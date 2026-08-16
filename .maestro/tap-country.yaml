@@ -1,0 +1,59 @@
+# E2E: tap a country, read its facts, dismiss.
+#
+# Coordinate taps are only deterministic because WorldMap.tsx pins the camera to a
+# fixed INITIAL_CENTER / INITIAL_ZOOM on launch. If you change either, re-derive the
+# points below by taking a screenshot and measuring.
+#
+#   npm run test:e2e            (needs a booted emulator or connected device)
+appId: com.boris.geographyapp
+---
+- launchApp:
+    clearState: true
+
+- assertVisible:
+    id: 'world-map'
+
+# Nothing selected on a cold start.
+- assertNotVisible:
+    id: 'country-info-sheet'
+
+# Libya - large, unambiguous target in the Sahara, well clear of the sheet area.
+- tapOn:
+    point: '47%,42%'
+
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Libya'
+- assertVisible: 'Arabic'
+- assertVisible: 'Libyan dinar.*'
+- assertVisible: 'Tripoli'
+
+# Selecting another country replaces the contents rather than stacking. Greenland
+# sits in the upper-left, which the info sheet never covers.
+- tapOn:
+    point: '19%,13%'
+- assertVisible: 'Greenland'
+- assertNotVisible: 'Libya'
+
+# Explicit close.
+- tapOn:
+    id: 'close-info-sheet'
+- assertNotVisible:
+    id: 'country-info-sheet'
+
+# Tapping open ocean deselects. This is the regression guard for the press-bubbling
+# bug: GeoJSONSource.onPress must call stopPropagation, or Map.onPress clears the
+# selection the instant it is made and nothing ever shows.
+#
+# The point must be open ocean AND above the sheet, which covers the bottom ~half of
+# the screen once open. It also has to clear MapLibre's 44dp hitbox by a wide margin:
+# 33%,47% looked like open sea but selected Gambia. 17%,44% is mid-Atlantic, far from
+# any coastline at this zoom.
+- tapOn:
+    point: '47%,42%'
+- assertVisible:
+    id: 'country-info-sheet'
+- tapOn:
+    point: '17%,44%'
+- assertNotVisible:
+    id: 'country-info-sheet'
