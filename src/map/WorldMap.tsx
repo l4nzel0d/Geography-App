@@ -5,6 +5,7 @@ import worldGeoJson from '@/data/countries.geo.json';
 import type { CountryFeatureProperties } from '@/data/types';
 
 import { mapColors, OFFLINE_STYLE } from './offlineStyle';
+import { pickCountry } from './pickCountry';
 
 /**
  * Fixed starting viewport.
@@ -50,15 +51,25 @@ export function WorldMap({ selectedIso3, onSelect }: WorldMapProps) {
       <GeoJSONSource
         id="countries"
         data={worldGeoJson as GeoJSON.FeatureCollection}
+        // MapLibre's default is 44dp, which at zoom 0 spans ~30 degrees of longitude
+        // and drags half a continent into every press. 10dp keeps enough slack for a
+        // fingertip while letting `pickCountry` resolve by containment, and it means a
+        // press in open water yields no candidates at all so the ocean handler can
+        // deselect. See pickCountry.ts.
+        hitbox={{ top: 10, right: 10, bottom: 10, left: 10 }}
         onPress={(event) => {
           // Source presses bubble up to Map.onPress. Without this the ocean handler
           // below fires immediately afterwards and clears the selection we just made,
           // so nothing ever appears to be selected.
           event.stopPropagation();
 
-          const feature = event.nativeEvent.features[0];
-          const props = feature?.properties as CountryFeatureProperties | undefined;
-          onSelect(props?.iso3 ?? null);
+          // The hitbox returns every country it touches, not just the one under the
+          // finger, so the candidates have to be resolved against the pressed
+          // coordinate. See pickCountry.ts.
+          const candidates = event.nativeEvent.features.map(
+            (f) => (f.properties as CountryFeatureProperties | undefined)?.iso3,
+          );
+          onSelect(pickCountry(event.nativeEvent.lngLat, candidates));
         }}
       >
         <Layer

@@ -4,7 +4,11 @@
 # fixed INITIAL_CENTER / INITIAL_ZOOM on launch. If you change either, re-derive the
 # points below by taking a screenshot and measuring.
 #
-#   npm run test:e2e            (needs a booted emulator or connected device)
+# Pick targets in the INTERIOR of large countries. An earlier version tapped 47%,42%
+# and asserted "Libya", but that point sits on the Algeria/Libya border and only
+# returned Libya through the old features[0] bug.
+#
+#   maestro --device <serial> test .maestro/tap-country.yaml
 appId: com.boris.geographyapp
 ---
 - launchApp:
@@ -17,23 +21,24 @@ appId: com.boris.geographyapp
 - assertNotVisible:
     id: 'country-info-sheet'
 
-# Libya - large, unambiguous target in the Sahara, well clear of the sheet area.
+# Russia - the largest unambiguous target on screen, deep in Siberia.
 - tapOn:
-    point: '47%,42%'
+    point: '81%,20%'
 
 - assertVisible:
     id: 'country-info-sheet'
-- assertVisible: 'Libya'
-- assertVisible: 'Arabic'
-- assertVisible: 'Libyan dinar.*'
-- assertVisible: 'Tripoli'
+- assertVisible: 'Russia'
+- assertVisible: 'Russian'
+- assertVisible: 'Russian ruble.*'
+- assertVisible: 'Moscow'
 
-# Selecting another country replaces the contents rather than stacking. Greenland
-# sits in the upper-left, which the info sheet never covers.
+# Selecting another country replaces the contents rather than stacking. Greenland is
+# large and sits in the upper-left, which the info sheet never covers.
 - tapOn:
     point: '19%,13%'
 - assertVisible: 'Greenland'
-- assertNotVisible: 'Libya'
+- assertVisible: 'Nuuk'
+- assertNotVisible: 'Moscow'
 
 # Explicit close.
 - tapOn:
@@ -41,16 +46,14 @@ appId: com.boris.geographyapp
 - assertNotVisible:
     id: 'country-info-sheet'
 
-# Tapping open ocean deselects. This is the regression guard for the press-bubbling
-# bug: GeoJSONSource.onPress must call stopPropagation, or Map.onPress clears the
-# selection the instant it is made and nothing ever shows.
-#
-# The point must be open ocean AND above the sheet, which covers the bottom ~half of
-# the screen once open. It also has to clear MapLibre's 44dp hitbox by a wide margin:
-# 33%,47% looked like open sea but selected Gambia. 17%,44% is mid-Atlantic, far from
-# any coastline at this zoom.
+# Tapping open ocean deselects. Two regressions are guarded here:
+#   1. GeoJSONSource.onPress must call stopPropagation, or Map.onPress clears the
+#      selection the instant it is made and nothing ever shows.
+#   2. The hitbox must be tight enough that open water yields no candidates, otherwise
+#      pickCountry's nearest-coast fallback selects a country instead of deselecting.
+# The point must also be above the sheet, which covers the bottom ~half when open.
 - tapOn:
-    point: '47%,42%'
+    point: '81%,20%'
 - assertVisible:
     id: 'country-info-sheet'
 - tapOn:

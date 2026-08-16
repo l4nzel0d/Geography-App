@@ -25,6 +25,10 @@ Verified end to end on 2026-08-16:
 - Maestro flow passes all 18 steps
 - **offline acceptance test passes** — release build, airplane mode, `ping` unreachable: map renders,
   taps work, info sheet populates, and logcat shows no HTTP/DNS/tile/glyph request from the app
+- **verified on physical hardware**: Galaxy S25 (SM-S931B), Android 16, arm64-v8a, 1080x2340 @480dpi.
+  Cold start matches the emulator, and the Maestro flow passes unchanged — the tap percentages survive
+  the aspect-ratio difference. Only Samsung/Qualcomm platform noise in logcat (Adreno, ashmem,
+  libpenguin, Kumiho); nothing from the app.
 
 ## Stack
 
@@ -130,6 +134,29 @@ Unit tests cannot catch this on their own (the mock doesn't model native bubblin
 explicit assertion that `stopPropagation` was called, plus a Maestro step that taps ocean after
 selecting.
 
+## Which country a press selects — `pickCountry.ts`
+
+`GeoJSONSource.onPress` returns **every feature the hitbox touches**, not the one under the finger, and
+in an arbitrary order. Taking `features[0]` is wrong and was a real, user-visible bug: "sometimes the
+country above or below my fingertip gets selected".
+
+Measured on the device, a press on **Paris** returned
+`["GBR","ITA","NLD","BEL","LUX","CHE","DEU","FRA"]` — France **last** of eight, so the old code selected
+Great Britain. Berlin returned Czechia first, Rome returned Bosnia first.
+
+The fix is two-part and both halves matter:
+
+1. **`hitbox` is tightened to 10 dp** (from MapLibre's 44 dp default). At zoom 0 the default spans ~30°
+   of longitude and drags half a continent into every press. The tighter box also means open water
+   yields *no* candidates, which is what lets `Map.onPress` deselect.
+2. **`pickCountry`** resolves candidates against the pressed coordinate: prefer the country whose
+   polygon actually **contains** the point (`@turf/boolean-point-in-polygon`), and fall back to the
+   nearest candidate only when none does. The fallback keeps small islands and thin coastal states
+   reachable — and correctly handles presses into the Caspian, which is inside no country.
+
+Verified on hardware: 6/6 European capitals select correctly, plus a Sahara sweep at 7/8 exact
+containment (the 8th was a press into the Caspian Sea, resolved by the fallback).
+
 ## Camera
 
 `INITIAL_CENTER = [10, 20]`, `INITIAL_ZOOM = 0`, and `minZoom` is pinned to the same value.
@@ -137,8 +164,11 @@ selecting.
 **Do not switch back to `bounds`.** Fitting `[-180,-60,180,85]` on a tall phone fills the screen height
 with the latitude range and crops most of the longitude range — half the world ends up off-screen.
 
-Zoom 0 is as wide as a portrait phone can go: MapLibre's world is 512 dp wide at zoom 0 versus a
-~393 dp screen, so roughly 77% of the longitude range is visible and the user pans for the rest.
+**Zoom 0 is a request, not a guarantee.** MapLibre clamps the camera so the world covers the viewport,
+so on a tall phone the effective zoom is higher than asked — measured at ~0.61 on the S25, where the
+world's full height maps exactly onto the 2340 px screen and only ~46% of the longitude range is
+visible. Don't be surprised when a projection calculation assuming zoom 0 disagrees with reality;
+derive the mapping empirically instead.
 
 ## Local toolchain (verified 2026-08-16)
 
@@ -173,8 +203,29 @@ npm run test:e2e                   # maestro, needs a running emulator/device
 npm run build:data                 # one-off, needs network
 ```
 
-**Emulator-only builds are much faster** with `ORG_GRADLE_PROJECT_reactNativeArchitectures=x86_64`,
-which skips the three ARM ABIs. Drop it when building for a physical phone.
+### Architectures — this bites every time
+
+`ORG_GRADLE_PROJECT_reactNativeArchitectures` controls which ABIs get built. An x86_64-only APK **will
+not install on a phone** (`INSTALL_FAILED_NO_MATCHING_ABIS`), and an arm-only APK will not install on
+the emulator.
+
+- emulator only, fastest: `x86_64`
+- phone only: `arm64-v8a`
+- both (current debug APK): `arm64-v8a,x86_64` — 157 MB debug, ~3.5 min incremental
+- omit entirely for a store build, so all four ABIs are produced
+
+### Testing on the physical phone
+
+```bash
+adb devices                          # phone must show `device`, not `unauthorized`
+adb -s <serial> reverse tcp:8081 tcp:8081    # REQUIRED: lets the phone reach Metro over USB
+npx expo run:android --device
+maestro --device <serial> test .maestro/tap-country.yaml
+```
+
+`adb reverse` is the step people forget — without it the app opens to a blank or red screen because it
+cannot find the bundler. Re-run it after every unplug. With two targets attached, every `adb` command
+needs `-s <serial>` or it fails with "more than one device/emulator".
 
 ### The dev loop
 
