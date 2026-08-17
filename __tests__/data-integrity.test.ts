@@ -145,6 +145,19 @@ describe('facts content', () => {
     expect(brazil!.languages).toContain('Portuguese');
   });
 
+  it('records every population as a positive, finite number', () => {
+    // Guards the choropleth: its fill expression takes log10 of this value, and a 0
+    // or a negative would evaluate to -Infinity/NaN and break the paint for the whole
+    // layer - inside the native renderer, where no unit test can see it. Null is fine
+    // and expected; `worldGeoJson.ts` drops those features out of the ramp entirely.
+    const bad = Object.entries(allCountryFacts)
+      .filter(([, facts]) => facts.population !== null)
+      .filter(([, facts]) => !Number.isFinite(facts.population) || facts.population! <= 0)
+      .map(([iso3, facts]) => `${iso3}=${facts.population}`);
+
+    expect(bad).toEqual([]);
+  });
+
   it('handles multi-currency and multi-language countries', () => {
     const swiss = getCountryFacts('CHE');
     expect(swiss!.languages.length).toBeGreaterThan(1);

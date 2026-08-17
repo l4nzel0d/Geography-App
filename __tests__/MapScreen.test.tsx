@@ -12,6 +12,7 @@ import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-librar
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
 import MapScreen from '@/app/index';
+import { POPULATION_FILL_COLOR } from '@/map/choropleth';
 
 /**
  * `_layout.tsx` supplies the SafeAreaProvider in the real app; these tests render
@@ -105,6 +106,73 @@ describe('MapScreen', () => {
     });
 
     expect(screen.queryByTestId('country-info-sheet')).toBeNull();
+  });
+
+  it('starts on the flat basemap with no legend', async () => {
+    await render();
+
+    expect(screen.getByTestId('layer-country-fill').props.paint['fill-color']).toBe('#7d9b76');
+    expect(screen.queryByTestId('population-legend')).toBeNull();
+  });
+
+  it('paints the choropleth and shows the legend when toggled', async () => {
+    await render();
+    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+
+    expect(screen.getByTestId('layer-country-fill').props.paint['fill-color']).toEqual(
+      POPULATION_FILL_COLOR,
+    );
+    expect(screen.getByTestId('population-legend')).toBeTruthy();
+  });
+
+  it('toggles back to the flat basemap', async () => {
+    await render();
+    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+
+    expect(screen.getByTestId('layer-country-fill').props.paint['fill-color']).toBe('#7d9b76');
+    expect(screen.queryByTestId('population-legend')).toBeNull();
+  });
+
+  it('marks the selection with an outline instead of a fill in choropleth mode', async () => {
+    // A solid orange fill would hide the population colour - the value you tapped the
+    // country to read. Both layers stay mounted; only one is handed the iso3.
+    await render();
+    await pressCountry('BRA');
+    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+
+    expect(screen.getByTestId('layer-country-selected').props.filter).toEqual([
+      '==',
+      ['get', 'iso3'],
+      '',
+    ]);
+    expect(screen.getByTestId('layer-country-selected-outline').props.filter).toEqual([
+      '==',
+      ['get', 'iso3'],
+      'BRA',
+    ]);
+  });
+
+  it('draws the outline over a casing, so it reads at both ends of the ramp', async () => {
+    // A white line vanishes on a low-population country and a dark one vanishes on
+    // China. The casing must be the wider of the two and must track the same country.
+    await render();
+    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+    await pressCountry('BRA');
+
+    const casing = screen.getByTestId('layer-country-selected-casing').props;
+    const outline = screen.getByTestId('layer-country-selected-outline').props;
+
+    expect(casing.filter).toEqual(outline.filter);
+    expect(casing.paint['line-width']).toBeGreaterThan(outline.paint['line-width']);
+  });
+
+  it('keeps the selection working while the choropleth is on', async () => {
+    await render();
+    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+    await pressCountry('JPN');
+
+    expect(screen.getByTestId('country-name')).toHaveTextContent('Japan');
   });
 
   it('stops the source press from bubbling to the ocean handler', async () => {

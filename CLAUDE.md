@@ -45,6 +45,23 @@ Added 2026-08-17, verified on the emulator (`Medium_Phone`, x86_64 debug build):
   call — the geometry is still a bundled `import` — but the gate is the gate, and the bundle did grow
   by ~1.4 MB, which is worth a look at cold-start time on real hardware.
 
+Added 2026-08-17, **not yet verified on any device**:
+
+- the **population choropleth** — a toggle in the top-left switches the land between the flat green
+  basemap and a log-scaled white→deep-red ramp, with a stepped legend. See *Map fill modes*.
+- 102 Jest tests pass, typecheck clean. The x86_64 debug APK builds and installs.
+- **the visual check never happened.** The emulator could not reach the dev server: the app dials
+  `10.0.2.2:8081` and got `Failed to connect`, and that AVD had no working DNS either
+  (`play.googleapis.com` unresolvable), so its whole NAT stack looks wedged rather than this being a
+  Metro problem — Metro served the bundle to the host fine (HTTP 200, 10.9 MB). `adb reverse` does not
+  help on its own because the client dials `10.0.2.2`, not `localhost`; launching via
+  `adb shell am start -a android.intent.action.VIEW -d "geographyapp://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"`
+  is the way to point it at the reversed port, and that still needs a re-try on a healthy AVD.
+- So **nothing below the unit tests is confirmed**: not the colours on screen, not the legend layout,
+  not that the paint expression parses in the native renderer, and not
+  `.maestro/population-choropleth.yaml`, which has never been run. Treat the whole feature as unproven
+  until someone launches it.
+
 ## Stack
 
 | Concern | Choice | Notes |
@@ -113,20 +130,25 @@ and the slide distance is **measured via `onLayout`**, not a constant: `maxHeigh
 src/
   app/
     _layout.tsx             # GestureHandlerRootView + Stack
-    index.tsx               # MapScreen: owns selectedIso3 state
+    index.tsx               # MapScreen: owns selectedIso3 + fillMode state
   map/
     WorldMap.tsx            # Map + GeoJSONSource + fill/selected/line Layers
     cameraFit.ts            # pure: zoom floor that stops the world tiling in landscape
+    choropleth.ts           # pure: population ramp + the fill-color paint expression
     offlineStyle.ts         # inline style: background layer ONLY, no sources, no glyphs
   data/
     countries.geo.json      # 240 outlines, properties trimmed to { iso3, name }   (1.6 MB)
     countryFacts.json       # 250 fact records keyed by ISO-3                       (65 KB)
     countryFacts.ts         # synchronous lookup
+    worldGeoJson.ts         # outlines + population folded on, for the choropleth
     types.ts
   components/
     CountryInfoSheet.tsx
     infoSheetLayout.ts      # pure: portrait bottom sheet vs landscape side panel
     formatters.ts           # pure, unit-tested
+    MapControls.tsx         # the only chrome: top-left column, owns the safe-area maths
+    MapModeToggle.tsx       # flat <-> population pill
+    PopulationLegend.tsx    # stepped key, driven by POPULATION_STOPS
 scripts/build-country-data.mjs
 __tests__/ , __mocks__/ , .maestro/
 ```
@@ -198,6 +220,11 @@ Highlight is a **filtered layer**, not feature-state:
 `filter: ['==', ['get','iso3'], selectedIso3 ?? '']`. An empty string matches nothing, which is how
 "no selection" is expressed.
 
+There are **two** such layers, because the choropleth needs a different marker (see below):
+`country-selected` (orange fill) and `country-selected-outline` (white line, drawn last so it sits over
+`country-border`). Both stay mounted in both modes and the fill mode is expressed by handing the ISO-3
+to only one of them — the same empty-string idiom, rather than adding and removing layers at runtime.
+
 ### `GeoJSONSource.onPress` MUST call `event.stopPropagation()`
 
 This cost real debugging time. Source presses **bubble up to `Map.onPress`**, which is our
@@ -208,6 +235,74 @@ do nothing at all — no error, no log, just silence.
 Unit tests cannot catch this on their own (the mock doesn't model native bubbling), so there is an
 explicit assertion that `stopPropagation` was called, plus a Maestro step that taps ocean after
 selecting.
+
+## Map fill modes — the population choropleth
+
+`WorldMap` takes `fillMode: 'flat' | 'population'`, owned by `MapScreen` and driven by the toggle in
+`MapControls`. `flat` is the original green basemap; `population` paints the ColorBrewer *Reds* ramp
+defined in `src/map/choropleth.ts`.
+
+**The scale is `log10(population)`, and that is not a preference.** Population runs from ~11k (Tuvalu)
+to ~1.45B (India) — five orders of magnitude. A linear ramp renders the entire world white except China
+and India. The stops sit one per decade, so each colour step is a 10× step of people.
+
+| 10k | 100k | 1M | 10M | 100M | 1B | 1.5B |
+|---|---|---|---|---|---|---|
+| `#ffffff` | `#fee0d2` | `#fcbba1` | `#fc9272` | `#ef3b2c` | `#a50f15` | `#67000d` |
+
+`interpolate` clamps outside its domain, so under 10k is white and over 1.5B is the darkest stop without
+extra branches. `PopulationLegend` renders these same stops, so the key and the map cannot drift.
+
+**Population reaches the paint expression through a runtime join, not the pipeline.** The build script
+trims outline properties to `{ iso3, name }`, and a data-driven expression can only read what is on the
+feature. `src/data/worldGeoJson.ts` folds `population` on at module load — keeping `countryFacts.json` the
+single source of truth, where emitting it into `countries.geo.json` too would give you two committed
+copies free to drift and would need an online rebuild to change. It is cheap because **`geometry` is
+passed through by reference**; only the small properties object is rebuilt. `worldGeoJson.test.ts` asserts
+that identity, since losing it means duplicating 1.6 MB at import.
+
+**Features with no World Bank figure omit `population` entirely rather than carrying null**, which is what
+lets the expression split them off with `['has','population']` into the grey `NO_DATA_COLOR`. A null would
+also reach `log10` and poison the whole expression — as would a `0`, which `data-integrity.test.ts` now
+forbids.
+
+### Overlaying the map: one shrink-wrapped absolute box per control
+
+`MapControls` anchors the toggle and the legend as **two separate absolutely-positioned boxes**, and
+derives the legend's `top` from the toggle's `onLayout`-measured height rather than letting them stack
+in one container. That looks like the long way round. It is the only arrangement of the three tried
+that actually paints over the MapLibre surface, and it cost several release builds to find:
+
+| Arrangement | Result |
+|---|---|
+| One absolute container, shrink-wrapped, toggle + legend stacked | toggle painted, **legend never painted a pixel** |
+| One absolute container, `absoluteFillObject` + `box-none`, offsets as padding | **nothing painted at all** — the whole overlay vanished |
+| One shrink-wrapped absolute box per control | works |
+
+The first failure is the instructive one. The legend was **present in the view hierarchy with entirely
+correct bounds** — `uiautomator dump` showed the card, all seven swatches and every label laid out where
+they belonged — but a screencap of those exact coordinates was pure map. The container had measured
+itself to the first child only: at 2.625 density the toggle spanned y 95–186 while the legend was laid
+out at y 207–443, completely outside its parent, and **Android's ViewGroup clips children to the parent's
+bounds by default**. Nothing errors, nothing logs, the tree looks right, the pixels are simply absent.
+
+Symptoms to recognise next time: a view in the hierarchy with correct bounds that paints nothing, while
+a sibling above it paints fine. Suspect the parent's measured size, not the child's styling — a
+translucent background, `pointerEvents` and `elevation` were all ruled out first, one build each, and
+none of them was it. `uiautomator dump` plus sampling the screenshot's pixels at the reported bounds is
+what separates "not laid out" from "laid out but not painted"; it is much faster than guessing.
+
+Two more traps worth keeping:
+
+- **The Jest mock used to strip `paint`.** It now forwards it, like `filter`. Without that no test can see
+  the fill colour at all.
+- **A malformed paint expression fails inside the native renderer**, which is exactly the thing Jest
+  replaces with a stub — so it passes every unit test and then blanks the layer on a device.
+  `.maestro/population-choropleth.yaml` exists solely to catch that.
+
+The map now has **chrome in the top-left** (`MapControls`, safe-area inset). It is the one corner free in
+both orientations — the info sheet docks bottom in portrait and right in landscape. Keep Maestro tap
+points clear of it; the portrait Greenland tap at `19%,13%` passes just under it.
 
 ## Which country a press selects — `pickCountry.ts`
 
@@ -347,13 +442,14 @@ Windows** (no WSL) and needs JDK 17, which is already set up. It is installed at
 `C:\Users\Boris\maestro\maestro\bin\maestro.bat` and is **not on PATH** — either add it or call it by
 full path. `npm run test:e2e` assumes `maestro` is on PATH.
 
-There are **two flows, one per orientation**, and each pins its own with `setOrientation` — the app
-rotates freely now, so neither can assume it:
+There are **three flows**, and each pins its own orientation with `setOrientation` — the app rotates
+freely now, so none can assume it:
 
 | Flow | Orientation | Journey |
 |---|---|---|
 | `.maestro/tap-country.yaml` | `PORTRAIT` | Russia → Greenland → close → ocean-deselect |
 | `.maestro/landscape-info-panel.yaml` | `LANDSCAPE_LEFT` | Brazil → Mali → close → ocean-deselect → rotate to portrait with the card open |
+| `.maestro/population-choropleth.yaml` | `PORTRAIT` | toggle on → legend → Russia still selects → close → toggle off |
 
 Coordinate taps are only deterministic because `INITIAL_CENTER` and the derived zoom floor
 (`cameraFit.ts`) pin the camera on launch — **change either and you must re-derive every tap point in

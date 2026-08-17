@@ -1,10 +1,11 @@
 import { Camera, GeoJSONSource, Layer, Map } from '@maplibre/maplibre-react-native';
 import { StyleSheet, useWindowDimensions } from 'react-native';
 
-import worldGeoJson from '@/data/countries.geo.json';
 import type { CountryFeatureProperties } from '@/data/types';
+import { worldGeoJson } from '@/data/worldGeoJson';
 
 import { getWorldFitZoom } from './cameraFit';
+import { POPULATION_FILL_COLOR } from './choropleth';
 import { mapColors, OFFLINE_STYLE } from './offlineStyle';
 import { pickCountry } from './pickCountry';
 
@@ -27,16 +28,31 @@ export const INITIAL_CENTER: [number, number] = [10, 20];
  */
 export const INITIAL_ZOOM = 0;
 
+/**
+ * How the land is coloured. A mode rather than a boolean so an area or density ramp
+ * can be added later without growing a second flag.
+ */
+export type FillMode = 'flat' | 'population';
+
 type WorldMapProps = {
   selectedIso3: string | null;
   onSelect: (iso3: string | null) => void;
+  fillMode?: FillMode;
 };
 
-export function WorldMap({ selectedIso3, onSelect }: WorldMapProps) {
+export function WorldMap({ selectedIso3, onSelect, fillMode = 'flat' }: WorldMapProps) {
   // Landscape is wider than one world at zoom 0, so the floor is derived from the
   // window rather than pinned to INITIAL_ZOOM. Without this a cold launch into
   // landscape renders the world tiled ~1.8 times over.
   const fitZoom = getWorldFitZoom(useWindowDimensions().width);
+
+  // The choropleth marks selection with an outline rather than a fill; both marker
+  // layers share this filter, and it is empty - matching nothing - in flat mode.
+  const outlineFilter: ['==', ['get', 'iso3'], string] = [
+    '==',
+    ['get', 'iso3'],
+    (fillMode === 'population' && selectedIso3) || '',
+  ];
 
   return (
     <Map
@@ -61,7 +77,7 @@ export function WorldMap({ selectedIso3, onSelect }: WorldMapProps) {
 
       <GeoJSONSource
         id="countries"
-        data={worldGeoJson as GeoJSON.FeatureCollection}
+        data={worldGeoJson}
         // MapLibre's default is 44dp, which at zoom 0 spans ~30 degrees of longitude
         // and drags half a continent into every press. 10dp keeps enough slack for a
         // fingertip while letting `pickCountry` resolve by containment, and it means a
@@ -86,18 +102,27 @@ export function WorldMap({ selectedIso3, onSelect }: WorldMapProps) {
         <Layer
           id="country-fill"
           type="fill"
-          paint={{ 'fill-color': mapColors.land, 'fill-opacity': 1 }}
+          paint={{
+            'fill-color': fillMode === 'population' ? POPULATION_FILL_COLOR : mapColors.land,
+            'fill-opacity': 1,
+          }}
         />
 
         {/*
           Selection highlight is a filtered layer rather than feature-state: it is
           simpler and reliably supported. An empty string matches nothing, which is
           how "no selection" is expressed.
+
+          There are two of these because a solid orange fill would hide the country's
+          population colour - the thing you tapped to inspect - so the choropleth marks
+          selection with an outline instead. Both layers stay mounted and the mode is
+          expressed by handing the iso3 to only one of them, reusing the same
+          "empty string matches nothing" idiom rather than adding and removing layers.
         */}
         <Layer
           id="country-selected"
           type="fill"
-          filter={['==', ['get', 'iso3'], selectedIso3 ?? '']}
+          filter={['==', ['get', 'iso3'], (fillMode === 'flat' && selectedIso3) || '']}
           paint={{ 'fill-color': mapColors.landSelected, 'fill-opacity': 1 }}
         />
 
@@ -105,6 +130,25 @@ export function WorldMap({ selectedIso3, onSelect }: WorldMapProps) {
           id="country-border"
           type="line"
           paint={{ 'line-color': mapColors.border, 'line-width': 0.5, 'line-opacity': 0.6 }}
+        />
+
+        {/*
+          Last, so the outline draws over country-border rather than under it, and the
+          casing draws under the white line. Two lines because the ramp spans near-white
+          to deep maroon - see mapColors.selectionCasing.
+        */}
+        <Layer
+          id="country-selected-casing"
+          type="line"
+          filter={outlineFilter}
+          paint={{ 'line-color': mapColors.selectionCasing, 'line-width': 5 }}
+        />
+
+        <Layer
+          id="country-selected-outline"
+          type="line"
+          filter={outlineFilter}
+          paint={{ 'line-color': mapColors.selectionOutline, 'line-width': 2 }}
         />
       </GeoJSONSource>
     </Map>

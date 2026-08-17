@@ -23,4 +23,9 @@ export type CountryFacts = {
 export type CountryFeatureProperties = {
   iso3: string;
   name: string;
+  /**
+   * Folded in at runtime by `worldGeoJson.ts` so the choropleth can paint from it.
+   * Absent - not null - for the territories the World Bank does not report on.
+   */
+  population?: number;
 };

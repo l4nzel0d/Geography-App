@@ -26,9 +26,12 @@ export const GeoJSONSource = ({ children, data, ...props }: AnyProps) => (
   </View>
 );
 
-// `filter` is deliberately forwarded, not stripped: the selection-highlight test
-// asserts on it to prove the right country is highlighted.
-export const Layer = ({ paint, layout, ...props }: AnyProps) => (
+// `filter` and `paint` are deliberately forwarded, not stripped: the selection-highlight
+// test asserts on `filter` to prove the right country is highlighted, and the choropleth
+// test asserts on `paint` to prove the right fill colour is in play. Note that neither
+// test can catch an *invalid* paint expression - that fails inside the native renderer,
+// which is exactly what this stub replaces. See .maestro/population-choropleth.yaml.
+export const Layer = ({ layout, ...props }: AnyProps) => (
   <View testID={`layer-${String(props.id)}`} {...props} />
 );
 
