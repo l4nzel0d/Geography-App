@@ -1,0 +1,76 @@
+# E2E: the same journey as tap-country.yaml, but in landscape, where the info card is
+# a right-hand side panel instead of a bottom sheet.
+#
+# The panel covers roughly the right 40% of the screen (360 dp of a 914 dp-wide
+# window), so every tap point here is in the LEFT 60%. That is the mirror of the
+# portrait constraint, where the sheet covers the bottom half.
+#
+# Points were derived on the emulator at 2400x1080 (420 dpi) and each one is a
+# verified point-in-polygon hit, not a border coin-flip. They depend on the landscape
+# camera: cameraFit.ts raises the zoom floor to log2(914/512) = 0.836 so one world
+# fills the width, and the projection is only stable because of it. Re-derive from a
+# screenshot if that or INITIAL_CENTER changes.
+#
+# Note the percentages differ from the portrait flow's, and also from what you measure
+# by rotating an already-running app - a cold launch into landscape settles at a
+# different camera than a rotation does. Derive them from a cold launch, as here.
+#
+#   maestro --device <serial> test .maestro/landscape-info-panel.yaml
+appId: com.boris.geographyapp
+---
+- launchApp:
+    clearState: true
+
+- setOrientation: LANDSCAPE_LEFT
+
+- assertVisible:
+    id: 'world-map'
+
+- assertNotVisible:
+    id: 'country-info-sheet'
+
+# Brazil - the largest unambiguous target on the left half of the map.
+- tapOn:
+    point: '33%,68%'
+
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Brazil'
+- assertVisible: 'Brasília'
+- assertVisible: 'Brazilian real.*'
+
+# Selecting another country replaces the contents rather than stacking. Mali is a
+# large Sahel block whose interior is comfortably clear of its neighbours.
+- tapOn:
+    point: '47%,51%'
+- assertVisible: 'Mali'
+- assertVisible: 'Bamako'
+- assertNotVisible: 'Brasília'
+
+# Explicit close, by id rather than coordinate - the ✕ sits in the panel header.
+- tapOn:
+    id: 'close-info-sheet'
+- assertNotVisible:
+    id: 'country-info-sheet'
+
+# Tapping open ocean deselects, guarding the same two regressions as in portrait: the
+# source press must stopPropagation, and the 10 dp hitbox must yield no candidates in
+# open water. This point is in the South Pacific, ~96 dp clear of the Chilean coast.
+- tapOn:
+    point: '33%,68%'
+- assertVisible:
+    id: 'country-info-sheet'
+- tapOn:
+    point: '16%,83%'
+- assertNotVisible:
+    id: 'country-info-sheet'
+
+# The layout must survive a rotation with the card open: the side panel becomes a
+# bottom sheet and keeps its country.
+- tapOn:
+    point: '33%,68%'
+- assertVisible: 'Brazil'
+- setOrientation: PORTRAIT
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Brazil'

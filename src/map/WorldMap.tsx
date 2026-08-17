@@ -1,9 +1,10 @@
 import { Camera, GeoJSONSource, Layer, Map } from '@maplibre/maplibre-react-native';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
 
 import worldGeoJson from '@/data/countries.geo.json';
 import type { CountryFeatureProperties } from '@/data/types';
 
+import { getWorldFitZoom } from './cameraFit';
 import { mapColors, OFFLINE_STYLE } from './offlineStyle';
 import { pickCountry } from './pickCountry';
 
@@ -19,6 +20,11 @@ import { pickCountry } from './pickCountry';
  * is off-screen. An explicit centre and zoom is predictable on any screen shape.
  */
 export const INITIAL_CENTER: [number, number] = [10, 20];
+
+/**
+ * Portrait baseline. The effective floor is `getWorldFitZoom(width)`, which is exactly
+ * this in portrait and higher in landscape - see cameraFit.ts.
+ */
 export const INITIAL_ZOOM = 0;
 
 type WorldMapProps = {
@@ -27,6 +33,11 @@ type WorldMapProps = {
 };
 
 export function WorldMap({ selectedIso3, onSelect }: WorldMapProps) {
+  // Landscape is wider than one world at zoom 0, so the floor is derived from the
+  // window rather than pinned to INITIAL_ZOOM. Without this a cold launch into
+  // landscape renders the world tiled ~1.8 times over.
+  const fitZoom = getWorldFitZoom(useWindowDimensions().width);
+
   return (
     <Map
       testID="world-map"
@@ -43,8 +54,8 @@ export function WorldMap({ selectedIso3, onSelect }: WorldMapProps) {
       onDidFailLoadingMap={() => console.error('[WorldMap] map failed to load')}
     >
       <Camera
-        initialViewState={{ center: INITIAL_CENTER, zoom: INITIAL_ZOOM }}
-        minZoom={INITIAL_ZOOM}
+        initialViewState={{ center: INITIAL_CENTER, zoom: fitZoom }}
+        minZoom={fitZoom}
         maxZoom={8}
       />
 

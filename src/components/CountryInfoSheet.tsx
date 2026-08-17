@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import {
   formatPopulation,
   formatRegion,
 } from './formatters';
+import { getInfoSheetLayout } from './infoSheetLayout';
 
 type CountryInfoSheetProps = {
   iso3: string | null;
@@ -31,10 +33,11 @@ const OPEN_DURATION = 220;
 const CLOSE_DURATION = 200;
 
 /** Slide distance for the first frame, before the card has measured itself. */
-const FALLBACK_HEIGHT = 400;
+const FALLBACK_SIZE = { width: 360, height: 400 };
 
 /**
- * Slide-up info card for the selected country.
+ * Info card for the selected country: a bottom sheet in portrait, a right-hand side
+ * panel in landscape. It slides in along whichever edge it is docked to.
  *
  * Hand-rolled on React Native's `Animated` rather than pulling in a bottom-sheet
  * dependency: the interaction is a simple show/hide, and this keeps the native
@@ -42,6 +45,7 @@ const FALLBACK_HEIGHT = 400;
  */
 export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
   const insets = useSafeAreaInsets();
+  const { landscape, panelWidth } = getInfoSheetLayout(useWindowDimensions());
   const facts = getCountryFacts(iso3);
   const slide = useRef(new Animated.Value(0)).current;
 
@@ -51,10 +55,10 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
   // screen readers afterwards.
   const [visibleFacts, setVisibleFacts] = useState(facts);
 
-  // Measured so the card slides exactly its own height off-screen. `maxHeight: 55%`
-  // is 429 dp on a 780 dp-tall phone, so any fixed guess risks leaving a sliver of
-  // card on screen at the moment it unmounts.
-  const [height, setHeight] = useState(FALLBACK_HEIGHT);
+  // Measured so the card slides exactly its own size off-screen along whichever axis
+  // it travels. `maxHeight: 55%` is 429 dp on a 780 dp-tall phone, so any fixed guess
+  // risks leaving a sliver of card on screen at the moment it unmounts.
+  const [size, setSize] = useState(FALLBACK_SIZE);
 
   useEffect(() => {
     if (facts) setVisibleFacts(facts);
@@ -78,12 +82,16 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
 
   if (!visibleFacts) return null;
 
-  const onLayout = (event: LayoutChangeEvent) => {
-    const measured = event.nativeEvent.layout.height;
-    if (measured > 0) setHeight(measured);
+  const onLayout = ({ nativeEvent }: LayoutChangeEvent) => {
+    const { width, height } = nativeEvent.layout;
+    if (width > 0 && height > 0) setSize({ width, height });
   };
 
-  const translateY = slide.interpolate({ inputRange: [0, 1], outputRange: [height, 0] });
+  // Off-screen is down in portrait and out to the right in landscape.
+  const travel = slide.interpolate({
+    inputRange: [0, 1],
+    outputRange: [landscape ? size.width : size.height, 0],
+  });
 
   return (
     <Animated.View
@@ -92,7 +100,19 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
       // While sliding out the card is still mounted but no longer the user's target -
       // let taps through to the map underneath.
       pointerEvents={facts ? 'auto' : 'none'}
-      style={[styles.sheet, { paddingBottom: insets.bottom + 20, transform: [{ translateY }] }]}
+      style={[
+        styles.sheet,
+        landscape ? styles.sheetLandscape : styles.sheetPortrait,
+        landscape
+          ? {
+              width: panelWidth ?? undefined,
+              paddingTop: insets.top + 16,
+              paddingBottom: insets.bottom + 20,
+              paddingRight: insets.right + 20,
+              transform: [{ translateX: travel }],
+            }
+          : { paddingBottom: insets.bottom + 20, transform: [{ translateY: travel }] },
+      ]}
     >
       <View style={styles.header}>
         <Text style={styles.flag}>{visibleFacts.flag ?? '🏳️'}</Text>
@@ -116,7 +136,10 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
         </Pressable>
       </View>
 
-      <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
+      <ScrollView
+        style={landscape ? styles.bodyLandscape : styles.body}
+        contentContainerStyle={styles.bodyContent}
+      >
         <Fact
           testID="fact-population"
           label="Population"
@@ -170,17 +193,30 @@ function Fact({
 const styles = StyleSheet.create({
   sheet: {
     position: 'absolute',
+    backgroundColor: '#12263a',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    borderColor: '#2c4a63',
+  },
+  // Docked to the bottom edge, spanning the width.
+  sheetPortrait: {
     left: 0,
     right: 0,
     bottom: 0,
     maxHeight: '55%',
-    backgroundColor: '#12263a',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingTop: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#2c4a63',
+  },
+  // Docked to the right edge, spanning the height. `width` comes from
+  // getInfoSheetLayout; paddingTop is overridden with the status-bar inset.
+  sheetLandscape: {
+    top: 0,
+    bottom: 0,
+    right: 0,
+    borderTopLeftRadius: 20,
+    borderBottomLeftRadius: 20,
+    borderLeftWidth: StyleSheet.hairlineWidth,
   },
   header: {
     flexDirection: 'row',
@@ -194,7 +230,11 @@ const styles = StyleSheet.create({
   official: { color: '#8fa9bd', fontSize: 13, marginTop: 2 },
   close: { padding: 4 },
   closeText: { color: '#8fa9bd', fontSize: 18 },
+  // Portrait: the sheet is only as tall as its content, up to maxHeight.
   body: { flexGrow: 0 },
+  // Landscape: the panel is full-height, so the facts take the room left under the
+  // header and scroll within it.
+  bodyLandscape: { flex: 1 },
   bodyContent: { gap: 14, paddingBottom: 8 },
   fact: { gap: 2 },
   factLabel: {

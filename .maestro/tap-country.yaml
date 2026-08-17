@@ -14,6 +14,10 @@ appId: com.boris.geographyapp
 - launchApp:
     clearState: true
 
+# The app rotates freely now, so the orientation has to be pinned: every point below
+# is a portrait percentage. The landscape layout has its own flow.
+- setOrientation: PORTRAIT
+
 - assertVisible:
     id: 'world-map'
 

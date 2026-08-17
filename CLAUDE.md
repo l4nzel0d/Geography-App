@@ -30,6 +30,15 @@ Verified end to end on 2026-08-16:
   the aspect-ratio difference. Only Samsung/Qualcomm platform noise in logcat (Adreno, ashmem,
   libpenguin, Kumiho); nothing from the app.
 
+Added 2026-08-17, verified on the emulator (`Medium_Phone`, x86_64 debug build):
+
+- the info card **animates out** instead of vanishing, and **landscape** docks it to the right edge
+- 59 Jest tests pass, typecheck clean
+- both Maestro flows pass — portrait 20 steps, landscape 24
+- **not re-verified on the S25 or against the offline acceptance test.** The manifest lost
+  `android:screenOrientation`, so those two need a re-run before release; nothing here adds a network
+  call, but the gate is the gate.
+
 ## Stack
 
 | Concern | Choice | Notes |
@@ -67,6 +76,31 @@ Dismissal is a close button plus tapping the ocean, not a swipe. If you later wa
 adding the dependency is JS-only (reanimated and gesture-handler are already installed) and needs no
 native rebuild, but check its reanimated 4 compatibility first.
 
+### The info card in both orientations
+
+`orientation` is `"default"` in `app.json` and `android:screenOrientation` is **absent** from the
+manifest — re-adding either pins the app to portrait again. The card docks to a different edge per
+orientation, decided by `getInfoSheetLayout(window)`:
+
+| | Portrait | Landscape |
+|---|---|---|
+| Dock | bottom, full width | **right**, full height |
+| Size | `maxHeight: 55%`, content-height | `width` = clamp(280, 42% of width, 360) dp, capped at 60% |
+| Slides along | `translateY` | `translateX` |
+| Facts list | `flexGrow: 0` | `flex: 1`, scrolls inside the panel |
+
+A bottom sheet in landscape would cover most of the little vertical space there is, while the map is
+wider than it is tall — the spare room is at the side. The panel is capped at 60% of the width so the map
+keeps at least 40% on the narrowest landscape screens.
+
+**The card animates out, so it outlives its selection.** It keeps its own `visibleFacts` state that lags
+the `iso3` prop: on close it goes on rendering the country it was showing, slides off, and drops the
+content in the animation's completion callback. Returning `null` as soon as `iso3` is `null` unmounts it
+on the same frame and there is nothing left to animate — which is what the code used to do, despite a
+comment claiming otherwise. It also sets `pointerEvents="none"` while sliding out so taps reach the map,
+and the slide distance is **measured via `onLayout`**, not a constant: `maxHeight: 55%` is ~429 dp on a
+780 dp-tall phone, so a hardcoded 400 left a visible sliver at the moment it unmounted.
+
 ## Layout
 
 ```
@@ -76,6 +110,7 @@ src/
     index.tsx               # MapScreen: owns selectedIso3 state
   map/
     WorldMap.tsx            # Map + GeoJSONSource + fill/selected/line Layers
+    cameraFit.ts            # pure: zoom floor that stops the world tiling in landscape
     offlineStyle.ts         # inline style: background layer ONLY, no sources, no glyphs
   data/
     countries.geo.json      # 177 outlines, properties trimmed to { iso3, name }   (248 KB)
@@ -84,6 +119,7 @@ src/
     types.ts
   components/
     CountryInfoSheet.tsx
+    infoSheetLayout.ts      # pure: portrait bottom sheet vs landscape side panel
     formatters.ts           # pure, unit-tested
 scripts/build-country-data.mjs
 __tests__/ , __mocks__/ , .maestro/
@@ -159,7 +195,8 @@ containment (the 8th was a press into the Caspian Sea, resolved by the fallback)
 
 ## Camera
 
-`INITIAL_CENTER = [10, 20]`, `INITIAL_ZOOM = 0`, and `minZoom` is pinned to the same value.
+`INITIAL_CENTER = [10, 20]`. The zoom is **not** a constant: both `initialViewState.zoom` and `minZoom`
+come from `getWorldFitZoom(windowWidth)` in `src/map/cameraFit.ts`.
 
 **Do not switch back to `bounds`.** Fitting `[-180,-60,180,85]` on a tall phone fills the screen height
 with the latitude range and crops most of the longitude range — half the world ends up off-screen.
@@ -169,6 +206,18 @@ so on a tall phone the effective zoom is higher than asked — measured at ~0.61
 world's full height maps exactly onto the 2340 px screen and only ~46% of the longitude range is
 visible. Don't be surprised when a projection calculation assuming zoom 0 disagrees with reality;
 derive the mapping empirically instead.
+
+**Why the zoom floor is derived, not pinned.** That upward clamp only saves you in portrait. The world is
+512 dp wide at zoom 0, and a landscape window is *wider* than that — 914 dp on the emulator — so
+MapLibre tiles the world horizontally instead: a cold launch into landscape rendered ~1.8 copies with a
+seam through the Pacific. `getWorldFitZoom` returns `max(0, log2(width / 512))`, which is **exactly 0 in
+portrait** (so the portrait tap points are untouched) and 0.836 in landscape. Keep the `max(0, …)`: it is
+what makes portrait a no-op, and `log2(0)` would otherwise send `-Infinity` to the native camera.
+
+**A cold launch and a rotation do not settle at the same camera.** Rotating a running app keeps the
+zoom it already had; launching fresh into landscape starts from the fit zoom. The two projections differ
+by enough to change which country a percentage tap hits — 32%,56% is Brazil after a rotation but Guyana
+on a cold launch. Derive Maestro points from a cold launch in the orientation the flow pins.
 
 ## Local toolchain (verified 2026-08-16)
 
@@ -248,16 +297,30 @@ Windows** (no WSL) and needs JDK 17, which is already set up. It is installed at
 `C:\Users\Boris\maestro\maestro\bin\maestro.bat` and is **not on PATH** — either add it or call it by
 full path. `npm run test:e2e` assumes `maestro` is on PATH.
 
-Coordinate taps are only deterministic because `INITIAL_CENTER` / `INITIAL_ZOOM` in `WorldMap.tsx` pin
-the camera on launch — **change either and you must re-derive every tap point.**
+There are **two flows, one per orientation**, and each pins its own with `setOrientation` — the app
+rotates freely now, so neither can assume it:
 
-Two things to know when picking tap points:
+| Flow | Orientation | Journey |
+|---|---|---|
+| `.maestro/tap-country.yaml` | `PORTRAIT` | Russia → Greenland → close → ocean-deselect |
+| `.maestro/landscape-info-panel.yaml` | `LANDSCAPE_LEFT` | Brazil → Mali → close → ocean-deselect → rotate to portrait with the card open |
 
-- The info sheet covers roughly the **bottom half** of the screen once open, so any follow-up tap has
-  to be above it.
-- MapLibre's default hitbox is **44 dp**, which is generous at zoom 0. A point that looks like open sea
+Coordinate taps are only deterministic because `INITIAL_CENTER` and the derived zoom floor
+(`cameraFit.ts`) pin the camera on launch — **change either and you must re-derive every tap point in
+both flows.**
+
+Things to know when picking tap points:
+
+- **The card occupies a different edge per orientation.** Portrait: it covers roughly the bottom half, so
+  follow-up taps go above it. Landscape: it covers the right ~40%, so they go in the **left 60%**.
+- **Derive points from a cold launch in the flow's orientation**, not by rotating a running app — the two
+  settle at different cameras. `32%,56%` is Brazil after a rotation and Guyana on a cold launch.
+- MapLibre's default hitbox is **44 dp**, which is generous at this zoom. A point that looks like open sea
   can still select a country — `33%,47%` looked like mid-ocean and reliably selected **Gambia**. The
-  ocean-deselect step uses `17%,44%` (mid-Atlantic), which clears every coastline by a wide margin.
+  ocean-deselect steps use `17%,44%` in portrait (mid-Atlantic) and `16%,83%` in landscape (South
+  Pacific, ~96 dp clear of Chile), both of which clear every coastline by a wide margin.
+- Aim at a **verified interior**, never a border. Both flows' points are point-in-polygon hits confirmed
+  by screenshot; a first draft of the landscape flow aimed at "Algeria" and got Mali.
 
 **Offline acceptance test** — the one that actually proves the requirement:
 
@@ -283,10 +346,22 @@ adb shell svc wifi enable
 - **Emulator GPU** — if the map ever renders as a black rectangle, that's the emulator's graphics mode,
   not a code bug. Switch the AVD to *Hardware — GLES 2.0*.
 
+Two emulator failure modes that look like app bugs but aren't:
+
+- **Never force-kill `qemu-system-x86_64`.** It corrupts the AVD's quick-boot snapshot, and the next
+  launch hangs with `sys.boot_completed=1` but only ~50 services registered and the boot animation still
+  spinning — `system_server` never starts, `adb shell settings` reports *"Can't find service: settings"*,
+  and `screencap` hangs. Shut down with `adb emu kill` and wait for the process to exit; recover a wedged
+  AVD with `emulator -avd Medium_Phone -no-snapshot-load` (a cold boot, which keeps installed apps).
+  `-gpu angle_indirect` does **not** help — it hangs the same way.
+- **Launch the emulator detached**, e.g. PowerShell `Start-Process`. Started as a child of a shell that
+  the tooling later reaps, it has segfaulted (exit 139) seconds after a clean boot, taking the device
+  offline mid-session.
+
 ## Ideas not yet built
 
-Country search, zoom-to-selected-country, an About screen with the required attributions, landscape
-support, and haptics on selection.
+Country search, zoom-to-selected-country, an About screen with the required attributions, and haptics on
+selection.
 
 ## Attribution
 
