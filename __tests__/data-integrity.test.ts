@@ -10,10 +10,14 @@ import { allCountryFacts, getCountryFacts } from '@/data/countryFacts';
 import type { CountryFeatureProperties } from '@/data/types';
 
 /** Territories we knowingly ship without facts - mirrors the build script. */
-const FACTLESS_ALLOWLIST = new Set(['CYN', 'SOL']);
+const FACTLESS_ALLOWLIST = new Set(['CYN', 'SOL', 'KAS']);
 
 /** Territories with no World Bank population series - mirrors the build script. */
-const POPULATIONLESS_ALLOWLIST = new Set(['TWN', 'ESH', 'FLK', 'ATF', 'ATA']);
+const POPULATIONLESS_ALLOWLIST = new Set([
+  'TWN', 'ESH', 'FLK', 'ATF', 'ATA',
+  'VAT', 'SGS', 'IOT', 'SHN', 'PCN', 'AIA', 'MSR', 'JEY', 'GGY', 'NIU',
+  'COK', 'SPM', 'WLF', 'BLM', 'ALA', 'HMD', 'NFK',
+]);
 
 const features = geo.features as unknown as {
   properties: CountryFeatureProperties;
@@ -24,10 +28,34 @@ const isoCodes = features.map((f) => f.properties.iso3);
 
 describe('country geometry', () => {
   it('ships a plausible number of outlines', () => {
-    // 1:110m Natural Earth has ~177 sovereign-state features. A large swing means
-    // the upstream dataset changed shape and needs a look.
-    expect(features.length).toBeGreaterThan(160);
-    expect(features.length).toBeLessThan(200);
+    // 1:50m Natural Earth has 242 features, which merge down to 240 countries.
+    // A large swing means the upstream dataset changed shape and needs a look.
+    expect(features.length).toBeGreaterThan(220);
+    expect(features.length).toBeLessThan(260);
+  });
+
+  it('has an outline for the microstates 1:110m omitted', () => {
+    // The reason for moving to 1:50m: at 110m none of these had a polygon, so they
+    // could not be tapped or highlighted at all. Dropping back would silently undo it.
+    for (const code of ['LIE', 'DMA', 'MCO', 'SMR', 'AND', 'VAT', 'MLT', 'SGP']) {
+      expect(isoCodes).toContain(code);
+    }
+  });
+
+  it('rounds coordinates to the documented precision', () => {
+    // roundGeometry once took the coordinate array but was handed the geometry
+    // object, so it rounded nothing and the file shipped at full 6dp. Anything
+    // finer than 3dp here means that regressed.
+    const tooPrecise: number[] = [];
+    const walk = (node: unknown): void => {
+      if (typeof node === 'number') {
+        if (Number(node.toFixed(3)) !== node) tooPrecise.push(node);
+      } else if (Array.isArray(node)) {
+        node.forEach(walk);
+      }
+    };
+    features.forEach((f) => walk(f.geometry.coordinates));
+    expect(tooPrecise).toEqual([]);
   });
 
   it('has a valid ISO-3 code on every feature', () => {
@@ -84,12 +112,24 @@ describe('geometry <-> facts join', () => {
     }
   });
 
-  it('keeps facts for microstates that have no 110m outline', () => {
-    // Expected and harmless - they simply are not tappable at this resolution.
+  it('keeps facts for territories that have no outline of their own', () => {
+    // Expected and harmless. At 1:50m these are not missing so much as absorbed:
+    // Natural Earth draws the French overseas departments as part of FRA, Svalbard
+    // as part of NOR, and Christmas / Cocos inside Australia's territories.
     const geometryCodes = new Set(isoCodes);
     const factsOnly = Object.keys(allCountryFacts).filter((c) => !geometryCodes.has(c));
     expect(factsOnly.length).toBeGreaterThan(0);
-    expect(factsOnly).toContain('MCO'); // Monaco
+    expect(factsOnly).toContain('GUF'); // French Guiana - drawn as part of France
+  });
+
+  it('folds a country split across several source features into one', () => {
+    // Australia ships as mainland + Indian Ocean Territories + Ashmore and Cartier,
+    // all resolving to AUS. Left unmerged they are duplicate features, and the
+    // highlight layer filters on iso3 so only one of them would ever light up.
+    const australia = features.filter((f) => f.properties.iso3 === 'AUS');
+    expect(australia).toHaveLength(1);
+    expect(australia[0].geometry.type).toBe('MultiPolygon');
+    expect(australia[0].geometry.coordinates.length).toBeGreaterThan(2);
   });
 });
 

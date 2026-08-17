@@ -33,11 +33,17 @@ Verified end to end on 2026-08-16:
 Added 2026-08-17, verified on the emulator (`Medium_Phone`, x86_64 debug build):
 
 - the info card **animates out** instead of vanishing, and **landscape** docks it to the right edge
-- 57 Jest tests pass, typecheck clean (was 59 before the Region row and `formatRegion` were removed)
-- both Maestro flows pass — portrait 20 steps, landscape 24
+- the **Region row is gone** from the info sheet, and `region`/`subregion` are gone from the pipeline,
+  `CountryFacts` and `countryFacts.json` entirely
+- geometry moved to **Natural Earth 1:50m**, so the ~65 microstates the 110m tier omitted now exist:
+  **Liechtenstein selected on the emulator** (41,024, Vaduz, 160 km²), as did Switzerland beside it
+- 61 Jest tests pass, typecheck clean
+- both Maestro flows pass unchanged — portrait 20 steps, landscape 24, **no tap point needed
+  re-deriving** despite the geometry change (the camera is what pins those, and it did not move)
 - **not re-verified on the S25 or against the offline acceptance test.** The manifest lost
   `android:screenOrientation`, so those two need a re-run before release; nothing here adds a network
-  call, but the gate is the gate.
+  call — the geometry is still a bundled `import` — but the gate is the gate, and the bundle did grow
+  by ~1.4 MB, which is worth a look at cold-start time on real hardware.
 
 ## Stack
 
@@ -47,7 +53,7 @@ Added 2026-08-17, verified on the emulator (`Medium_Phone`, x86_64 debug build):
 | Routing | expo-router, routes in **`src/app/`** | SDK 57's default template layout |
 | Map | **`@maplibre/maplibre-react-native` 11.3.6** | Free, no API key, GPU polygon rendering, native hit-testing |
 | Info box | Hand-rolled on RN `Animated` | See below — deliberately not a bottom-sheet dependency |
-| Geometry | Natural Earth *Admin 0 Countries, 1:110m* | public domain, 177 features |
+| Geometry | Natural Earth *Admin 0 Countries, 1:50m* | public domain, 242 features → 240 countries |
 | Facts | `world-countries` npm (= mledoze/countries) | ODbL; the dataset REST Countries itself serves |
 | Population | World Bank `SP.POP.TOTL` | free, no key, most-recent-year values |
 
@@ -113,7 +119,7 @@ src/
     cameraFit.ts            # pure: zoom floor that stops the world tiling in landscape
     offlineStyle.ts         # inline style: background layer ONLY, no sources, no glyphs
   data/
-    countries.geo.json      # 177 outlines, properties trimmed to { iso3, name }   (248 KB)
+    countries.geo.json      # 240 outlines, properties trimmed to { iso3, name }   (1.6 MB)
     countryFacts.json       # 250 fact records keyed by ISO-3                       (65 KB)
     countryFacts.ts         # synchronous lookup
     types.ts
@@ -135,6 +141,39 @@ read and no async load at runtime. Do not convert either to a fetch.
 `npm run build:data` — a **one-off**, run while online; its output is committed. The app never calls
 these APIs.
 
+### Why 1:50m, and what it cost
+
+1:110m has **177 features and no microstates at all** — Liechtenstein, Dominica, Monaco, San Marino,
+Andorra, Malta, Singapore, Vatican and ~25 others simply had no polygon, so they could not be tapped,
+highlighted or reached in any way. 1:50m carries every one of them. Measured before choosing:
+
+| Tier | Features | Committed size @3dp | Unmatched slivers |
+|---|---|---|---|
+| 1:110m | 177 | 0.24 MB | 0 — but no microstates |
+| **1:50m** | 242 → **240** | **1.6 MB** | 1 (Siachen Glacier) |
+| 1:10m | 258 | ~8 MB | 13 |
+
+10m was rejected on size, and because it splits disputed slivers (Bir Tawil, the Spratlys, the Cyprus
+buffer zone) into their own ISO-less, factless features — a lot of allowlist for detail invisible on a
+world map.
+
+Two things the higher tier forced:
+
+- **Some countries arrive as several features and must be merged.** Australia ships as the mainland
+  plus `Indian Ocean Territories` plus `Ashmore and Cartier Islands`, all resolving to AUS through
+  `ISO_A3_EH`. The build folds every same-ISO feature into one MultiPolygon (`mergePolygons`). It has
+  to: the highlight layer filters on `iso3`, so a second AUS feature would be an untappable duplicate.
+- **17 more territories have no World Bank population** (Vatican, Jersey, Guernsey, Niue, Cook Islands,
+  Anguilla, …). Every one was checked against `GET /v2/country/<code>` and is genuinely not a World Bank
+  economy — none is a join failure. Jersey and Guernsey are reported only as a combined "Channel
+  Islands" (CHI), which would double-count if split across both, so both stay blank.
+
+**`roundCoords` never rounded anything.** It recursed on numbers and arrays and returned everything else
+untouched — but it was called with `f.geometry`, an *object*, so it hit that identity branch and the
+110m file shipped at full 6dp precision for its whole life, despite the comment. `roundGeometry` now
+takes the geometry and recurses into `.coordinates`; the integrity suite asserts nothing finer than 3dp
+survives. At 50m that is worth ~0.5 MB.
+
 Things that bit us, preserved so they don't bite again:
 
 - **REST Countries is no longer usable.** v3.1 is deprecated (returns an error envelope, not data) and
@@ -144,14 +183,14 @@ Things that bit us, preserved so they don't bite again:
   Kosovo (`KOS` → `UNK`) and South Sudan (`SDS` → `SSD`); France and Norway resolve via the `ADM0_A3`
   fallback. Without this France silently becomes an untappable blank.
 - **Kosovo is `UNK` in mledoze but `XKX` at the World Bank** — see `ISO3_TO_WORLD_BANK`.
-- Coordinates are rounded to 3 dp (~110 m), which roughly halves the file size and is far finer than a
-  1:110m basemap needs.
+- Coordinates are rounded to 3 dp (~110 m), which takes ~25% off the file and is still far finer than a
+  1:50m basemap resolves.
 
 The script **fails the build** on any unresolved code, duplicate, missing facts record, or missing
 population. Genuine upstream gaps go in an explicit allowlist (`FACTLESS_ALLOWLIST` = Northern Cyprus,
-Somaliland; `POPULATIONLESS_ALLOWLIST` = Taiwan, Western Sahara, Falklands, French Southern Territories,
-Antarctica) — never a silent skip. The same invariants are re-asserted in `__tests__/data-integrity.test.ts`
-so they cannot rot.
+Somaliland, Siachen Glacier; `POPULATIONLESS_ALLOWLIST` = Taiwan, Western Sahara, Falklands, French
+Southern Territories, Antarctica plus the 17 small territories 50m added) — never a silent skip. The
+same invariants are re-asserted in `__tests__/data-integrity.test.ts` so they cannot rot.
 
 ## Selection
 
@@ -192,6 +231,17 @@ The fix is two-part and both halves matter:
 
 Verified on hardware: 6/6 European capitals select correctly, plus a Sahara sweep at 7/8 exact
 containment (the 8th was a press into the Caspian Sea, resolved by the fallback).
+
+**Containment is what makes microstates usable.** Their polygons existing is not enough — at any zoom
+where Liechtenstein is visible, the 10 dp hitbox still returns Switzerland and Austria alongside it, and
+Dominica competes with France (Natural Earth draws Guadeloupe and Martinique as part of FRA). Both cases
+are pinned in `__tests__/pickCountry.test.ts`.
+
+**A sharper border can change the right answer.** The recorded Sahara press at `10.0E, 25.29N` used to
+be inside Libya and is now inside Algeria — 110m smoothed that stretch of border eastward, and 50m and
+10m both put the point in Algeria, as does the real border near Ghat. The test expectation moved with
+it; the property under test did not (LBY is still first in the candidate list, so `features[0]` still
+fails). If a `pickCountry` expectation flips after a data change, check the geometry before the code.
 
 ## Camera
 

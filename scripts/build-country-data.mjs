@@ -10,7 +10,7 @@
  * The app itself NEVER makes these requests. See CLAUDE.md - offline is a hard requirement.
  *
  * Sources (all free, none requires an API key):
- *   geometry   Natural Earth 1:110m admin 0 countries (public domain)
+ *   geometry   Natural Earth 1:50m admin 0 countries (public domain)
  *   facts      `world-countries` npm package = the mledoze/countries dataset (ODbL)
  *   population World Bank indicator SP.POP.TOTL, most recent non-empty year
  *
@@ -26,8 +26,18 @@ import worldCountries from 'world-countries';
 
 const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'data');
 
+/**
+ * 1:50m, not 1:110m. The 110m tier has only 177 features and omits every microstate -
+ * Liechtenstein, Dominica, Monaco, Malta, Singapore and ~25 others simply had no
+ * polygon to tap. 50m carries all of them, at 1.6 MB against 110m's 0.24 MB.
+ *
+ * 10m was measured too and rejected: ~8 MB in the bundle, and it splits 13 disputed
+ * slivers (Bir Tawil, the Spratlys, Cyprus's UN buffer zone, ...) into their own
+ * features with no ISO code and no facts record - a lot of allowlist for detail no
+ * one can see on a world map.
+ */
 const GEOMETRY_URL =
-  'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson';
+  'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson';
 const POPULATION_URL =
   'https://api.worldbank.org/v2/country/all/indicator/SP.POP.TOTL?format=json&per_page=500&mrnev=1';
 
@@ -57,6 +67,7 @@ const ISO3_TO_WORLD_BANK = {
 const FACTLESS_ALLOWLIST = new Set([
   'CYN', // Northern Cyprus - not a mledoze entry
   'SOL', // Somaliland - not a mledoze entry
+  'KAS', // Siachen Glacier - disputed, 50m-only, not a mledoze entry
 ]);
 
 /**
@@ -69,9 +80,31 @@ const POPULATIONLESS_ALLOWLIST = new Set([
   'FLK', // Falkland Islands
   'ATF', // French Southern and Antarctic Lands
   'ATA', // Antarctica - no permanent population
+
+  // Small territories that only appear at 1:50m. Every one was checked against
+  // `GET /v2/country/<code>` and is not a World Bank economy at all - none of these
+  // is a join failure. The info box shows a dash for population.
+  'VAT', // Vatican City
+  'SGS', // South Georgia and the South Sandwich Islands
+  'IOT', // British Indian Ocean Territory
+  'SHN', // Saint Helena, Ascension and Tristan da Cunha
+  'PCN', // Pitcairn Islands
+  'AIA', // Anguilla
+  'MSR', // Montserrat
+  'JEY', // Jersey    - the World Bank only reports Jersey and Guernsey combined, as
+  'GGY', // Guernsey    "Channel Islands" (CHI); splitting that across both would
+  //                    double-count the same people, so both stay blank
+  'NIU', // Niue
+  'COK', // Cook Islands
+  'SPM', // Saint Pierre and Miquelon
+  'WLF', // Wallis and Futuna
+  'BLM', // Saint Barthelemy
+  'ALA', // Aland Islands
+  'HMD', // Heard Island and McDonald Islands - uninhabited
+  'NFK', // Norfolk Island
 ]);
 
-/** Coordinate precision. 3dp is ~110 m, far finer than a 1:110m basemap needs. */
+/** Coordinate precision. 3dp is ~110 m, far finer than a 1:50m basemap resolves. */
 const COORD_PRECISION = 3;
 
 async function fetchJson(url, label) {
@@ -82,11 +115,42 @@ async function fetchJson(url, label) {
   return json;
 }
 
-/** Recursively round every coordinate. Roughly halves the output file size. */
-function roundCoords(node) {
-  if (typeof node === 'number') return Number(node.toFixed(COORD_PRECISION));
-  if (Array.isArray(node)) return node.map(roundCoords);
-  return node;
+/**
+ * Round every coordinate in a geometry. Takes ~25% off the output size.
+ *
+ * Note it takes the geometry OBJECT and recurses into `.coordinates`: an earlier
+ * version recursed on numbers and arrays only, so handing it a geometry object hit
+ * the identity branch and rounded nothing at all - the 110m file shipped with full
+ * 6dp precision despite the comment claiming otherwise.
+ */
+function roundGeometry(geometry) {
+  const round = (node) => {
+    if (typeof node === 'number') return Number(node.toFixed(COORD_PRECISION));
+    if (Array.isArray(node)) return node.map(round);
+    return node;
+  };
+  return { ...geometry, coordinates: round(geometry.coordinates) };
+}
+
+/**
+ * Fold every feature sharing an ISO-3 into one MultiPolygon.
+ *
+ * 50m splits some countries across features: Australia ships as the mainland plus
+ * `Indian Ocean Territories` and `Ashmore and Cartier Islands`, both of which are
+ * Australian and resolve to AUS via ISO_A3_EH. They must be one feature, because the
+ * highlight layer filters on `iso3` and a second AUS feature would be an untappable
+ * duplicate that the integrity check rejects.
+ */
+function mergePolygons(geometries) {
+  const polygons = [];
+  for (const g of geometries) {
+    if (g.type === 'Polygon') polygons.push(g.coordinates);
+    else if (g.type === 'MultiPolygon') polygons.push(...g.coordinates);
+    else throw new Error(`Unexpected geometry type: ${g.type}`);
+  }
+  return polygons.length === 1
+    ? { type: 'Polygon', coordinates: polygons[0] }
+    : { type: 'MultiPolygon', coordinates: polygons };
 }
 
 function resolveIso3(props) {
@@ -102,7 +166,7 @@ function resolveIso3(props) {
 async function main() {
   console.log('Building country data...');
   const [rawGeo, rawPop] = await Promise.all([
-    fetchJson(GEOMETRY_URL, 'Natural Earth 1:110m outlines'),
+    fetchJson(GEOMETRY_URL, 'Natural Earth 1:50m outlines'),
     fetchJson(POPULATION_URL, 'World Bank population'),
   ]);
   console.log(`  loaded ${worldCountries.length} records from world-countries`);
@@ -138,7 +202,7 @@ async function main() {
   }
 
   // ---- geometry ----------------------------------------------------------
-  const features = [];
+  const grouped = new Map();
   const unresolved = [];
   for (const f of rawGeo.features) {
     const iso3 = resolveIso3(f.properties);
@@ -146,12 +210,17 @@ async function main() {
       unresolved.push(f.properties.NAME ?? '<unnamed>');
       continue;
     }
-    features.push({
-      type: 'Feature',
-      properties: { iso3, name: facts[iso3]?.name ?? f.properties.NAME },
-      geometry: roundCoords(f.geometry),
-    });
+    const entry = grouped.get(iso3) ?? { name: f.properties.NAME, geometries: [] };
+    entry.geometries.push(roundGeometry(f.geometry));
+    grouped.set(iso3, entry);
   }
+
+  const merged = [...grouped.entries()].filter(([, e]) => e.geometries.length > 1);
+  const features = [...grouped.entries()].map(([iso3, entry]) => ({
+    type: 'Feature',
+    properties: { iso3, name: facts[iso3]?.name ?? entry.name },
+    geometry: mergePolygons(entry.geometries),
+  }));
 
   // ---- integrity checks --------------------------------------------------
   const problems = [];
@@ -161,6 +230,8 @@ async function main() {
     problems.push(`Features with no resolvable ISO-3: ${unresolved.join(', ')}`);
   }
 
+  // Grouping by ISO-3 makes duplicates structurally impossible; assert it anyway,
+  // because a duplicate is exactly the failure the highlight filter cannot survive.
   const dupes = [...new Set(geometryCodes.filter((c, i) => geometryCodes.indexOf(c) !== i))];
   if (dupes.length) problems.push(`Duplicate ISO-3 codes: ${dupes.join(', ')}`);
 
@@ -196,8 +267,11 @@ async function main() {
   const factsWithoutGeometry = Object.keys(facts).filter((c) => !geometrySet.has(c));
 
   console.log(`\n  ${features.length} country outlines`);
+  for (const [iso3, e] of merged) {
+    console.log(`    merged ${e.geometries.length} features into ${iso3}`);
+  }
   console.log(`  ${Object.keys(facts).length} fact records`);
-  console.log(`  ${factsWithoutGeometry.length} facts without 110m geometry (expected: microstates)`);
+  console.log(`  ${factsWithoutGeometry.length} facts without 1:50m geometry`);
   console.log(`  -> ${geoPath}`);
   console.log(`  -> ${factsPath}`);
 }
