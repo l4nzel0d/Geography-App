@@ -8,7 +8,7 @@
  * Note: React Native Testing Library v14 made `render` and `fireEvent` async. They
  * must be awaited or `screen` is never populated.
  */
-import { fireEvent, render as rtlRender, screen } from '@testing-library/react-native';
+import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
 import MapScreen from '@/app/index';
@@ -89,7 +89,12 @@ describe('MapScreen', () => {
     await pressCountry('BRA');
     await fireEvent.press(screen.getByTestId('close-info-sheet'));
 
-    expect(screen.queryByTestId('country-info-sheet')).toBeNull();
+    // The card slides out rather than vanishing, so it stays mounted - and stops
+    // taking touches - for the duration of the animation, and unmounts only once
+    // the animation reports finished.
+    const sheet = screen.getByTestId('country-info-sheet');
+    expect(sheet.props.pointerEvents).toBe('none');
+    await waitFor(() => expect(screen.queryByTestId('country-info-sheet')).toBeNull());
   });
 
   it('ignores a press that carries no feature', async () => {
