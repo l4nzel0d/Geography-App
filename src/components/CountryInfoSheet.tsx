@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +25,7 @@ import {
   formatPopulation,
 } from './formatters';
 import { getInfoSheetLayout } from './infoSheetLayout';
+import { dismissDrag, dragProgress, shouldCaptureDrag, shouldDismiss } from './sheetDismiss';
 
 type CountryInfoSheetProps = {
   iso3: string | null;
@@ -59,6 +63,12 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
   // risks leaving a sliver of card on screen at the moment it unmounts.
   const [size, setSize] = useState(FALLBACK_SIZE);
 
+  // Read inside the pan responder, which is memoised - a ref keeps it seeing the
+  // current values without tearing the responder down and rebuilding it mid-gesture.
+  const factsAtTop = useRef(true);
+  const dragState = useRef({ landscape, extent: FALLBACK_SIZE.height, onClose });
+  dragState.current = { landscape, extent: landscape ? size.width : size.height, onClose };
+
   useEffect(() => {
     if (facts) setVisibleFacts(facts);
 
@@ -79,6 +89,59 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
     return () => animation.stop();
   }, [facts, slide]);
 
+  const springBack = useCallback(() => {
+    Animated.spring(slide, { toValue: 1, useNativeDriver: true, bounciness: 0 }).start();
+  }, [slide]);
+
+  /**
+   * Drag the card toward its docked edge to dismiss it - down in portrait, right in
+   * landscape.
+   *
+   * It claims the gesture in the *capture* phase, which is what lets it win against
+   * the facts list underneath: in portrait both want vertical drags, and a responder
+   * granted the normal way would go to the ScrollView first and never reach here.
+   * `shouldCaptureDrag` only captures when that list is already scrolled to the top,
+   * so a drag inside a scrolled list still scrolls it.
+   *
+   * Memoised, and everything that changes between renders (orientation, measured
+   * size, `onClose`) is read through `dragState` - rebuilding the responder while a
+   * finger is down would drop the drag half way.
+   */
+  const pan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
+          shouldCaptureDrag(gesture, {
+            landscape: dragState.current.landscape,
+            factsAtTop: factsAtTop.current,
+          }),
+
+        // Take over from any open/close animation still running.
+        onPanResponderGrant: () => slide.stopAnimation(),
+
+        onPanResponderMove: (_event, gesture) => {
+          const { landscape: isLandscape, extent } = dragState.current;
+          const { distance } = dismissDrag(gesture, isLandscape);
+          slide.setValue(dragProgress(distance, extent));
+        },
+
+        onPanResponderRelease: (_event, gesture) => {
+          const { landscape: isLandscape, extent, onClose: close } = dragState.current;
+          const drag = dismissDrag(gesture, isLandscape);
+
+          // Closing is left to the parent clearing the selection, which runs the same
+          // close animation as the ✕ button - from wherever the drag left the card.
+          if (shouldDismiss({ ...drag, extent })) close();
+          else springBack();
+        },
+
+        // A phone call or a system gesture stealing the touch must not leave the card
+        // stranded half off-screen.
+        onPanResponderTerminate: () => springBack(),
+      }),
+    [slide, springBack],
+  );
+
   if (!visibleFacts) return null;
 
   const onLayout = ({ nativeEvent }: LayoutChangeEvent) => {
@@ -96,6 +159,7 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
     <Animated.View
       testID="country-info-sheet"
       onLayout={onLayout}
+      {...pan.panHandlers}
       // While sliding out the card is still mounted but no longer the user's target -
       // let taps through to the map underneath.
       pointerEvents={facts ? 'auto' : 'none'}
@@ -113,6 +177,15 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
           : { paddingBottom: insets.bottom + 20, transform: [{ translateY: travel }] },
       ]}
     >
+      {/* Decorative grab handle: the affordance for the drag, on the edge the card
+          travels toward. Hidden from screen readers, which have the ✕ button. */}
+      <View
+        testID="drag-handle"
+        importantForAccessibility="no"
+        accessibilityElementsHidden
+        style={landscape ? styles.handleLandscape : styles.handlePortrait}
+      />
+
       <View style={styles.header}>
         <Text style={styles.flag}>{visibleFacts.flag ?? '🏳️'}</Text>
         <View style={styles.headerText}>
@@ -138,6 +211,12 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
       <ScrollView
         style={landscape ? styles.bodyLandscape : styles.body}
         contentContainerStyle={styles.bodyContent}
+        // Portrait dismisses along the axis this list scrolls on, so the card may
+        // only take the drag while the list is at the top. See `shouldCaptureDrag`.
+        scrollEventThrottle={16}
+        onScroll={({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+          factsAtTop.current = nativeEvent.contentOffset.y <= 0;
+        }}
       >
         <Fact
           testID="fact-population"
@@ -211,6 +290,28 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderBottomLeftRadius: 20,
     borderLeftWidth: StyleSheet.hairlineWidth,
+  },
+  // Portrait: a pill across the top, the edge the card slides down from.
+  handlePortrait: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#3d5c76',
+    marginTop: -6,
+    marginBottom: 10,
+  },
+  // Landscape: the card slides out to the right, so the handle turns to match and
+  // sits against the left edge, clear of the header text.
+  handleLandscape: {
+    position: 'absolute',
+    left: 7,
+    top: '50%',
+    width: 4,
+    height: 40,
+    borderRadius: 2,
+    backgroundColor: '#3d5c76',
+    transform: [{ translateY: -20 }],
   },
   header: {
     flexDirection: 'row',
