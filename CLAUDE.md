@@ -266,31 +266,39 @@ lets the expression split them off with `['has','population']` into the grey `NO
 also reach `log10` and poison the whole expression — as would a `0`, which `data-integrity.test.ts` now
 forbids.
 
-### Overlaying the map: one shrink-wrapped absolute box per control
+### Never conditionally mount an overlay above the map
 
-`MapControls` anchors the toggle and the legend as **two separate absolutely-positioned boxes**, and
-derives the legend's `top` from the toggle's `onLayout`-measured height rather than letting them stack
-in one container. That looks like the long way round. It is the only arrangement of the three tried
-that actually paints over the MapLibre surface, and it cost several release builds to find:
+**The most expensive bug in the project so far.** A view inserted over the MapLibre surface *after* the
+initial mount is never drawn. It sits in the view hierarchy with entirely correct bounds — `uiautomator
+dump` showed the legend card, all seven swatches and every label exactly where they belonged — and
+paints nothing at all; sampling the screenshot at those coordinates returns pure map pixels.
 
-| Arrangement | Result |
-|---|---|
-| One absolute container, shrink-wrapped, toggle + legend stacked | toggle painted, **legend never painted a pixel** |
-| One absolute container, `absoluteFillObject` + `box-none`, offsets as padding | **nothing painted at all** — the whole overlay vanished |
-| One shrink-wrapped absolute box per control | works |
+So `PopulationLegend` is **mounted from startup and never conditionally rendered**. `MapControls` parks it
+at `left: -2000` when hidden and animates `left` — a **layout** property, on the **JS thread**
+(`useNativeDriver: false`) — to slide it in. Every part of that sentence is load-bearing:
 
-The first failure is the instructive one. The legend was **present in the view hierarchy with entirely
-correct bounds** — `uiautomator dump` showed the card, all seven swatches and every label laid out where
-they belonged — but a screencap of those exact coordinates was pure map. The container had measured
-itself to the first child only: at 2.625 density the toggle spanned y 95–186 while the legend was laid
-out at y 207–443, completely outside its parent, and **Android's ViewGroup clips children to the parent's
-bounds by default**. Nothing errors, nothing logs, the tree looks right, the pixels are simply absent.
+- *Always mounted* gives it the same stable insertion order as the toggle pill, which never had the bug
+  precisely because it is present in the first pass.
+- *Animating a layout property* supplies the re-layout that reveals it. Rotating the device fixed it
+  manually for the same reason — and it then stayed visible, because the view was never recreated.
+- *JS-driven* so each frame commits through the shadow tree.
 
-Symptoms to recognise next time: a view in the hierarchy with correct bounds that paints nothing, while
-a sibling above it paints fine. Suspect the parent's measured size, not the child's styling — a
-translucent background, `pointerEvents` and `elevation` were all ruled out first, one build each, and
-none of them was it. `uiautomator dump` plus sampling the screenshot's pixels at the reported bounds is
-what separates "not laid out" from "laid out but not painted"; it is much faster than guessing.
+`visible` therefore drives `accessibilityElementsHidden` / `importantForAccessibility`, not mounting.
+In tests that means presence proves nothing, and **RNTL queries need `{ includeHiddenElements: true }`**
+or they will not find the parked legend at all.
+
+What did **not** work — one release build each, do not repeat them: a translucent `backgroundColor`;
+the `pointerEvents` prop; `elevation: 6`; restructuring `MapControls` into a shrink-wrapped absolute
+container, then into `absoluteFillObject` + `box-none`; and an entrance animation on opacity + translateY
+with `useNativeDriver: true`. That last one is the instructive failure — `CountryInfoSheet` uses exactly
+that pattern and paints fine, because its container is mounted at startup. The animation was never the
+thing that mattered; the insertion order was.
+
+Method that actually found it: `adb shell uiautomator dump` to prove the view **is** laid out with the
+right bounds, then sample the screenshot's pixels at those bounds to prove it is **not** painted. That
+splits "layout bug" from "paint bug" in one step, and is far faster than changing styles and rebuilding.
+The other free signal is behavioural: if rotating the device makes it appear and it then stays, you are
+looking at this bug, not a styling one.
 
 Two more traps worth keeping:
 

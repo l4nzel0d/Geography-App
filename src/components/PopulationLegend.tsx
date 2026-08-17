@@ -17,11 +17,21 @@ const AXIS_LABELS = [
  * honest reading of a scale defined by discrete stops anyway. The map interpolates
  * between them, so treat this as a key to the decades, not a pixel-exact match.
  *
- * Unpositioned - `MapControls` places it.
+ * Unpositioned, and **always mounted** - `MapControls` places it and slides it in and
+ * out. It must not be conditionally rendered; see the note there and in CLAUDE.md.
+ * `visible` therefore drives accessibility and hit-testing rather than mounting.
  */
-export function PopulationLegend() {
+export function PopulationLegend({ visible }: { visible: boolean }) {
   return (
-    <View testID="population-legend" style={styles.card}>
+    <View
+      testID="population-legend"
+      style={styles.card}
+      // Parked off-screen when hidden, so it must not absorb touches or be reachable
+      // by a screen reader.
+      pointerEvents="none"
+      accessibilityElementsHidden={!visible}
+      importantForAccessibility={visible ? 'yes' : 'no-hide-descendants'}
+    >
       <Text style={styles.title}>People per country</Text>
 
       <View style={styles.strip}>

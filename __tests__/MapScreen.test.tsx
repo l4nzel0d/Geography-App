@@ -108,11 +108,23 @@ describe('MapScreen', () => {
     expect(screen.queryByTestId('country-info-sheet')).toBeNull();
   });
 
-  it('starts on the flat basemap with no legend', async () => {
+  /**
+   * The legend is deliberately mounted from startup and slid off-screen when hidden -
+   * conditionally rendering it means it never paints over the map at all. So presence
+   * says nothing; `accessibilityElementsHidden` is what tracks visibility.
+   */
+  const legend = () =>
+    // `includeHiddenElements` is required: RNTL hides accessibility-hidden nodes from
+    // queries by default, and the legend marks itself hidden while it is parked.
+    screen.getByTestId('population-legend', { includeHiddenElements: true });
+
+  const legendShown = () => legend().props.accessibilityElementsHidden === false;
+
+  it('starts on the flat basemap with the legend hidden', async () => {
     await render();
 
     expect(screen.getByTestId('layer-country-fill').props.paint['fill-color']).toBe('#7d9b76');
-    expect(screen.queryByTestId('population-legend')).toBeNull();
+    expect(legendShown()).toBe(false);
   });
 
   it('paints the choropleth and shows the legend when toggled', async () => {
@@ -122,7 +134,16 @@ describe('MapScreen', () => {
     expect(screen.getByTestId('layer-country-fill').props.paint['fill-color']).toEqual(
       POPULATION_FILL_COLOR,
     );
-    expect(screen.getByTestId('population-legend')).toBeTruthy();
+    expect(legendShown()).toBe(true);
+  });
+
+  it('keeps the legend mounted while it is hidden', async () => {
+    // Regression guard for the bug that cost the most time on this feature: a view
+    // inserted over the MapLibre surface after the initial mount never gets drawn.
+    await render();
+    expect(
+      screen.queryByTestId('population-legend', { includeHiddenElements: true }),
+    ).not.toBeNull();
   });
 
   it('toggles back to the flat basemap', async () => {
@@ -131,7 +152,7 @@ describe('MapScreen', () => {
     await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
 
     expect(screen.getByTestId('layer-country-fill').props.paint['fill-color']).toBe('#7d9b76');
-    expect(screen.queryByTestId('population-legend')).toBeNull();
+    expect(legendShown()).toBe(false);
   });
 
   it('marks the selection with an outline instead of a fill in choropleth mode', async () => {
