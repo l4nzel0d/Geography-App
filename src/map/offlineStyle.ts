@@ -9,9 +9,9 @@ export const mapColors = {
    * Selection marker for the choropleth, where filling the country solid would hide
    * the very value you tapped to inspect. An outline instead of a fill.
    *
-   * Two colours because the ramp runs from near-white to deep maroon: a white line
-   * vanishes on Mongolia and a dark one vanishes on China, so the white line is drawn
-   * over a wider dark casing and reads against either end.
+   * Two colours because both ramps run from near-white to a very dark stop: a white
+   * line vanishes on Mongolia and a dark one vanishes on China, so the white line is
+   * drawn over a wider dark casing and reads against either end of either ramp.
    */
   selectionOutline: '#ffffff',
   selectionCasing: '#0d2b45',

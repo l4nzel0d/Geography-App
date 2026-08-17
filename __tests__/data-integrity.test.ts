@@ -158,6 +158,21 @@ describe('facts content', () => {
     expect(bad).toEqual([]);
   });
 
+  it('records every area as a finite number, and flags the unusable ones', () => {
+    // The density ramp divides by this and takes log10 of the result, so a 0 or a
+    // negative would evaluate to -Infinity/NaN and break the paint for the whole layer
+    // inside the native renderer. `worldGeoJson.ts` drops these features out of the
+    // ramp; this pins how many there are to drop.
+    const unusable = Object.entries(allCountryFacts)
+      .filter(([, facts]) => facts.area == null || !Number.isFinite(facts.area) || facts.area <= 0)
+      .map(([iso3]) => iso3);
+
+    // mledoze ships -1 for an unknown area, and Svalbard is the only one that has it.
+    // A new entry here is a new hole in the density map, not a rounding detail.
+    expect(unusable).toEqual(['SJM']);
+    expect(allCountryFacts.SJM.area).toBe(-1);
+  });
+
   it('handles multi-currency and multi-language countries', () => {
     const swiss = getCountryFacts('CHE');
     expect(swiss!.languages.length).toBeGreaterThan(1);

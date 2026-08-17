@@ -28,4 +28,9 @@ export type CountryFeatureProperties = {
    * Absent - not null - for the territories the World Bank does not report on.
    */
   population?: number;
+  /**
+   * People per square kilometre, derived from `population` and `area` at runtime.
+   * Absent wherever either is missing, or where the area is mledoze's `-1` unknown.
+   */
+  density?: number;
 };

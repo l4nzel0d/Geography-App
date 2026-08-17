@@ -1,16 +1,16 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { NO_DATA_COLOR, NO_DATA_LABEL, POPULATION_STOPS } from '@/map/choropleth';
+import { type ChoroplethRamp, NO_DATA_COLOR, NO_DATA_LABEL } from '@/map/choropleth';
 
 /** Labels sit under the strip, spread across it: first stop, middle stop, last stop. */
-const AXIS_LABELS = [
-  POPULATION_STOPS[0],
-  POPULATION_STOPS[Math.floor(POPULATION_STOPS.length / 2)],
-  POPULATION_STOPS[POPULATION_STOPS.length - 1],
+const axisLabelsOf = (ramp: ChoroplethRamp) => [
+  ramp.stops[0],
+  ramp.stops[Math.floor(ramp.stops.length / 2)],
+  ramp.stops[ramp.stops.length - 1],
 ];
 
 /**
- * Key for the population choropleth.
+ * Key for whichever choropleth ramp is showing.
  *
  * Stepped rather than a smooth gradient: `expo-linear-gradient` is not installed and
  * adding it would mean a native rebuild, and a strip of discrete swatches is the more
@@ -20,11 +20,16 @@ const AXIS_LABELS = [
  * Unpositioned, and **always mounted** - `MapControls` places it and slides it in and
  * out. It must not be conditionally rendered; see the note there and in CLAUDE.md.
  * `visible` therefore drives accessibility and hit-testing rather than mounting.
+ *
+ * **Switching ramps swaps `ramp`, it does not mount a second legend.** Every ramp
+ * carries the same number of stops (pinned in `choropleth.test.ts`), so React updates
+ * these swatches in place rather than inserting new views over the MapLibre surface -
+ * which is the one thing that reliably never paints.
  */
-export function PopulationLegend({ visible }: { visible: boolean }) {
+export function ChoroplethLegend({ ramp, visible }: { ramp: ChoroplethRamp; visible: boolean }) {
   return (
     <View
-      testID="population-legend"
+      testID="choropleth-legend"
       style={styles.card}
       // Parked off-screen when hidden, so it must not absorb touches or be reachable
       // by a screen reader.
@@ -32,16 +37,16 @@ export function PopulationLegend({ visible }: { visible: boolean }) {
       accessibilityElementsHidden={!visible}
       importantForAccessibility={visible ? 'yes' : 'no-hide-descendants'}
     >
-      <Text style={styles.title}>People per country</Text>
+      <Text style={styles.title}>{ramp.title}</Text>
 
       <View style={styles.strip}>
-        {POPULATION_STOPS.map((stop) => (
+        {ramp.stops.map((stop) => (
           <View key={stop.label} style={[styles.swatch, { backgroundColor: stop.color }]} />
         ))}
       </View>
 
-      <View style={styles.axis}>
-        {AXIS_LABELS.map((stop) => (
+      <View style={[styles.axis, { width: SWATCH_WIDTH * ramp.stops.length }]}>
+        {axisLabelsOf(ramp).map((stop) => (
           <Text key={stop.label} style={styles.axisLabel}>
             {stop.label}
           </Text>
@@ -90,7 +95,6 @@ const styles = StyleSheet.create({
   axis: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    width: SWATCH_WIDTH * POPULATION_STOPS.length,
     marginTop: 3,
   },
   axisLabel: {

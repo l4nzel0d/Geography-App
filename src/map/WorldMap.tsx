@@ -5,7 +5,7 @@ import type { CountryFeatureProperties } from '@/data/types';
 import { worldGeoJson } from '@/data/worldGeoJson';
 
 import { getWorldFitZoom } from './cameraFit';
-import { POPULATION_FILL_COLOR } from './choropleth';
+import { CHOROPLETH_RAMPS, type ChoroplethMode } from './choropleth';
 import { mapColors, OFFLINE_STYLE } from './offlineStyle';
 import { pickCountry } from './pickCountry';
 
@@ -29,10 +29,10 @@ export const INITIAL_CENTER: [number, number] = [10, 20];
 export const INITIAL_ZOOM = 0;
 
 /**
- * How the land is coloured. A mode rather than a boolean so an area or density ramp
- * can be added later without growing a second flag.
+ * How the land is coloured: the flat basemap, or one of the choropleth ramps in
+ * `choropleth.ts`. Adding a ramp there is all it takes to add a mode here.
  */
-export type FillMode = 'flat' | 'population';
+export type FillMode = 'flat' | ChoroplethMode;
 
 type WorldMapProps = {
   selectedIso3: string | null;
@@ -51,7 +51,7 @@ export function WorldMap({ selectedIso3, onSelect, fillMode = 'flat' }: WorldMap
   const outlineFilter: ['==', ['get', 'iso3'], string] = [
     '==',
     ['get', 'iso3'],
-    (fillMode === 'population' && selectedIso3) || '',
+    (fillMode !== 'flat' && selectedIso3) || '',
   ];
 
   return (
@@ -103,7 +103,8 @@ export function WorldMap({ selectedIso3, onSelect, fillMode = 'flat' }: WorldMap
           id="country-fill"
           type="fill"
           paint={{
-            'fill-color': fillMode === 'population' ? POPULATION_FILL_COLOR : mapColors.land,
+            'fill-color':
+              fillMode === 'flat' ? mapColors.land : CHOROPLETH_RAMPS[fillMode].fillColor,
             'fill-opacity': 1,
           }}
         />
@@ -114,7 +115,7 @@ export function WorldMap({ selectedIso3, onSelect, fillMode = 'flat' }: WorldMap
           how "no selection" is expressed.
 
           There are two of these because a solid orange fill would hide the country's
-          population colour - the thing you tapped to inspect - so the choropleth marks
+          ramp colour - the thing you tapped to inspect - so the choropleth modes mark
           selection with an outline instead. Both layers stay mounted and the mode is
           expressed by handing the iso3 to only one of them, reusing the same
           "empty string matches nothing" idiom rather than adding and removing layers.

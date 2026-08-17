@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, type LayoutChangeEvent, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CHOROPLETH_RAMPS, POPULATION_RAMP } from '@/map/choropleth';
 import type { FillMode } from '@/map/WorldMap';
 
+import { ChoroplethLegend } from './ChoroplethLegend';
 import { MapModeToggle } from './MapModeToggle';
-import { PopulationLegend } from './PopulationLegend';
 
 type MapControlsProps = {
   fillMode: FillMode;
@@ -44,7 +45,18 @@ export function MapControls({ fillMode, onFillModeChange }: MapControlsProps) {
 
   const top = insets.top + 12;
   const left = insets.left + 16;
-  const showLegend = fillMode === 'population';
+  const showLegend = fillMode !== 'flat';
+
+  // The legend outlives the mode that opened it: on the way back to `flat` it goes on
+  // showing the ramp it was showing and slides out with it, rather than blanking on
+  // the first frame of an 800ms animation. Same reasoning as `CountryInfoSheet`'s
+  // `visibleFacts`. Population is only the seed for the very first render, before any
+  // ramp has been chosen.
+  const [visibleRamp, setVisibleRamp] = useState(POPULATION_RAMP);
+
+  useEffect(() => {
+    if (fillMode !== 'flat') setVisibleRamp(CHOROPLETH_RAMPS[fillMode]);
+  }, [fillMode]);
 
   // Not `useNativeDriver`: the point is to drive `left` through the shadow tree so a
   // real layout pass happens on every frame.
@@ -80,7 +92,7 @@ export function MapControls({ fillMode, onFillModeChange }: MapControlsProps) {
           },
         ]}
       >
-        <PopulationLegend visible={showLegend} />
+        <ChoroplethLegend ramp={visibleRamp} visible={showLegend} />
       </Animated.View>
     </>
   );

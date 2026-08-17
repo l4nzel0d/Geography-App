@@ -1,0 +1,88 @@
+# E2E: both choropleth ramps - population and density.
+#
+# This flow exists for one reason unit tests cannot cover: each fill is a MapLibre
+# *paint expression*, evaluated inside the native renderer. Jest replaces that renderer
+# with a stub (__mocks__/@maplibre/maplibre-react-native.tsx), so a malformed expression
+# passes every unit test and then blanks the map on a device. Switching each ramp on
+# here and still finding the map and a working selection is the proof that it parsed.
+#
+# Both ramps are exercised because they are separate expressions over separate feature
+# properties: population can parse while density does not.
+#
+# The camera does not move, so the tap points are the same ones tap-country.yaml pins.
+#
+#   maestro --device <serial> test .maestro/choropleth-modes.yaml
+appId: com.boris.geographyapp
+---
+- launchApp:
+    clearState: true
+
+# Every point below is a portrait percentage.
+- setOrientation: PORTRAIT
+
+- assertVisible:
+    id: 'world-map'
+
+# The flat basemap is the default; the legend only exists in a choropleth mode.
+- assertVisible:
+    id: 'toggle-fill-mode'
+- assertNotVisible:
+    id: 'choropleth-legend'
+
+# --- population ---
+- tapOn:
+    id: 'mode-population'
+
+- assertVisible:
+    id: 'choropleth-legend'
+- assertVisible: 'People per country'
+- assertVisible: 'no data'
+
+# The map must still be there. If the paint expression failed to parse, MapLibre drops
+# the layer and this is where it shows.
+- assertVisible:
+    id: 'world-map'
+
+# --- density ---
+# Straight from one ramp to the other, without passing through flat: the legend swaps
+# its contents in place rather than remounting, which is the thing most likely to break.
+- tapOn:
+    id: 'mode-density'
+
+- assertVisible:
+    id: 'choropleth-legend'
+- assertVisible: 'People per km²'
+- assertVisible: 'no data'
+# Density's own axis labels, so a legend that failed to swap ramps is caught here
+# rather than passing on the shared 'no data' row.
+- assertVisible: '25k'
+- assertNotVisible: 'People per country'
+
+- assertVisible:
+    id: 'world-map'
+
+# Selection still works with a ramp on - it is marked by an outline rather than the
+# orange fill, but the wiring behind it is unchanged. Russia, deep in Siberia.
+- tapOn:
+    point: '81%,20%'
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Russia'
+- assertVisible: 'Moscow'
+
+# The legend sits top-left and the sheet bottom, so both are on screen at once.
+- assertVisible:
+    id: 'choropleth-legend'
+
+- tapOn:
+    id: 'close-info-sheet'
+- assertNotVisible:
+    id: 'country-info-sheet'
+
+# Back to the flat basemap.
+- tapOn:
+    id: 'mode-flat'
+- assertNotVisible:
+    id: 'choropleth-legend'
+- assertVisible:
+    id: 'world-map'

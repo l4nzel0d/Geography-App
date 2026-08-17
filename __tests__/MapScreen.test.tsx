@@ -12,7 +12,7 @@ import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-librar
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
 import MapScreen from '@/app/index';
-import { POPULATION_FILL_COLOR } from '@/map/choropleth';
+import { DENSITY_RAMP, POPULATION_RAMP } from '@/map/choropleth';
 
 /**
  * `_layout.tsx` supplies the SafeAreaProvider in the real app; these tests render
@@ -43,6 +43,12 @@ const countryPressEvent = (iso3: string) => ({
 
 const pressCountry = (iso3: string) =>
   fireEvent(screen.getByTestId('countries-source'), 'press', countryPressEvent(iso3));
+
+/** The fill mode control is a three-way segmented group, one testID per segment. */
+const selectMode = (mode: 'flat' | 'population' | 'density') =>
+  fireEvent.press(screen.getByTestId(`mode-${mode}`));
+
+const fillColor = () => screen.getByTestId('layer-country-fill').props.paint['fill-color'];
 
 describe('MapScreen', () => {
   it('shows no info sheet until a country is pressed', async () => {
@@ -116,24 +122,54 @@ describe('MapScreen', () => {
   const legend = () =>
     // `includeHiddenElements` is required: RNTL hides accessibility-hidden nodes from
     // queries by default, and the legend marks itself hidden while it is parked.
-    screen.getByTestId('population-legend', { includeHiddenElements: true });
+    screen.getByTestId('choropleth-legend', { includeHiddenElements: true });
 
   const legendShown = () => legend().props.accessibilityElementsHidden === false;
 
   it('starts on the flat basemap with the legend hidden', async () => {
     await render();
 
-    expect(screen.getByTestId('layer-country-fill').props.paint['fill-color']).toBe('#7d9b76');
+    expect(fillColor()).toBe('#7d9b76');
     expect(legendShown()).toBe(false);
   });
 
-  it('paints the choropleth and shows the legend when toggled', async () => {
+  it('paints the population ramp and shows its legend', async () => {
     await render();
-    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+    await selectMode('population');
 
-    expect(screen.getByTestId('layer-country-fill').props.paint['fill-color']).toEqual(
-      POPULATION_FILL_COLOR,
-    );
+    expect(fillColor()).toEqual(POPULATION_RAMP.fillColor);
+    expect(legendShown()).toBe(true);
+    // Regex, not a string: the legend renders its title, every axis label and the
+    // no-data key, and v14's toHaveTextContent matches the concatenation exactly.
+    expect(legend()).toHaveTextContent(/People per country/);
+  });
+
+  it('paints the density ramp and retitles the legend', async () => {
+    await render();
+    await selectMode('density');
+
+    expect(fillColor()).toEqual(DENSITY_RAMP.fillColor);
+    expect(legendShown()).toBe(true);
+    expect(legend()).toHaveTextContent(/People per km²/);
+  });
+
+  it('reads density from its own feature property, not population', async () => {
+    // The two ramps differ only in the property they read and the colours they emit.
+    // Painting density off `population` would look plausible and be silently wrong.
+    await render();
+    await selectMode('density');
+
+    const expression = fillColor() as unknown[];
+    expect(expression[1]).toEqual(['has', 'density']);
+    expect((expression[2] as unknown[])[2]).toEqual(['log10', ['get', 'density']]);
+  });
+
+  it('switches straight from one ramp to the other', async () => {
+    await render();
+    await selectMode('population');
+    await selectMode('density');
+
+    expect(fillColor()).toEqual(DENSITY_RAMP.fillColor);
     expect(legendShown()).toBe(true);
   });
 
@@ -142,43 +178,57 @@ describe('MapScreen', () => {
     // inserted over the MapLibre surface after the initial mount never gets drawn.
     await render();
     expect(
-      screen.queryByTestId('population-legend', { includeHiddenElements: true }),
+      screen.queryByTestId('choropleth-legend', { includeHiddenElements: true }),
     ).not.toBeNull();
+  });
+
+  it('keeps showing the ramp it was on while the legend slides out', async () => {
+    // The legend outlives the mode that opened it. Blanking the content on the frame
+    // the mode changes would empty the card for the whole 800ms slide.
+    await render();
+    await selectMode('density');
+    await selectMode('flat');
+
+    expect(legendShown()).toBe(false);
+    expect(legend()).toHaveTextContent(/People per km²/);
   });
 
   it('toggles back to the flat basemap', async () => {
     await render();
-    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
-    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+    await selectMode('population');
+    await selectMode('flat');
 
-    expect(screen.getByTestId('layer-country-fill').props.paint['fill-color']).toBe('#7d9b76');
+    expect(fillColor()).toBe('#7d9b76');
     expect(legendShown()).toBe(false);
   });
 
-  it('marks the selection with an outline instead of a fill in choropleth mode', async () => {
-    // A solid orange fill would hide the population colour - the value you tapped the
-    // country to read. Both layers stay mounted; only one is handed the iso3.
-    await render();
-    await pressCountry('BRA');
-    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+  it.each(['population', 'density'] as const)(
+    'marks the selection with an outline instead of a fill in %s mode',
+    async (mode) => {
+      // A solid orange fill would hide the very colour you tapped the country to read.
+      // Both layers stay mounted; only one is handed the iso3.
+      await render();
+      await pressCountry('BRA');
+      await selectMode(mode);
 
-    expect(screen.getByTestId('layer-country-selected').props.filter).toEqual([
-      '==',
-      ['get', 'iso3'],
-      '',
-    ]);
-    expect(screen.getByTestId('layer-country-selected-outline').props.filter).toEqual([
-      '==',
-      ['get', 'iso3'],
-      'BRA',
-    ]);
-  });
+      expect(screen.getByTestId('layer-country-selected').props.filter).toEqual([
+        '==',
+        ['get', 'iso3'],
+        '',
+      ]);
+      expect(screen.getByTestId('layer-country-selected-outline').props.filter).toEqual([
+        '==',
+        ['get', 'iso3'],
+        'BRA',
+      ]);
+    },
+  );
 
   it('draws the outline over a casing, so it reads at both ends of the ramp', async () => {
     // A white line vanishes on a low-population country and a dark one vanishes on
     // China. The casing must be the wider of the two and must track the same country.
     await render();
-    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+    await selectMode('population');
     await pressCountry('BRA');
 
     const casing = screen.getByTestId('layer-country-selected-casing').props;
@@ -188,9 +238,9 @@ describe('MapScreen', () => {
     expect(casing.paint['line-width']).toBeGreaterThan(outline.paint['line-width']);
   });
 
-  it('keeps the selection working while the choropleth is on', async () => {
+  it('keeps the selection working while a choropleth is on', async () => {
     await render();
-    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+    await selectMode('density');
     await pressCountry('JPN');
 
     expect(screen.getByTestId('country-name')).toHaveTextContent('Japan');
