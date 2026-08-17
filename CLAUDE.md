@@ -15,7 +15,7 @@ wifi + data disabled) is the gate that this must pass.
 ## Status
 
 **Working and verified on the emulator.** Tap a country → it highlights and the info sheet shows
-population, currency, official languages, capital, region and area.
+population, currency, official languages, capital and area.
 
 Verified end to end on 2026-08-16:
 
@@ -33,7 +33,7 @@ Verified end to end on 2026-08-16:
 Added 2026-08-17, verified on the emulator (`Medium_Phone`, x86_64 debug build):
 
 - the info card **animates out** instead of vanishing, and **landscape** docks it to the right edge
-- 59 Jest tests pass, typecheck clean
+- 57 Jest tests pass, typecheck clean (was 59 before the Region row and `formatRegion` were removed)
 - both Maestro flows pass — portrait 20 steps, landscape 24
 - **not re-verified on the S25 or against the offline acceptance test.** The manifest lost
   `android:screenOrientation`, so those two need a re-run before release; nothing here adds a network
@@ -114,7 +114,7 @@ src/
     offlineStyle.ts         # inline style: background layer ONLY, no sources, no glyphs
   data/
     countries.geo.json      # 177 outlines, properties trimmed to { iso3, name }   (248 KB)
-    countryFacts.json       # 250 fact records keyed by ISO-3                       (77 KB)
+    countryFacts.json       # 250 fact records keyed by ISO-3                       (65 KB)
     countryFacts.ts         # synchronous lookup
     types.ts
   components/

@@ -20,7 +20,6 @@ import {
   formatCurrencies,
   formatLanguages,
   formatPopulation,
-  formatRegion,
 } from './formatters';
 import { getInfoSheetLayout } from './infoSheetLayout';
 
@@ -159,11 +158,6 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
           value={formatLanguages(visibleFacts.languages)}
         />
         <Fact testID="fact-capital" label="Capital" value={formatCapital(visibleFacts.capital)} />
-        <Fact
-          testID="fact-region"
-          label="Region"
-          value={formatRegion(visibleFacts.region, visibleFacts.subregion)}
-        />
         <Fact testID="fact-area" label="Area" value={formatArea(visibleFacts.area)} />
       </ScrollView>
     </Animated.View>

@@ -31,11 +31,3 @@ export function formatArea(areaKm2: number | null | undefined): string {
   if (areaKm2 == null) return NOT_AVAILABLE;
   return `${new Intl.NumberFormat('en-US').format(Math.round(areaKm2))} km²`;
 }
-
-export function formatRegion(
-  region: string | null | undefined,
-  subregion: string | null | undefined,
-): string {
-  if (subregion && region) return `${subregion}, ${region}`;
-  return subregion ?? region ?? NOT_AVAILABLE;
-}

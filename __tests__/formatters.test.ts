@@ -4,7 +4,6 @@ import {
   formatCurrencies,
   formatLanguages,
   formatPopulation,
-  formatRegion,
   NOT_AVAILABLE,
 } from '@/components/formatters';
 
@@ -87,16 +86,5 @@ describe('formatArea', () => {
 
   it('falls back when absent', () => {
     expect(formatArea(null)).toBe(NOT_AVAILABLE);
-  });
-});
-
-describe('formatRegion', () => {
-  it('combines subregion and region', () => {
-    expect(formatRegion('Americas', 'South America')).toBe('South America, Americas');
-  });
-
-  it('degrades gracefully when one is missing', () => {
-    expect(formatRegion('Americas', null)).toBe('Americas');
-    expect(formatRegion(null, null)).toBe(NOT_AVAILABLE);
   });
 });

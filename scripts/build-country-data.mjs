@@ -126,8 +126,6 @@ async function main() {
       population: population[wbCode] ?? null,
       populationYear: populationYear[wbCode] ?? null,
       capital: c.capital ?? [],
-      region: c.region ?? null,
-      subregion: c.subregion ?? null,
       area: c.area ?? null,
       flag: c.flag ?? null,
       currencies: Object.entries(c.currencies ?? {}).map(([code, v]) => ({

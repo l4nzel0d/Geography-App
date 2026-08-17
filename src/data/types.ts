@@ -12,8 +12,6 @@ export type CountryFacts = {
   /** The year `population` refers to, e.g. "2025". */
   populationYear: string | null;
   capital: string[];
-  region: string | null;
-  subregion: string | null;
   /** Square kilometres. */
   area: number | null;
   flag: string | null;
