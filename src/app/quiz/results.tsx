@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { quizColors, quizRadii } from '@/components/quiz/palette';
+import { quizColors, quizRadii } from '@/components/palette';
 import { getCountryFacts } from '@/data/countryFacts';
 import { FIELD_LABELS, newSeed, toQuizParams } from '@/quiz/quizConfig';
 import { takeQuizResult } from '@/quiz/quizResultStore';

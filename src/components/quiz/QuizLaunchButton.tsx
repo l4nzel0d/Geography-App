@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
-import { quizColors, quizRadii } from './palette';
+import { quizColors, quizRadii } from '../palette';
 
 /**
  * The way into quiz mode, parked in the map's top-right corner.

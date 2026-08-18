@@ -5,7 +5,7 @@ import type { FieldGrade } from '@/quiz/gradeAnswer';
 import { type FieldId, FIELD_LABELS, isSetField } from '@/quiz/quizConfig';
 
 import { ChipInput } from './ChipInput';
-import { quizColors, quizRadii } from './palette';
+import { quizColors, quizRadii } from '../palette';
 
 type AnswerFieldProps = {
   field: FieldId;

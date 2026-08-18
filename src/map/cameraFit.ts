@@ -26,3 +26,25 @@ export function getWorldFitZoom(width: number): number {
 
   return Math.max(0, Math.log2(width / WORLD_WIDTH_AT_ZOOM_0));
 }
+
+/**
+ * Lowest zoom at which one world covers BOTH axes of a viewport.
+ *
+ * `getWorldFitZoom` only answers for the width, which is all the launch camera needs -
+ * MapLibre's own constraint takes care of the height by clamping upward, and the explore
+ * map is happy to be clamped.
+ *
+ * A stop fitted to PART of the screen is not. Framing Russia into the top 45% of a
+ * portrait phone asks for zoom 0.36, where the Mercator square is 659 dp tall and the
+ * viewport is 891: MapLibre overrides the zoom and re-centres, and the offset we so
+ * carefully computed was measured against a scale the map never used. Asking for a zoom
+ * that will actually be honoured keeps the arithmetic and the render in agreement.
+ *
+ * This is a floor for a computed STOP, not for the `Camera`'s `minZoom` prop - that one
+ * is the pinch limit, and raising it would stop the user zooming back out to the world.
+ */
+export function getViewportFitZoom(width: number, height: number): number {
+  const forHeight = height > 0 ? Math.log2(height / WORLD_WIDTH_AT_ZOOM_0) : 0;
+
+  return Math.max(getWorldFitZoom(width), forHeight);
+}

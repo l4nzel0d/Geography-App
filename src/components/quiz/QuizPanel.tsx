@@ -7,7 +7,7 @@ import type { QuizQuestion } from '@/quiz/quizBuilder';
 import type { FieldId } from '@/quiz/quizConfig';
 
 import { AnswerField } from './AnswerField';
-import { quizColors, quizRadii } from './palette';
+import { quizColors, quizRadii } from '../palette';
 
 export type PanelAnswers = {
   text: Partial<Record<FieldId, string>>;

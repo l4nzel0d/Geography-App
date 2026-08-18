@@ -4,6 +4,13 @@ import type { Bbox } from './countryBounds';
 /**
  * Where the camera should sit to frame one country.
  *
+ * Two entry points. `getCountryCameraStop` frames a country in the whole viewport it is
+ * given, which is all quiz mode needs because its answer panel is a flex sibling and the
+ * map really is the size it is told. `getFocusedCameraStop` frames a country in a
+ * sub-rectangle of the viewport, which is what the explore map's search needs: there the
+ * info sheet is a genuine absolute overlay, so the map is full-screen while only part of
+ * it is visible.
+ *
  * This deliberately does the Web Mercator arithmetic itself rather than handing
  * MapLibre a `bounds` + `padding` camera stop. Two reasons, both about being able to
  * see what happened:
@@ -92,29 +99,136 @@ export function getCountryCameraStop({
   const ySouth = mercatorY(south);
   const centerLat = inverseMercatorY((yNorth + ySouth) / 2);
 
-  const usableWidth = viewport.width * (1 - 2 * margin);
-  const usableHeight = viewport.height * (1 - 2 * margin);
+  const zoom = fitZoom({
+    width: viewport.width,
+    height: viewport.height,
+    lngSpan,
+    ySpan: Math.abs(ySouth - yNorth),
+    minZoom,
+    maxZoom,
+    margin,
+  });
 
-  // Fraction of the whole world the country occupies on each axis.
-  const xFraction = lngSpan / 360;
-  const yFraction = Math.abs(ySouth - yNorth);
+  return { center: [centerLng, centerLat], zoom };
+}
 
-  // At zoom z the world is WORLD_WIDTH_AT_ZOOM_0 * 2^z dp across, so the largest zoom
-  // that still fits the country is where its share of that equals the usable space.
+/**
+ * The largest zoom at which a country still fits a box, clamped to the map's own limits.
+ *
+ * At zoom z the world is WORLD_WIDTH_AT_ZOOM_0 * 2^z dp across, so the answer is where
+ * the country's share of that equals the usable space on the tighter of the two axes.
+ *
+ * The unfitted value is Infinity for a degenerate box and NaN for a zero-sized viewport,
+ * and either one reaching the native camera blanks the map. `countryBounds` guarantees a
+ * MIN_SPAN_DEG floor, so this is the second line of defence rather than the first.
+ */
+function fitZoom({
+  width,
+  height,
+  lngSpan,
+  ySpan,
+  minZoom,
+  maxZoom,
+  margin,
+}: {
+  width: number;
+  height: number;
+  lngSpan: number;
+  /** The country's height as a fraction of the whole Mercator world. */
+  ySpan: number;
+  minZoom: number;
+  maxZoom: number;
+  margin: number;
+}): number {
+  const usableWidth = width * (1 - 2 * margin);
+  const usableHeight = height * (1 - 2 * margin);
+
   const zoomFor = (available: number, fraction: number) =>
     fraction > 0 ? Math.log2(available / (WORLD_WIDTH_AT_ZOOM_0 * fraction)) : Infinity;
 
-  const fitted = Math.min(
-    zoomFor(usableWidth, xFraction),
-    zoomFor(usableHeight, yFraction),
-  );
+  const fitted = Math.min(zoomFor(usableWidth, lngSpan / 360), zoomFor(usableHeight, ySpan));
 
-  // `fitted` is Infinity for a degenerate box and NaN for a zero-sized viewport, and
-  // either one reaching the native camera blanks the map. countryBounds guarantees a
-  // MIN_SPAN_DEG floor, so this is the second line of defence rather than the first.
-  const zoom = Number.isFinite(fitted)
-    ? Math.max(minZoom, Math.min(maxZoom, fitted))
-    : maxZoom;
+  return Number.isFinite(fitted) ? Math.max(minZoom, Math.min(maxZoom, fitted)) : maxZoom;
+}
 
-  return { center: [centerLng, centerLat], zoom };
+/** A sub-rectangle of the map viewport, in dp, with the origin at the viewport's top-left. */
+export type FocusRect = { x: number; y: number; width: number; height: number };
+
+/**
+ * Frame a country inside `focus` rather than inside the whole viewport.
+ *
+ * The camera always points at the centre of the viewport - that is not something we can
+ * change - so putting the country somewhere else on screen means pointing the camera
+ * *away* from it by exactly the offset between the two centres. Zoom is fitted to
+ * `focus`, so the country is sized for the space it will actually occupy.
+ *
+ * Deliberately a separate function rather than `getCountryCameraStop` with a default
+ * focus of the full viewport: the pole clamp below would then apply to quiz framing too,
+ * and that is a behaviour change to a screen this feature has no business touching.
+ */
+export function getFocusedCameraStop({
+  bbox,
+  viewport,
+  focus,
+  minZoom,
+  maxZoom,
+  margin = CONTEXT_MARGIN,
+}: {
+  bbox: Bbox;
+  /** The MAP's box in dp. On the explore screen that is the whole window. */
+  viewport: { width: number; height: number };
+  /** The part of `viewport` the info sheet does not cover. */
+  focus: FocusRect;
+  minZoom: number;
+  maxZoom: number;
+  margin?: number;
+}): { center: [number, number]; zoom: number } {
+  const [west, south, , north] = bbox;
+
+  const lngSpan = longitudeSpan(bbox);
+  const centerLng = normalizeLongitude(west + lngSpan / 2);
+
+  const yNorth = mercatorY(north);
+  const ySouth = mercatorY(south);
+  const centerY = (yNorth + ySouth) / 2;
+
+  // Fitted to the focus rect, not the viewport - the country has to fit the space that
+  // is actually visible, which in portrait is a little under half the screen.
+  const zoom = fitZoom({
+    width: focus.width,
+    height: focus.height,
+    lngSpan,
+    ySpan: Math.abs(ySouth - yNorth),
+    minZoom,
+    maxZoom,
+    margin,
+  });
+
+  // Width of the whole world in dp at the zoom we are actually going to use, which is
+  // what turns a dp offset into world units.
+  const worldPx = WORLD_WIDTH_AT_ZOOM_0 * Math.pow(2, zoom);
+
+  const dx = focus.x + focus.width / 2 - viewport.width / 2;
+  const dy = focus.y + focus.height / 2 - viewport.height / 2;
+
+  // `mercatorY` grows southward and screen y grows downward, so both axes shift with the
+  // same sign: move the camera the opposite way from the focus rect, and the country
+  // lands inside it.
+  const centerX = normalizeLongitude(centerLng - (dx / worldPx) * 360);
+
+  /**
+   * Half the viewport, in world units. Pointing the camera closer to a pole than this
+   * would show space beyond the top or bottom of the Mercator world.
+   *
+   * This clamp is not defensive tidying - without it, searching Russia in portrait puts
+   * the camera at latitude -54 and Russia entirely off the top of the screen. Its fit
+   * zoom is already at the floor, so the world is only 512 dp tall while the wanted
+   * shift is 232 dp: 45% of the globe. When the world is shorter than the viewport
+   * (`half >= 0.5`) no offset is possible at all, and the honest answer is the equator.
+   */
+  const half = viewport.height / 2 / worldPx;
+  const wantedY = centerY - dy / worldPx;
+  const cameraY = half >= 0.5 ? 0.5 : Math.max(half, Math.min(1 - half, wantedY));
+
+  return { center: [centerX, inverseMercatorY(cameraY)], zoom };
 }

@@ -8,14 +8,18 @@
  * Note: React Native Testing Library v14 made `render` and `fireEvent` async. They
  * must be awaited or `screen` is never populated.
  */
-import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react-native';
-import { Dimensions } from 'react-native';
+import { act, fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react-native';
+import { Dimensions, StyleSheet } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
 import MapScreen from '@/app/index';
+import { PORTRAIT_MAX_HEIGHT_FRACTION } from '@/components/infoSheetLayout';
 import { getWorldFitZoom } from '@/map/cameraFit';
+import { getCountryBounds } from '@/map/countryBounds';
+import { getCountryCameraStop } from '@/map/quizCamera';
 import { DENSITY_RAMP, POPULATION_RAMP } from '@/map/choropleth';
 import { INITIAL_CENTER, INITIAL_ZOOM } from '@/map/WorldMap';
+import { selectCountry } from '@/search/pendingCountry';
 
 /**
  * `_layout.tsx` supplies the SafeAreaProvider in the real app; these tests render
@@ -92,6 +96,18 @@ describe('MapScreen', () => {
       ['get', 'iso3'],
       'BRA',
     ]);
+  });
+
+  it('covers exactly the share of the screen the camera reserves for it', async () => {
+    // The drift guard. `getMapFocusRect` frames a searched country into the height this
+    // card does NOT take, and the two only agree because both derive from one constant.
+    // Re-hardcoding '55%' here would leave the camera framing into a gap that no longer
+    // exists, and nothing else in the suite would notice.
+    await render();
+    await pressCountry('BRA');
+
+    const style = StyleSheet.flatten(screen.getByTestId('country-info-sheet').props.style);
+    expect(style.maxHeight).toBe(`${PORTRAIT_MAX_HEIGHT_FRACTION * 100}%`);
   });
 
   it('closes the sheet via the close button', async () => {
@@ -262,16 +278,18 @@ describe('MapScreen', () => {
 });
 
 /**
- * Explore mode's camera must never move.
+ * Explore mode's camera moves for a SEARCH, and for nothing else.
  *
- * All three existing Maestro flows tap the map by screen percentage, and those
+ * The three coordinate Maestro flows tap the map by screen percentage, and those
  * percentages are only meaningful because the camera sits at INITIAL_CENTER from launch
- * to teardown. Quiz mode added an optional `camera` prop to the same component, so this
- * is the guard that stops it being handed one here by accident - a change nothing else
- * in the unit suite would notice, and which would silently break every coordinate tap.
+ * until the user actually asks for something. This block used to say "never given a
+ * stop", which search made false; the property worth protecting was never "no stop", it
+ * was "no stop the user did not ask for". So: nothing on launch, nothing on a tap, and a
+ * stop only when a search hands one over - none of which any other test would notice, and
+ * each of which silently breaks every coordinate tap.
  */
 describe('the explore camera', () => {
-  it('is never given a stop', async () => {
+  it('is given no stop on launch', async () => {
     await render();
     const camera = screen.getByTestId('map-camera');
 
@@ -279,6 +297,72 @@ describe('the explore camera', () => {
     expect(camera.props.zoom).toBeUndefined();
     expect(camera.props.bounds).toBeUndefined();
     expect(camera.props.duration).toBeUndefined();
+  });
+
+  it('is given no stop when a country is pressed on the map', async () => {
+    // A tap highlights; it must never fly. This is the assertion the three coordinate
+    // flows actually depend on.
+    await render();
+    await pressCountry('BRA');
+
+    expect(screen.getByTestId('map-camera').props.center).toBeUndefined();
+  });
+
+  it('flies to a country handed over by search, framed clear of the info sheet', async () => {
+    await render();
+    await act(async () => selectCountry('FRA'));
+
+    const camera = screen.getByTestId('map-camera');
+    const bounds = getCountryBounds('FRA');
+    const window = Dimensions.get('window');
+    const centred = getCountryCameraStop({
+      bbox: bounds!.bbox,
+      viewport: window,
+      minZoom: 0,
+      maxZoom: 10,
+    });
+
+    // Jest's window is 750x1334, i.e. portrait, so the sheet docks to the BOTTOM and the
+    // country is framed above it: same longitude, camera pushed SOUTH of the country so
+    // the country renders in the upper part of the screen.
+    expect(camera.props.center[0]).toBeCloseTo(centred.center[0], 6);
+    expect(camera.props.center[1]).toBeLessThan(centred.center[1]);
+
+    // ...and it is framed smaller than it would be with the whole window to play with,
+    // because it has to fit the 45% the sheet leaves.
+    expect(camera.props.zoom).toBeLessThan(centred.zoom);
+    expect(camera.props.duration).toBe(900);
+    expect(screen.getByTestId('country-name')).toHaveTextContent('France');
+  });
+
+  it('never withdraws a stop it has already given', async () => {
+    // Handing `camera` back as undefined would take the native stop from
+    // {center, zoom, duration, easing} to {} - a real prop change pushed into a renderer
+    // Jest replaces with a stub, so this is the only place it can be caught. Tapping
+    // another country must leave the stop exactly as it was.
+    await render();
+    await act(async () => selectCountry('FRA'));
+    const before = screen.getByTestId('map-camera').props.center;
+
+    await pressCountry('BRA');
+
+    expect(screen.getByTestId('map-camera').props.center).toBe(before);
+  });
+
+  it('flies again when the same country is searched twice', async () => {
+    // The stop is recomputed from a nonce precisely so an identical destination is still
+    // a change. Without it, searching Brazil, panning away and searching Brazil again
+    // does nothing at all.
+    await render();
+    await act(async () => selectCountry('FRA'));
+    const first = screen.getByTestId('map-camera').props.center;
+
+    await pressCountry('BRA');
+    await act(async () => selectCountry('FRA'));
+
+    const second = screen.getByTestId('map-camera').props.center;
+    expect(second).not.toBe(first);
+    expect(second).toEqual(first);
   });
 
   it('still starts at the pinned initial view', async () => {
@@ -291,7 +375,7 @@ describe('the explore camera', () => {
     const fitZoom = getWorldFitZoom(Dimensions.get('window').width);
     expect(camera.props.initialViewState).toEqual({ center: INITIAL_CENTER, zoom: fitZoom });
     expect(camera.props.minZoom).toBe(fitZoom);
-    expect(camera.props.maxZoom).toBe(8);
+    expect(camera.props.maxZoom).toBe(10);
     expect(getWorldFitZoom(390)).toBe(INITIAL_ZOOM);
   });
 

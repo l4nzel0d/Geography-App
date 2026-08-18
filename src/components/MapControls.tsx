@@ -8,6 +8,7 @@ import type { FillMode } from '@/map/WorldMap';
 import { ChoroplethLegend } from './ChoroplethLegend';
 import { MapModeToggle } from './MapModeToggle';
 import { QuizLaunchButton } from './quiz/QuizLaunchButton';
+import { SearchLaunchButton } from './search/SearchLaunchButton';
 
 type MapControlsProps = {
   fillMode: FillMode;
@@ -82,8 +83,14 @@ export function MapControls({ fillMode, onFillModeChange }: MapControlsProps) {
 
       {/* Top-right: the one corner free in both orientations once the toggle has the
           left and the info sheet has the bottom/right edge. Mounted from the first
-          frame like everything else layered over the map surface. */}
-      <View style={[styles.anchor, { top, right: insets.right + 16 }]}>
+          frame like everything else layered over the map surface.
+
+          Search and quiz share one ROW. Growing this row DOWNWARD would push it into the
+          portrait Greenland tap at 19%,13%; growing it leftward is free, because the
+          nearest coordinate tap is Russia at 81%,20%, some 80 dp further down. Keep any
+          future control the same height as these two. */}
+      <View style={[styles.anchor, styles.topRight, { top, right: insets.right + 16 }]}>
+        <SearchLaunchButton />
         <QuizLaunchButton />
       </View>
 
@@ -110,5 +117,11 @@ const styles = StyleSheet.create({
   anchor: {
     position: 'absolute',
     alignItems: 'flex-start',
+  },
+  // Search and quiz sit side by side. A row, never a column: see the note at the anchor.
+  topRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
 });

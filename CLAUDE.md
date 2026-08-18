@@ -725,3 +725,7 @@ both require credit. All three belong in an About screen.
 
 ## Build APK commands
 cd android && ORG_GRADLE_PROJECT_reactNativeArchitectures=arm64-v8a ./gradlew.bat assembleRelease
+
+## Launching the app on AVD
+emulator -avd Medium_Phone
+npx expo run:android

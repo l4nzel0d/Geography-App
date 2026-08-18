@@ -1,0 +1,137 @@
+# E2E: find a country by name and fly to it.
+#
+# This flow exists for three things Jest structurally cannot see:
+#   1. that the search route PAINTS at all. It is a route with no map on it precisely
+#      because a results list appearing over a live MapLibre surface is the paint bug in
+#      CLAUDE.md - this is the proof the separation works;
+#   2. that a camera stop from `getFocusedCameraStop` parses in the native renderer. A bad
+#      centre or an Infinity zoom passes every unit test and then blanks the map, exactly
+#      like a malformed paint expression;
+#   3. that the new pill did not push the top-right chrome down onto a tap point.
+#
+# Almost every step is testID-driven, like quiz.yaml. The ONE coordinate tap is deliberate
+# and is the only way to prove from outside that the camera actually moved: 81%,20% is
+# Siberia at the launch camera - it is the exact point tap-country.yaml uses to select
+# Russia - so after flying to Brazil it must not select Russia any more.
+#
+#   maestro --device <serial> test .maestro/search-country.yaml
+appId: com.boris.geographyapp
+---
+- launchApp:
+    clearState: true
+
+- setOrientation: PORTRAIT
+
+- assertVisible:
+    id: 'world-map'
+- assertNotVisible:
+    id: 'country-info-sheet'
+
+# Both pills share the top-right row. If that row ever wrapped, one of these is gone.
+- assertVisible:
+    id: 'open-search'
+- assertVisible:
+    id: 'open-quiz'
+
+- tapOn:
+    id: 'open-search'
+
+- assertVisible:
+    id: 'country-search'
+# No map on this route. That is the entire point of it being a route.
+- assertNotVisible:
+    id: 'world-map'
+
+# The list opens on the whole world rather than an empty panel.
+- assertVisible:
+    id: 'country-result-AFG'
+
+# No tap on the field first: it is autofocused, and typing straight into it is what
+# proves that. If autofocus regresses this step fails, rather than the screen quietly
+# degrading into "you have to tap twice".
+- inputText: 'holland'
+
+# An alias resolves to the country, and the row says which alias it matched on.
+- assertVisible:
+    id: 'country-result-NLD'
+- assertVisible: 'Netherlands'
+- assertVisible: 'Holland'
+
+# Clearing returns to the full index rather than a blank screen.
+- tapOn:
+    id: 'country-search-clear'
+- assertVisible:
+    id: 'country-result-AFG'
+
+- tapOn:
+    id: 'country-search-input'
+- inputText: 'brazi'
+- assertVisible:
+    id: 'country-result-BRA'
+- tapOn:
+    id: 'country-result-BRA'
+
+# Back on the map, selected exactly as a tap would have left it: same highlight layer,
+# same info sheet, same facts.
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Brazil'
+- assertVisible: 'Brasília'
+
+# ...and the camera actually moved. See the header note on this point.
+- tapOn:
+    id: 'close-info-sheet'
+- assertNotVisible:
+    id: 'country-info-sheet'
+- tapOn:
+    point: '81%,20%'
+- assertNotVisible: 'Russia'
+
+# A microstate: unreachable by tapping at world zoom, which is the reason the feature
+# exists at all. This also exercises the maxZoom ceiling, where the stop is clamped.
+- tapOn:
+    id: 'open-search'
+- inputText: 'liecht'
+- assertVisible:
+    id: 'country-result-LIE'
+- tapOn:
+    id: 'country-result-LIE'
+- assertVisible:
+    id: 'world-map'
+- assertVisible: 'Liechtenstein'
+- assertVisible: 'Vaduz'
+
+# Rotating re-frames the same country against the side panel instead of the bottom sheet.
+# Nothing may disappear, and the map must survive a second programmatic stop.
+- setOrientation: LANDSCAPE_LEFT
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Liechtenstein'
+- setOrientation: PORTRAIT
+
+# Cancelling must NOT fly anywhere, and must leave the selection alone.
+- tapOn:
+    id: 'close-info-sheet'
+- tapOn:
+    id: 'open-search'
+- assertVisible:
+    id: 'country-search'
+- inputText: 'qqqzzz'
+- assertVisible:
+    id: 'country-search-empty'
+- tapOn:
+    id: 'country-search-cancel'
+
+- assertVisible:
+    id: 'world-map'
+- assertNotVisible:
+    id: 'country-info-sheet'
+# The chrome survived the whole round trip.
+- assertVisible:
+    id: 'open-search'
+- assertVisible:
+    id: 'open-quiz'

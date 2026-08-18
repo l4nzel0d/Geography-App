@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { Dimensions, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { quizColors } from '@/components/quiz/palette';
+import { quizColors } from '@/components/palette';
 import { QuizPanel, type PanelAnswers } from '@/components/quiz/QuizPanel';
 import { useKeyboardHeight } from '@/components/quiz/useKeyboardHeight';
 import { getWorldFitZoom } from '@/map/cameraFit';

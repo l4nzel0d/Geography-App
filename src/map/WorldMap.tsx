@@ -35,8 +35,17 @@ export const INITIAL_ZOOM = 0;
  */
 export type FillMode = 'flat' | ChoroplethMode;
 
-/** Highest zoom the explore map allows. Quiz mode passes its own; see quiz/play.tsx. */
-const DEFAULT_MAX_ZOOM = 8;
+/**
+ * Highest zoom the explore map allows. Quiz mode passes its own; see quiz/play.tsx.
+ *
+ * Raised from 8 when search arrived. At 8 a 400 dp screen spans about 1.1 degrees of
+ * longitude, which leaves Monaco a 22 dp dot - a poor answer to "show me Monaco", and
+ * searching for a microstate is one of the likelier reasons to open the search box at
+ * all. 10 is the ceiling CLAUDE.md already argues is honest for 3 dp geometry, and it is
+ * what the quiz uses. This bounds interaction, not the launch camera, so no Maestro
+ * coordinate tap depends on it.
+ */
+const DEFAULT_MAX_ZOOM = 10;
 
 type WorldMapProps = {
   selectedIso3: string | null;

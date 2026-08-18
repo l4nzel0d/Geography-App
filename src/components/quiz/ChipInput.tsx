@@ -1,7 +1,7 @@
 import { forwardRef } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { quizColors, quizRadii } from './palette';
+import { quizColors, quizRadii } from '../palette';
 
 /** Nobody is naming more official languages than this; the pool is fixed, see below. */
 export const MAX_CHIPS = 12;

@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { REGIONS } from '@/quiz/quizCountries';
 
-import { quizColors, quizRadii } from './palette';
+import { quizColors, quizRadii } from '../palette';
 
 type SubregionPickerProps = {
   selected: string[];

@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ANSWERABLE_FIELDS, type FieldId, FIELD_LABELS } from '@/quiz/quizConfig';
 
-import { quizColors, quizRadii } from './palette';
+import { quizColors, quizRadii } from '../palette';
 
 type FieldPickerProps = {
   selected: FieldId[];

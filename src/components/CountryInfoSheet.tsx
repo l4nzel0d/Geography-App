@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  type DimensionValue,
   Easing,
   type LayoutChangeEvent,
   type NativeScrollEvent,
@@ -24,7 +25,7 @@ import {
   formatLanguages,
   formatPopulation,
 } from './formatters';
-import { getInfoSheetLayout } from './infoSheetLayout';
+import { getInfoSheetLayout, PORTRAIT_MAX_HEIGHT_FRACTION } from './infoSheetLayout';
 import { dismissDrag, dragProgress, shouldCaptureDrag, shouldDismiss } from './sheetDismiss';
 
 type CountryInfoSheetProps = {
@@ -276,7 +277,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    maxHeight: '55%',
+    // Shared with `getMapFocusRect`, which treats this as the height of the map the
+    // camera must keep clear. The cast is needed because a template literal widens to
+    // `string`, which is not a `DimensionValue`.
+    maxHeight: `${PORTRAIT_MAX_HEIGHT_FRACTION * 100}%` as DimensionValue,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     borderTopWidth: StyleSheet.hairlineWidth,

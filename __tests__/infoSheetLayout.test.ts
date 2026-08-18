@@ -4,8 +4,11 @@
  */
 import {
   getInfoSheetLayout,
+  getMapFocusRect,
+  MAP_CHROME_HEIGHT,
   PANEL_MAX_WIDTH,
   PANEL_MIN_WIDTH,
+  PORTRAIT_MAX_HEIGHT_FRACTION,
 } from '@/components/infoSheetLayout';
 
 describe('getInfoSheetLayout', () => {
@@ -48,6 +51,63 @@ describe('getInfoSheetLayout', () => {
 
       expect(panelWidth).not.toBeNull();
       expect(panelWidth! / width).toBeLessThanOrEqual(0.6);
+    }
+  });
+});
+
+/**
+ * Which part of the map the card leaves visible - what search frames a country into.
+ *
+ * The rect and the card have to agree, and they only do because both are derived from
+ * `PORTRAIT_MAX_HEIGHT_FRACTION`. If someone re-spells that as a literal in the
+ * stylesheet, the camera will keep framing countries into a gap the card no longer
+ * leaves, and nothing else in the suite will notice.
+ */
+describe('getMapFocusRect', () => {
+  it('leaves the band between the chrome and the sheet in portrait', () => {
+    // Top of the sheet is at 45% of 1000 = 450; the chrome reserves the first 60.
+    const rect = getMapFocusRect({ width: 390, height: 1000 });
+
+    expect(rect).toEqual({ x: 0, y: 60, width: 390, height: 390 });
+    expect(PORTRAIT_MAX_HEIGHT_FRACTION).toBe(0.55);
+  });
+
+  it('moves the band down by the safe-area inset', () => {
+    // The chrome row is positioned below the status bar, so the rect has to be too - the
+    // notch is 47 dp on the phone the tests model.
+    const rect = getMapFocusRect({ width: 390, height: 1000 }, 47);
+
+    expect(rect.y).toBe(47 + MAP_CHROME_HEIGHT);
+    expect(rect.height).toBe(450 - 47 - MAP_CHROME_HEIGHT);
+  });
+
+  it('leaves the left of the screen in landscape', () => {
+    const window = { width: 914, height: 411 };
+    const { panelWidth } = getInfoSheetLayout(window);
+
+    // The card takes the right edge rather than the bottom, so the band runs to the
+    // foot of the window - but it still starts below the toggle.
+    expect(getMapFocusRect(window)).toEqual({
+      x: 0,
+      y: MAP_CHROME_HEIGHT,
+      width: 914 - (panelWidth ?? 0),
+      height: 411 - MAP_CHROME_HEIGHT,
+    });
+  });
+
+  it('never returns a negative dimension', () => {
+    // A zero-sized window is reachable for one frame before the first layout pass, and a
+    // negative width would reach `log2` in the camera arithmetic.
+    for (const window of [
+      { width: 0, height: 0 },
+      { width: 320, height: 480 },
+      { width: 480, height: 320 },
+      { width: 2000, height: 1200 },
+    ]) {
+      const rect = getMapFocusRect(window);
+
+      expect(rect.width).toBeGreaterThanOrEqual(0);
+      expect(rect.height).toBeGreaterThanOrEqual(0);
     }
   });
 });

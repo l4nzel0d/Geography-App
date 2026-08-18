@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FieldPicker } from '@/components/quiz/FieldPicker';
-import { quizColors, quizRadii } from '@/components/quiz/palette';
+import { quizColors, quizRadii } from '@/components/palette';
 import { SubregionPicker } from '@/components/quiz/SubregionPicker';
 import { countriesIn } from '@/quiz/quizCountries';
 import { type FieldId, newSeed, toQuizParams } from '@/quiz/quizConfig';
