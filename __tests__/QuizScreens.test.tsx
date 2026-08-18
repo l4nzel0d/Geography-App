@@ -37,6 +37,8 @@ const mockPush = jest.fn();
 const mockReplace = jest.fn();
 const mockDismissAll = jest.fn();
 const mockBack = jest.fn();
+/** Defaults to true in `beforeEach`: the setup screen is normally still on the stack. */
+const mockCanGoBack = jest.fn();
 
 jest.mock('expo-router', () => ({
   router: {
@@ -44,6 +46,7 @@ jest.mock('expo-router', () => ({
     replace: (...args: unknown[]) => mockReplace(...args),
     dismissAll: () => mockDismissAll(),
     back: () => mockBack(),
+    canGoBack: () => mockCanGoBack(),
   },
   useLocalSearchParams: () => mockSearchParams,
 }));
@@ -57,6 +60,7 @@ beforeEach(() => {
   mockReplace.mockClear();
   mockDismissAll.mockClear();
   mockBack.mockClear();
+  mockCanGoBack.mockReset().mockReturnValue(true);
 });
 
 describe('the setup screen', () => {
@@ -442,5 +446,33 @@ describe('the results screen', () => {
     await fireEvent.press(screen.getByTestId('quiz-back-to-map'));
 
     expect(mockDismissAll).toHaveBeenCalled();
+  });
+
+  it('pops back to the setup screen rather than building a new one', async () => {
+    // "Change settings" has to land on the setup screen the player already filled in.
+    // `/quiz` was pushed and only `/quiz/play` was replaced, so it is still mounted with
+    // its subregions and fields; navigating to '/quiz' would mount a SECOND, empty one
+    // and silently discard every choice they just made. Popping is also what the back
+    // gesture does, and the two should not disagree.
+    setQuizResult(run);
+    await render(<QuizResultsScreen />);
+    mockReplace.mockClear();
+    await fireEvent.press(screen.getByTestId('quiz-change-settings'));
+
+    expect(mockBack).toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a fresh setup when there is nothing to pop to', async () => {
+    // `/quiz/play` is deep-linkable, so a round can be played without `/quiz` ever
+    // having been on the stack. `back()` would then do nothing at all.
+    mockCanGoBack.mockReturnValue(false);
+    setQuizResult(run);
+    await render(<QuizResultsScreen />);
+    mockReplace.mockClear();
+    await fireEvent.press(screen.getByTestId('quiz-change-settings'));
+
+    expect(mockBack).not.toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledWith('/quiz');
   });
 });

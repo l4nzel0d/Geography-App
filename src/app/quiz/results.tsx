@@ -15,6 +15,26 @@ import { summarize } from '@/quiz/quizScore';
  * Its own route with no map: the round is over, and reaching it with `router.replace`
  * unmounts the play screen's MapLibre surface rather than leaving two alive.
  */
+
+/**
+ * Back to setup with the round's choices still in it.
+ *
+ * `/quiz` was PUSHED and only `/quiz/play` was replaced, so the setup screen is still
+ * mounted underneath this one holding its `subregions` and `fields` state. Popping to it
+ * is what "change settings" means - navigating to `/quiz` instead builds a second, empty
+ * setup screen, so every choice the player just made is silently thrown away and they
+ * have to reselect a subregion to change one field.
+ *
+ * This is exactly what the back gesture already does; the button now agrees with it.
+ *
+ * The fallback is for the one path that has no setup screen to go back to: `/quiz/play`
+ * is deep-linkable, so a round can start without `/quiz` ever being on the stack.
+ */
+const goToSetup = () => {
+  if (router.canGoBack()) router.back();
+  else router.replace('/quiz');
+};
+
 export default function QuizResultsScreen() {
   const insets = useSafeAreaInsets();
 
@@ -144,7 +164,7 @@ export default function QuizResultsScreen() {
         <View style={styles.footerRow}>
           <Pressable
             testID="quiz-change-settings"
-            onPress={() => router.replace('/quiz')}
+            onPress={goToSetup}
             style={styles.secondary}
             accessibilityRole="button"
           >
