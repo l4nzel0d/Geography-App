@@ -24,6 +24,8 @@ import { fileURLToPath } from 'node:url';
 
 import worldCountries from 'world-countries';
 
+import { buildFactRecord, quizIntegrityProblems } from './countryFactRecord.mjs';
+
 const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'data');
 
 /**
@@ -181,24 +183,15 @@ async function main() {
   }
 
   // ---- facts -------------------------------------------------------------
+  // The record shape lives in countryFactRecord.mjs, shared with the offline
+  // enrichment script so the two writers of this file cannot drift.
   const facts = {};
   for (const c of worldCountries) {
     const wbCode = ISO3_TO_WORLD_BANK[c.cca3] ?? c.cca3;
-    facts[c.cca3] = {
-      name: c.name?.common ?? c.cca3,
-      official: c.name?.official ?? null,
+    facts[c.cca3] = buildFactRecord(c, {
       population: population[wbCode] ?? null,
       populationYear: populationYear[wbCode] ?? null,
-      capital: c.capital ?? [],
-      area: c.area ?? null,
-      flag: c.flag ?? null,
-      currencies: Object.entries(c.currencies ?? {}).map(([code, v]) => ({
-        code,
-        name: v?.name ?? code,
-        symbol: v?.symbol ?? null,
-      })),
-      languages: Object.values(c.languages ?? {}),
-    };
+    });
   }
 
   // ---- geometry ----------------------------------------------------------
@@ -249,6 +242,10 @@ async function main() {
   if (missingPop.length) {
     problems.push(`Mapped countries with no population: ${missingPop.join(', ')}`);
   }
+
+  // Quiz mode asks these fields of every UN member, so a gap here is an unanswerable
+  // question rather than a blank row in the info sheet.
+  problems.push(...quizIntegrityProblems(facts, geometryCodes));
 
   if (problems.length) {
     console.error('\nIntegrity check FAILED:');

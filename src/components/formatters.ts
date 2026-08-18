@@ -8,12 +8,21 @@ export function formatPopulation(population: number | null | undefined): string 
   return new Intl.NumberFormat('en-US').format(population);
 }
 
+/**
+ * One currency, e.g. "Brazilian real (BRL, R$)".
+ *
+ * Split out so quiz mode can label a single currency the same way the info sheet labels
+ * a list of them - the two must not drift into different ideas of what a currency looks
+ * like written down.
+ */
+export function formatCurrency({ code, name, symbol }: Currency): string {
+  return symbol ? `${name} (${code}, ${symbol})` : `${name} (${code})`;
+}
+
 /** e.g. "Brazilian real (BRL, R$)", or several joined with "  ·  ". */
 export function formatCurrencies(currencies: Currency[] | null | undefined): string {
   if (!currencies?.length) return NOT_AVAILABLE;
-  return currencies
-    .map(({ code, name, symbol }) => (symbol ? `${name} (${code}, ${symbol})` : `${name} (${code})`))
-    .join('  ·  ');
+  return currencies.map(formatCurrency).join('  ·  ');
 }
 
 export function formatLanguages(languages: string[] | null | undefined): string {

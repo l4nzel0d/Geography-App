@@ -8,6 +8,7 @@ import { getWorldFitZoom } from './cameraFit';
 import { CHOROPLETH_RAMPS, type ChoroplethMode } from './choropleth';
 import { mapColors, OFFLINE_STYLE } from './offlineStyle';
 import { pickCountry } from './pickCountry';
+import type { MapCameraStop } from './quizCamera';
 
 /**
  * Fixed starting viewport.
@@ -34,13 +35,42 @@ export const INITIAL_ZOOM = 0;
  */
 export type FillMode = 'flat' | ChoroplethMode;
 
+/** Highest zoom the explore map allows. Quiz mode passes its own; see quiz/play.tsx. */
+const DEFAULT_MAX_ZOOM = 8;
+
 type WorldMapProps = {
   selectedIso3: string | null;
-  onSelect: (iso3: string | null) => void;
+  /**
+   * Omit to make the map read-only: no press handler is attached at all, which is what
+   * quiz mode wants - tapping the answer out of the map would rather defeat it.
+   */
+  onSelect?: (iso3: string | null) => void;
   fillMode?: FillMode;
+  /**
+   * Overrides `mapColors.landSelected` on the highlight fill. Quiz mode swaps this from
+   * yellow to green or red once an answer is graded.
+   */
+  selectionColor?: string;
+  /**
+   * A declarative camera stop. When absent the camera sits at `INITIAL_CENTER` and never
+   * moves, which is what every Maestro percentage tap depends on - see CLAUDE.md.
+   *
+   * **Must be referentially stable.** `Camera` is memoised and rebuilds its stop from
+   * these props, so a freshly-allocated object each render re-fires the animation on
+   * every keystroke. Callers should `useMemo` it.
+   */
+  camera?: MapCameraStop;
+  maxZoom?: number;
 };
 
-export function WorldMap({ selectedIso3, onSelect, fillMode = 'flat' }: WorldMapProps) {
+export function WorldMap({
+  selectedIso3,
+  onSelect,
+  fillMode = 'flat',
+  selectionColor,
+  camera,
+  maxZoom = DEFAULT_MAX_ZOOM,
+}: WorldMapProps) {
   // Landscape is wider than one world at zoom 0, so the floor is derived from the
   // window rather than pinned to INITIAL_ZOOM. Without this a cold launch into
   // landscape renders the world tiled ~1.8 times over.
@@ -66,13 +96,22 @@ export function WorldMap({ selectedIso3, onSelect, fillMode = 'flat' }: WorldMap
       touchRotate={false}
       touchPitch={false}
       // Fires only when the press did not hit a country - i.e. the ocean.
-      onPress={() => onSelect(null)}
+      onPress={onSelect ? () => onSelect(null) : undefined}
       onDidFailLoadingMap={() => console.error('[WorldMap] map failed to load')}
     >
+      {/*
+        Spreading `undefined` adds no keys, so with no `camera` prop this is exactly the
+        three props it has always been and the camera never moves. `initialViewState`
+        stays either way: it supplies frame one while the first stop is still animating,
+        which also sidesteps the imperative CameraRef's throw when the native view is
+        not ready yet.
+      */}
       <Camera
+        testID="map-camera"
         initialViewState={{ center: INITIAL_CENTER, zoom: fitZoom }}
         minZoom={fitZoom}
-        maxZoom={8}
+        maxZoom={maxZoom}
+        {...(camera ?? {})}
       />
 
       <GeoJSONSource
@@ -85,6 +124,8 @@ export function WorldMap({ selectedIso3, onSelect, fillMode = 'flat' }: WorldMap
         // deselect. See pickCountry.ts.
         hitbox={{ top: 10, right: 10, bottom: 10, left: 10 }}
         onPress={(event) => {
+          if (!onSelect) return;
+
           // Source presses bubble up to Map.onPress. Without this the ocean handler
           // below fires immediately afterwards and clears the selection we just made,
           // so nothing ever appears to be selected.
@@ -124,7 +165,10 @@ export function WorldMap({ selectedIso3, onSelect, fillMode = 'flat' }: WorldMap
           id="country-selected"
           type="fill"
           filter={['==', ['get', 'iso3'], (fillMode === 'flat' && selectedIso3) || '']}
-          paint={{ 'fill-color': mapColors.landSelected, 'fill-opacity': 1 }}
+          paint={{
+            'fill-color': selectionColor ?? mapColors.landSelected,
+            'fill-opacity': 1,
+          }}
         />
 
         <Layer

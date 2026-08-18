@@ -4,7 +4,7 @@ import type { Feature, MultiPolygon, Polygon } from 'geojson';
 import worldGeoJson from '@/data/countries.geo.json';
 import type { CountryFeatureProperties } from '@/data/types';
 
-type CountryFeature = Feature<Polygon | MultiPolygon, CountryFeatureProperties>;
+export type CountryFeature = Feature<Polygon | MultiPolygon, CountryFeatureProperties>;
 
 const byIso3 = new Map<string, CountryFeature>(
   (worldGeoJson as unknown as { features: CountryFeature[] }).features.map((f) => [
@@ -12,6 +12,16 @@ const byIso3 = new Map<string, CountryFeature>(
     f,
   ]),
 );
+
+/**
+ * The outline for one country, or null if there is none.
+ *
+ * Exported so `countryBounds.ts` can reuse this index rather than building a second
+ * one: the source file is 1.6 MB and walking it twice at import is pure waste.
+ */
+export function getCountryFeature(iso3: string): CountryFeature | null {
+  return byIso3.get(iso3) ?? null;
+}
 
 /** Squared planar distance from a lng/lat to the nearest vertex of a feature. */
 function nearestVertexDistanceSq(feature: CountryFeature, [lng, lat]: [number, number]): number {

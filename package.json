@@ -49,7 +49,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:e2e": "maestro test .maestro",
-    "build:data": "node scripts/build-country-data.mjs"
+    "build:data": "node scripts/build-country-data.mjs",
+    "enrich:data": "node scripts/enrich-country-facts.mjs"
   },
   "jest": {
     "preset": "jest-expo",

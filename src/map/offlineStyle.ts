@@ -15,6 +15,19 @@ export const mapColors = {
    */
   selectionOutline: '#ffffff',
   selectionCasing: '#0d2b45',
+
+  /**
+   * Quiz mode paints the country being asked about, then repaints it with the verdict.
+   *
+   * Yellow rather than the explore mode's orange: it has to read unmistakably against
+   * both the green land and the dark ocean while looking like a question rather than a
+   * selection. The verdict pair are deliberately far apart in hue and lightness so the
+   * answer is legible at a glance and without relying on colour alone - the panel says
+   * the same thing in words.
+   */
+  quizTarget: '#ffd23f',
+  quizCorrect: '#3ddc84',
+  quizWrong: '#ef5350',
 } as const;
 
 /**

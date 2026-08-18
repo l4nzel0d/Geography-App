@@ -5,6 +5,8 @@
  * This is the highest-value suite in the project: a broken ISO-3 join is invisible
  * in code review but immediately visible to a user tapping France.
  */
+import worldCountries from 'world-countries';
+
 import geo from '@/data/countries.geo.json';
 import { allCountryFacts, getCountryFacts } from '@/data/countryFacts';
 import type { CountryFeatureProperties } from '@/data/types';
@@ -183,5 +185,111 @@ describe('facts content', () => {
     expect(getCountryFacts('ZZZ')).toBeNull();
     expect(getCountryFacts(null)).toBeNull();
     expect(getCountryFacts(undefined)).toBeNull();
+  });
+});
+
+/**
+ * Quiz mode asks these fields of every UN member, so a gap here is an unanswerable
+ * question rather than a blank row in the info sheet. Mirrors the checks in
+ * `scripts/countryFactRecord.mjs` - the same "explicit allowlist, never a silent
+ * skip" rule as the two allowlists above.
+ */
+describe('quiz data', () => {
+  /**
+   * mledoze sets `unMember` on Vatican City, which is a permanent observer state and
+   * not a member. The quiz pool excludes it explicitly, so the flag is 194 wide and
+   * the pool is 193.
+   */
+  const OBSERVER_STATE = 'VAT';
+
+  /** Micronesia carries no currency upstream - checked, genuinely absent. */
+  const CURRENCYLESS = new Set(['FSM']);
+
+  const geometryCodes = new Set(isoCodes);
+  const unMembers = Object.entries(allCountryFacts).filter(
+    ([iso3, facts]) => facts.unMember && geometryCodes.has(iso3),
+  );
+  const pool = unMembers.filter(([iso3]) => iso3 !== OBSERVER_STATE);
+
+  it('flags exactly 194 UN members with geometry, giving a pool of 193', () => {
+    // Pinned rather than bounded: a change here is a change to the dataset's idea of
+    // who is a country, which should never happen quietly.
+    expect(unMembers).toHaveLength(194);
+    expect(pool).toHaveLength(193);
+    expect(unMembers.map(([iso3]) => iso3)).toContain(OBSERVER_STATE);
+  });
+
+  it('excludes non-members that would otherwise look like countries', () => {
+    for (const code of ['TWN', 'PSE', 'UNK', 'GRL', 'PRI', 'HKG']) {
+      expect(allCountryFacts[code]?.unMember).toBe(false);
+    }
+  });
+
+  it('gives every quiz country a region and a subregion', () => {
+    // The setup menu groups the 24 subregions under 6 regions; an empty one would be
+    // a country that no filter can reach and that therefore never gets asked.
+    const missing = pool.filter(([, f]) => !f.region || !f.subregion).map(([iso3]) => iso3);
+    expect(missing).toEqual([]);
+  });
+
+  it('spreads the pool over exactly 24 subregions, none of them empty', () => {
+    const counts = new Map<string, number>();
+    for (const [, facts] of pool) {
+      counts.set(facts.subregion, (counts.get(facts.subregion) ?? 0) + 1);
+    }
+    expect(counts.size).toBe(24);
+    expect([...counts.values()].every((n) => n > 0)).toBe(true);
+    expect([...counts.values()].reduce((a, b) => a + b, 0)).toBe(193);
+  });
+
+  it('has a population for every quiz country', () => {
+    // Population is an answerable field, and the grader takes a ±20% band around it.
+    // VAT is the only UN-flagged record without one, which is why it is also the one
+    // the pool excludes.
+    expect(pool.filter(([, f]) => f.population == null).map(([iso3]) => iso3)).toEqual([]);
+    expect(allCountryFacts[OBSERVER_STATE].population).toBeNull();
+  });
+
+  it('has a capital and at least one language for every quiz country', () => {
+    expect(pool.filter(([, f]) => f.capital.length === 0).map(([c]) => c)).toEqual([]);
+    expect(pool.filter(([, f]) => f.languages.length === 0).map(([c]) => c)).toEqual([]);
+  });
+
+  it('has a currency for every quiz country except Micronesia', () => {
+    // Exact, not a `toContain`: an allowlist entry that stops being needed would
+    // otherwise hide the next genuine gap.
+    expect(pool.filter(([, f]) => f.currencies.length === 0).map(([c]) => c)).toEqual([
+      ...CURRENCYLESS,
+    ]);
+  });
+
+  it('strips the two-letter country code out of altSpellings', () => {
+    // Without this "fr" is an accepted answer for France and "in" for India. The
+    // filter is on the cca2 itself, not on length, so UK / USA / UAE / DRC / RSA -
+    // exactly what a player types - all survive.
+    expect(allCountryFacts.FRA.altSpellings).not.toContain('FR');
+    expect(allCountryFacts.GBR.altSpellings).toContain('UK');
+    expect(allCountryFacts.ARE.altSpellings).toContain('UAE');
+    expect(allCountryFacts.COD.altSpellings).toContain('DRC');
+
+    // The rule is "not the country's own cca2", checked against the same upstream the
+    // build reads. A length cutoff would be wrong in both directions: it would drop UK
+    // and DRC, and it would keep the Korean and Chinese names, which are 2-3 characters
+    // and entirely legitimate.
+    const wearingItsOwnCode = worldCountries
+      .filter((c) => allCountryFacts[c.cca3])
+      .filter((c) =>
+        allCountryFacts[c.cca3].altSpellings.some(
+          (s) => s.toUpperCase() === c.cca2.toUpperCase(),
+        ),
+      )
+      .map((c) => `${c.cca3}:${c.cca2}`);
+    expect(wearingItsOwnCode).toEqual([]);
+  });
+
+  it('carries the aliases the forgiving grader leans on', () => {
+    expect(allCountryFacts.CIV.altSpellings).toContain('Ivory Coast');
+    expect(allCountryFacts.NLD.altSpellings).toContain('Holland');
+    expect(allCountryFacts.KOR.altSpellings).toContain('Republic of Korea');
   });
 });

@@ -7,6 +7,7 @@ import type { FillMode } from '@/map/WorldMap';
 
 import { ChoroplethLegend } from './ChoroplethLegend';
 import { MapModeToggle } from './MapModeToggle';
+import { QuizLaunchButton } from './quiz/QuizLaunchButton';
 
 type MapControlsProps = {
   fillMode: FillMode;
@@ -77,6 +78,13 @@ export function MapControls({ fillMode, onFillModeChange }: MapControlsProps) {
     <>
       <View style={[styles.anchor, { top, left }]} onLayout={onToggleLayout}>
         <MapModeToggle mode={fillMode} onChange={onFillModeChange} />
+      </View>
+
+      {/* Top-right: the one corner free in both orientations once the toggle has the
+          left and the info sheet has the bottom/right edge. Mounted from the first
+          frame like everything else layered over the map surface. */}
+      <View style={[styles.anchor, { top, right: insets.right + 16 }]}>
+        <QuizLaunchButton />
       </View>
 
       <Animated.View

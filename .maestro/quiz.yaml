@@ -1,0 +1,140 @@
+# E2E: play a round of the quiz.
+#
+# This flow exists for the two things Jest structurally cannot see:
+#   1. that a camera stop computed by `quizCamera.ts` actually parses in the native
+#      renderer - a bad centre or an Infinity zoom passes every unit test and then
+#      blanks the map on a device, exactly like a malformed paint expression;
+#   2. that the answer panel PAINTS beside a live MapLibre surface. The panel is a flex
+#      sibling rather than an overlay precisely to avoid the bug in CLAUDE.md, and this
+#      is what proves it.
+#
+# Unlike the other three flows, there is not a single coordinate tap here - it is
+# entirely testID-driven. That is deliberate and required: the quiz camera moves on
+# every question, so a screen percentage means nothing.
+#
+# "Australia and New Zealand" is chosen because it is the smallest subregion (2 UN
+# members), so the round is short and "Australia" is a plausible answer without having
+# to pin the shuffle seed.
+#
+#   maestro --device <serial> test .maestro/quiz.yaml
+appId: com.boris.geographyapp
+---
+- launchApp:
+    clearState: true
+
+- setOrientation: PORTRAIT
+
+- assertVisible:
+    id: 'world-map'
+
+# The way in. Top-right, the one corner free in both orientations.
+- tapOn:
+    id: 'open-quiz'
+
+- assertVisible:
+    id: 'quiz-setup'
+- assertVisible: 'What do you have to answer?'
+# Every UN member state, before any subregion narrows it.
+- assertVisible: 'Start — 193 countries'
+
+# Oceania is the last region in the list, so the row has to be scrolled to before it
+# exists in the hierarchy at all.
+#
+# `centerElement` is required, not tidiness: the Start bar is pinned over the bottom of
+# the list, and a plain scrollUntilVisible stops the moment the row is technically
+# visible - which can leave it underneath that bar, so the tap lands on the footer and
+# the subregion is silently never selected.
+- scrollUntilVisible:
+    element:
+      id: 'subregion-Australia and New Zealand'
+    direction: DOWN
+    centerElement: true
+    timeout: 20000
+
+- tapOn:
+    id: 'subregion-Australia and New Zealand'
+
+- scrollUntilVisible:
+    element:
+      id: 'field-capital'
+    direction: UP
+    centerElement: true
+    timeout: 20000
+
+- tapOn:
+    id: 'field-capital'
+- assertVisible: 'Start — 2 countries'
+
+- tapOn:
+    id: 'quiz-start'
+
+# The map survived a programmatic camera move, and the panel is beside it rather than
+# missing. This single pair of assertions is most of the reason the flow exists.
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'quiz-panel'
+- assertVisible:
+    id: 'quiz-progress'
+- assertVisible: '1 / 2'
+
+# Both configured fields have a row.
+- assertVisible:
+    id: 'quiz-input-name'
+- assertVisible:
+    id: 'quiz-input-capital'
+
+# Answer the country and leave the capital blank, so this one question exercises both
+# the correct and the wrong path at once.
+- tapOn:
+    id: 'quiz-input-name'
+- inputText: 'Australia'
+- hideKeyboard
+
+- tapOn:
+    id: 'quiz-submit'
+
+# Reveal-on-wrong painted. The capital was left empty, so its reveal must now name the
+# answer rather than staying blank.
+- assertVisible:
+    id: 'quiz-reveal-capital'
+- assertVisible: 'Answer: .*'
+
+# The button relabels rather than being swapped for a second button.
+- assertVisible: 'Next'
+
+# Rotating mid-question re-docks the panel to the right edge and re-fits the camera to
+# the same country. Nothing may disappear.
+- setOrientation: LANDSCAPE_LEFT
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'quiz-panel'
+- assertVisible:
+    id: 'quiz-reveal-capital'
+- setOrientation: PORTRAIT
+
+- tapOn:
+    id: 'quiz-submit'
+- assertVisible: '2 / 2'
+# The next question starts clean.
+- assertNotVisible: 'Next'
+
+# Ending early scores what was answered and leaves the map behind.
+- tapOn:
+    id: 'quiz-end'
+
+- assertVisible:
+    id: 'quiz-results'
+- assertVisible: 'Round over'
+- assertVisible:
+    id: 'quiz-score-countries'
+- assertNotVisible:
+    id: 'world-map'
+
+- tapOn:
+    id: 'quiz-back-to-map'
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'open-quiz'

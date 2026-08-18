@@ -59,8 +59,23 @@ Added 2026-08-17, **not yet verified on any device**:
   is the way to point it at the reversed port, and that still needs a re-try on a healthy AVD.
 - So **nothing below the unit tests is confirmed**: not the colours on screen, not the legend layout,
   not that the paint expression parses in the native renderer, and not
-  `.maestro/population-choropleth.yaml`, which has never been run. Treat the whole feature as unproven
-  until someone launches it.
+  `.maestro/choropleth-modes.yaml`, which had never been run. *(Superseded — see below.)*
+
+Added 2026-08-18, verified on the emulator (`Medium_Phone`, x86_64, dev build over Metro):
+
+- **the dev loop is unwedged.** The AVD's NAT was the problem, not Metro: a cold boot
+  (`emulator -avd Medium_Phone -no-snapshot-load`, launched detached) came up with working DNS and a
+  reachable `10.0.2.2`, and `adb reverse tcp:8081 tcp:8081` plus the
+  `geographyapp://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081` intent connects first
+  time. A JS edit reaches the screen in about a second. **Do not set `CI=1` when starting Metro** —
+  it disables watch mode, which is exactly the thing you want.
+- that also clears the choropleth's backlog: the mode toggle and the legend paint, and
+  `.maestro/choropleth-modes.yaml` now passes.
+- **quiz mode** — zoom to a country, paint it yellow, type the answers. See *Quiz mode*.
+- 389 Jest tests across 15 suites pass, typecheck clean, and **all four Maestro flows pass**.
+- **not re-verified on the S25, and the offline acceptance test has still not been re-run** since the
+  1:50m switch. Nothing in quiz mode adds a network call — the new fields come from the same bundled
+  `countryFacts.json` — but the gate is the gate.
 
 ## Stack
 
@@ -146,10 +161,28 @@ src/
     CountryInfoSheet.tsx
     infoSheetLayout.ts      # pure: portrait bottom sheet vs landscape side panel
     formatters.ts           # pure, unit-tested
-    MapControls.tsx         # the only chrome: top-left column, owns the safe-area maths
+    MapControls.tsx         # the chrome: toggle + legend top-left, quiz pill top-right
     MapModeToggle.tsx       # flat <-> population pill
-    PopulationLegend.tsx    # stepped key, driven by POPULATION_STOPS
-scripts/build-country-data.mjs
+    ChoroplethLegend.tsx    # stepped key, driven by the active ramp
+    quiz/                   # QuizPanel, AnswerField, ChipInput, SubregionPicker,
+                            #   FieldPicker, QuizLaunchButton, palette, useKeyboardHeight
+  map/
+    countryBounds.ts        # pure: which polygons to frame for one country
+    quizCamera.ts           # pure: bbox + viewport -> centre and zoom
+  quiz/
+    quizConfig.ts           # pure: FieldId, QuizConfig, router-param coercion
+    quizCountries.ts        # the 193-country pool and the subregion catalogue
+    quizBuilder.ts          # pure: seeded shuffle -> ordered questions
+    normalizeText.ts        # pure
+    editDistance.ts         # pure: Damerau, and the typo budget
+    answerAliases.ts        # accepted spellings, plus NAME_INDEX for the confusable guard
+    gradeAnswer.ts          # pure: the marking
+    quizScore.ts            # pure: the tallies
+    quizPanelLayout.ts      # pure: the map/panel split, and the map's own viewport
+    quizResultStore.ts      # one-slot handover from the round to the score screen
+scripts/build-country-data.mjs      # full online rebuild
+scripts/enrich-country-facts.mjs    # offline facts-only re-derivation
+scripts/countryFactRecord.mjs       # the record shape, shared by both
 __tests__/ , __mocks__/ , .maestro/
 ```
 
@@ -162,6 +195,26 @@ read and no async load at runtime. Do not convert either to a fetch.
 
 `npm run build:data` — a **one-off**, run while online; its output is committed. The app never calls
 these APIs.
+
+**There are two writers of `countryFacts.json`, and one record builder shared between them** so they
+cannot drift (`scripts/countryFactRecord.mjs`):
+
+| | |
+|---|---|
+| `npm run build:data` | the full rebuild. Fetches Natural Earth + the World Bank; rewrites **both** JSON files. |
+| `npm run enrich:data` | **offline.** Re-derives the facts from the local `world-countries`, carries the committed population through untouched, rewrites **only** `countryFacts.json`. |
+
+Prefer `enrich:data` for anything that comes from `world-countries`. A full rebuild re-fetches Natural
+Earth `master`, and the geometry drifts — this file already records a border moving between tiers and
+flipping a `pickCountry` expectation, and every Maestro percentage tap is pinned to today's outlines.
+Taking an unreviewable 1.6 MB coordinate diff to gain four fields from a pinned local devDependency is a
+bad trade. The enrich script **fails if any population would change**, which is the proof it never
+touched the World Bank join.
+
+Quiz mode added four fields to each record: `region`, `subregion`, `unMember` and `altSpellings`
+(region/subregion having been removed in `3cb9f6e` and now restored). Both scripts assert the quiz's own
+invariants — 193 UN members with geometry, each with a subregion, a population, a capital and a language,
+and a currency for all but FSM — and `data-integrity.test.ts` mirrors them.
 
 ### Why 1:50m, and what it cost
 
@@ -251,7 +304,7 @@ and India. The stops sit one per decade, so each colour step is a 10× step of p
 | `#ffffff` | `#fee0d2` | `#fcbba1` | `#fc9272` | `#ef3b2c` | `#a50f15` | `#67000d` |
 
 `interpolate` clamps outside its domain, so under 10k is white and over 1.5B is the darkest stop without
-extra branches. `PopulationLegend` renders these same stops, so the key and the map cannot drift.
+extra branches. `ChoroplethLegend` renders these same stops, so the key and the map cannot drift.
 
 **Population reaches the paint expression through a runtime join, not the pipeline.** The build script
 trims outline properties to `{ iso3, name }`, and a data-driven expression can only read what is on the
@@ -273,7 +326,7 @@ initial mount is never drawn. It sits in the view hierarchy with entirely correc
 dump` showed the legend card, all seven swatches and every label exactly where they belonged — and
 paints nothing at all; sampling the screenshot at those coordinates returns pure map pixels.
 
-So `PopulationLegend` is **mounted from startup and never conditionally rendered**. `MapControls` parks it
+So `ChoroplethLegend` is **mounted from startup and never conditionally rendered**. `MapControls` parks it
 at `left: -2000` when hidden and animates `left` — a **layout** property, on the **JS thread**
 (`useNativeDriver: false`) — to slide it in. Every part of that sentence is load-bearing:
 
@@ -306,11 +359,145 @@ Two more traps worth keeping:
   the fill colour at all.
 - **A malformed paint expression fails inside the native renderer**, which is exactly the thing Jest
   replaces with a stub — so it passes every unit test and then blanks the layer on a device.
-  `.maestro/population-choropleth.yaml` exists solely to catch that.
+  `.maestro/choropleth-modes.yaml` exists solely to catch that.
 
 The map now has **chrome in the top-left** (`MapControls`, safe-area inset). It is the one corner free in
 both orientations — the info sheet docks bottom in portrait and right in landscape. Keep Maestro tap
 points clear of it; the portrait Greenland tap at `19%,13%` passes just under it.
+
+## Quiz mode
+
+Three routes, none of which touch `src/app/index.tsx`:
+
+| Route | File | Map? |
+|---|---|---|
+| `/quiz` | `src/app/quiz/index.tsx` | no — subregion + field picker |
+| `/quiz/play` | `src/app/quiz/play.tsx` | **yes** — the round |
+| `/quiz/results` | `src/app/quiz/results.tsx` | no — score and per-question review |
+
+The config crosses `/quiz → /quiz/play` as **router params** (`subregions`, `fields`, `seed`), which
+also makes a round deep-linkable and therefore pinnable from a test. The finished round crosses
+`/quiz/play → /quiz/results` through **`quizResultStore.ts`**, a one-slot module singleton: 193 × 5
+graded fields will not fit in a URL, and results are reached with `router.replace`, which is what tears
+down the second MapLibre surface. The store **clears on read**, so a back gesture cannot resurrect a
+stale score.
+
+### The panel is a flex sibling, never an overlay
+
+**This is the structural answer to the paint bug above, not a styling preference.** The answer panel
+grows a chip every time the player names a language, and a view inserted over a live MapLibre surface
+after the first mount lays out perfectly and never paints. So the quiz screen *splits*: map on top and
+panel below in portrait, map left and panel right in landscape, sized by `quizPanelLayout.ts`. Nothing
+is ever positioned over the map, so the bug is unreachable rather than worked around. Belt to that
+braces: one row per **configured** field for the whole round, hidden with `display: 'none'` when the
+current country cannot be asked it, a fixed pool of chip slots, and one button whose label swaps
+`Check` → `Next`.
+
+`QuizPanel`'s root needs `flex: 1`. Without it the panel shrink-wraps its header and button, the body
+`ScrollView`'s own `flex: 1` resolves against a zero-height parent, and **every answer field collapses
+to nothing** — which looks exactly like the fields failing to render.
+
+### The keyboard is an inset, not a resize
+
+The app is **edge-to-edge** (the RN 0.86 / Expo 57 default), so Android does **not** resize the window
+when the IME opens — `android:windowSoftInputMode` is irrelevant, and `KeyboardAvoidingView`'s Android
+path assumes a resize and does nothing useful. `useKeyboardHeight` listens to `keyboardDidShow` /
+`keyboardDidHide` and the screen gives that space back as `paddingBottom`; the map absorbs the loss.
+
+**Add `insets.bottom` to the reported height.** Measured on the emulator, `endCoordinates.height` stops
+at the top of the navigation bar, so reserving it alone leaves the Check button 56 px under the keyboard.
+
+### The camera
+
+`WorldMap` gained four optional props — `selectionColor`, `camera`, `maxZoom`, and an `onSelect` whose
+*absence* makes the map read-only. All default to today's behaviour, so `index.tsx` renders
+byte-identically and every existing tap point still lands where it did. **`MapScreen.test.tsx` asserts
+that the explore camera is never handed a stop**, which is what protects the three coordinate flows from
+a future edit here.
+
+No camera ref: v11's `Camera` takes a declarative `Partial<CameraStop>`, and the imperative
+`fitBounds`/`setStop` *throw* when the native view is not ready — which is exactly the first question of
+a round. `initialViewState` stays alongside it to supply frame one.
+
+**We compute centre and zoom ourselves** (`quizCamera.ts`) rather than handing MapLibre `bounds` +
+`padding`, whose antimeridian behaviour cannot be verified offline and which Fiji and Russia exercise on
+day one. Doing the Mercator arithmetic here makes it unit-testable — and a bad stop is otherwise
+invisible until the native renderer blanks the map, exactly like a malformed paint expression. Quiz
+`maxZoom` is **10**, not the explore map's 8: at 8 a 400 dp screen shows ~1° of longitude, which leaves
+Liechtenstein a few pixels; 3 dp geometry makes 10 the honest ceiling. The stop is `useMemo`'d on the
+country and the map's box only — `Camera` is `memo()`'d and rebuilds its animation from its props, so a
+freshly allocated object would re-fire the fly on every keystroke.
+
+### Which polygons to frame — `countryBounds.ts`
+
+A plain bounding box is wrong, and the reason is France: Natural Earth draws French Guiana as part of
+FRA, so the full extent spans 63° and the camera frames the Atlantic with a speck of Europe in it.
+Guiana is ~13% of France's polygon area, so **no area threshold separates it from Sicily** — only
+distance does.
+
+So: rank the polygons by area, seed a cluster with the largest, and absorb any polygon whose bbox is
+within `max(GAP_MIN_DEG, 0.35 × cluster diagonal)`, to a fixpoint. Two things that bite:
+
+- **Pick the longitude frame first, from the country's total extent**, then cluster inside it. Deciding
+  per polygon instead silently yields "Kiribati is one atoll" and "the UK is Great Britain only".
+- **`GAP_MIN_DEG` is 5.5 because of Malaysia**, whose two halves sit 5.2° apart with Borneo the larger —
+  a tighter floor seeds on Borneo and drops the peninsula, capital and all. Measured margins at 5.5:
+  Spain rejects the Canaries by 2.5°, Portugal the Azores by 2.8, Ecuador the Galápagos by 2.8, South
+  Africa the Prince Edward Islands by 5.7, France its overseas departments by 53. Raising it much
+  further starts pulling the Canaries in.
+
+Degenerate spans are widened to `MIN_SPAN_DEG`, and the widening deliberately **overshoots by a relative
+epsilon**: `mid ± MIN_SPAN_DEG / 2` around Monaco's latitude lands at 0.04999999999999716, and
+correcting by that 2.8e-15 shortfall does nothing at all, because one ulp at latitude 44 is ~7e-15. A
+zero span sends `log2(0)` to the native camera.
+
+Accepted limitation: **Kiribati and Micronesia frame to their largest island group.** Their islands span
+38° and 25° of ocean; framing either in full is an empty blue rectangle. The subregion filter is the way
+to opt out.
+
+### Grading — forgiving about spelling, unforgiving about being a different country
+
+Normalize (NFD, strip combining marks, drop punctuation, `&`→`and`, `st.`→`saint`, strip a leading
+"the"), then accept an exact match, an alias, or a small typo. Aliases come mostly from the dataset:
+`altSpellings` already carries "Ivory Coast", "Holland", "UK", "DRC" and "Republic of Korea". The build
+strips **the cca2 code** out of that list — not entries under some length — or "fr" would pass for
+France while UK, USA, UAE, DRC and RSA would all be thrown away.
+
+Typo tolerance is **Damerau**, not plain Levenshtein: adjacent transposition is the commonest typing
+mistake, and plain Levenshtein scores "Frnace" two edits from "France", outside the budget for a
+six-letter target. The budget is 0 edits under 5 characters, 1 under 9, 2 above.
+
+**The confusable guard is load-bearing.** Edit distance alone accepts **"Gambia" for Zambia** — one edit
+on a six-letter target. So a *fuzzy* match (never an exact or alias one) is rejected outright when the
+thing typed is itself the name of another country, via `NAME_INDEX`. `grading.test.ts` sweeps all
+193 × 193 combinations and asserts no country is ever accepted for another, while every country's own
+name and every dataset alias still passes.
+
+Set fields (languages, currencies) match **exact before fuzzy** — with one greedy pass a loosely spelled
+chip can consume the entry that a later chip matches exactly, marking a right answer wrong. Head nouns
+count when unambiguous *within that country*: "rand" for the South African rand, "German" for
+Switzerland's "Swiss German" — but not "peso" for Cuba, which has two, nor "Sotho" for South Africa,
+which lists Northern and Southern. Currency **codes are rejected**: "USD" is different knowledge from
+"United States dollar".
+
+The rules, all settled: name and capital are single answers (any one of South Africa's three capitals
+counts), currencies need **all** of them, languages need **any 3** (Zimbabwe lists 15, and demanding all
+15 is a wall rather than a question), and population is correct **within ±20%**, parsed from
+`68,000,000`, `68m`, `68 million` or `1.4bn`.
+
+### Who gets asked
+
+`QUIZ_COUNTRIES` is the **193 UN member states** that have an outline. mledoze flags 194: it counts
+**Vatican City**, which is a permanent observer rather than a member — and which is also the only
+UN-flagged record with no World Bank population. `NON_MEMBER_ISO3` excludes it by name, in keeping with
+the pipeline's "explicit allowlist, never a silent skip" rule.
+
+A country missing data for a selected field is still asked; it just skips that field. Only one real case
+exists: **Micronesia has no currency** upstream. A country left with nothing askable — a currency-only
+round over Micronesia — drops out entirely rather than becoming a question with no inputs.
+
+Order is a **seeded** Fisher-Yates (`mulberry32`), so a round replays identically and a Maestro flow can
+pin it.
 
 ## Which country a press selects — `pickCountry.ts`
 
@@ -393,6 +580,7 @@ on a cold launch. Derive Maestro points from a cold launch in the orientation th
 ```bash
 emulator -avd Medium_Phone
 npx expo start                     # leave running; r = reload, j = debugger, m = dev menu
+                                   # do NOT set CI=1 - it disables watch mode
 
 # native build — only when native deps or app.json change
 npx expo run:android
@@ -402,7 +590,8 @@ npx expo run:android --variant release
 npm test                           # jest, runs on the PC, no emulator needed
 npm run typecheck
 npm run test:e2e                   # maestro, needs a running emulator/device
-npm run build:data                 # one-off, needs network
+npm run build:data                 # one-off, needs network; rewrites BOTH json files
+npm run enrich:data                # offline; rewrites countryFacts.json only
 ```
 
 ### Architectures — this bites every time
@@ -450,18 +639,26 @@ Windows** (no WSL) and needs JDK 17, which is already set up. It is installed at
 `C:\Users\Boris\maestro\maestro\bin\maestro.bat` and is **not on PATH** — either add it or call it by
 full path. `npm run test:e2e` assumes `maestro` is on PATH.
 
-There are **three flows**, and each pins its own orientation with `setOrientation` — the app rotates
+There are **four flows**, and each pins its own orientation with `setOrientation` — the app rotates
 freely now, so none can assume it:
 
 | Flow | Orientation | Journey |
 |---|---|---|
 | `.maestro/tap-country.yaml` | `PORTRAIT` | Russia → Greenland → close → ocean-deselect |
 | `.maestro/landscape-info-panel.yaml` | `LANDSCAPE_LEFT` | Brazil → Mali → close → ocean-deselect → rotate to portrait with the card open |
-| `.maestro/population-choropleth.yaml` | `PORTRAIT` | toggle on → legend → Russia still selects → close → toggle off |
+| `.maestro/choropleth-modes.yaml` | `PORTRAIT` | toggle on → legend → Russia still selects → close → toggle off |
+| `.maestro/quiz.yaml` | `PORTRAIT` + rotate | Quiz → pick a subregion and fields → answer → reveal → rotate → end → score |
 
 Coordinate taps are only deterministic because `INITIAL_CENTER` and the derived zoom floor
 (`cameraFit.ts`) pin the camera on launch — **change either and you must re-derive every tap point in
-both flows.**
+the three explore flows.**
+
+`quiz.yaml` is the exception and contains **no coordinate taps at all**: the quiz camera moves on every
+question, so a screen percentage means nothing there. It is entirely testID-driven, which also makes it
+the one flow immune to a camera change. Two things it needs that the others do not: `scrollUntilVisible`
+to reach a subregion row (Oceania is the last region in a long list), and the smallest subregion —
+*Australia and New Zealand*, 2 countries — so the round is short and "Australia" is a knowable answer
+without pinning the shuffle seed.
 
 Things to know when picking tap points:
 
@@ -499,6 +696,15 @@ adb shell svc wifi enable
   distribution.
 - **Emulator GPU** — if the map ever renders as a black rectangle, that's the emulator's graphics mode,
   not a code bug. Switch the AVD to *Hardware — GLES 2.0*.
+- **Two MapLibre surfaces are alive during a quiz.** `/quiz/play` is `push`ed, so the explore map stays
+  mounted behind it. It behaves on the emulator and has **not** been measured on the S25 — check
+  `adb shell dumpsys meminfo com.boris.geographyapp` before and after, and watch for a black quiz map,
+  which is what GL-context exhaustion looks like. If it bites, the fix is one word: `push` → `replace`
+  in `QuizLaunchButton`, at the cost of the back gesture.
+- **`.expo/types/router.d.ts` goes stale, and looks like a compile error.** With `typedRoutes: true`,
+  adding a route fails `npm run typecheck` until Metro regenerates that file — and it can regenerate
+  *wrong*, listing every module under `src/` as a route. Deleting `.expo/types` and restarting
+  `npx expo start --clear` fixes it. This is not a bug in your code.
 
 Two emulator failure modes that look like app bugs but aren't:
 
@@ -512,12 +718,10 @@ Two emulator failure modes that look like app bugs but aren't:
   the tooling later reaps, it has segfaulted (exit 139) seconds after a clean boot, taking the device
   offline mid-session.
 
-## Ideas not yet built
-
-Country search, zoom-to-selected-country, an About screen with the required attributions, and haptics on
-selection.
-
 ## Attribution
 
 Natural Earth is public domain. `world-countries`/mledoze is ODbL and World Bank data is CC BY 4.0 —
 both require credit. All three belong in an About screen.
+
+## Build APK commands
+cd android && ORG_GRADLE_PROJECT_reactNativeArchitectures=arm64-v8a ./gradlew.bat assembleRelease

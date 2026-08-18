@@ -139,6 +139,10 @@ describe('densityOf', () => {
     flag: null,
     currencies: [],
     languages: [],
+    region: 'Test Region',
+    subregion: 'Test Subregion',
+    unMember: true,
+    altSpellings: [],
     ...over,
   });
 
@@ -213,6 +217,10 @@ describe('withChoroplethValues', () => {
         flag: null,
         currencies: [],
         languages: [],
+        region: 'Test Region',
+        subregion: 'Test Subregion',
+        unMember: true,
+        altSpellings: [],
       },
     });
 

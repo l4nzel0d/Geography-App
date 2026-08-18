@@ -9,10 +9,13 @@
  * must be awaited or `screen` is never populated.
  */
 import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react-native';
+import { Dimensions } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
 import MapScreen from '@/app/index';
+import { getWorldFitZoom } from '@/map/cameraFit';
 import { DENSITY_RAMP, POPULATION_RAMP } from '@/map/choropleth';
+import { INITIAL_CENTER, INITIAL_ZOOM } from '@/map/WorldMap';
 
 /**
  * `_layout.tsx` supplies the SafeAreaProvider in the real app; these tests render
@@ -255,5 +258,45 @@ describe('MapScreen', () => {
     await fireEvent(screen.getByTestId('countries-source'), 'press', event);
 
     expect(event.stopPropagation).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Explore mode's camera must never move.
+ *
+ * All three existing Maestro flows tap the map by screen percentage, and those
+ * percentages are only meaningful because the camera sits at INITIAL_CENTER from launch
+ * to teardown. Quiz mode added an optional `camera` prop to the same component, so this
+ * is the guard that stops it being handed one here by accident - a change nothing else
+ * in the unit suite would notice, and which would silently break every coordinate tap.
+ */
+describe('the explore camera', () => {
+  it('is never given a stop', async () => {
+    await render();
+    const camera = screen.getByTestId('map-camera');
+
+    expect(camera.props.center).toBeUndefined();
+    expect(camera.props.zoom).toBeUndefined();
+    expect(camera.props.bounds).toBeUndefined();
+    expect(camera.props.duration).toBeUndefined();
+  });
+
+  it('still starts at the pinned initial view', async () => {
+    await render();
+    const camera = screen.getByTestId('map-camera');
+
+    // The zoom is derived from the window rather than pinned - `getWorldFitZoom` returns
+    // exactly INITIAL_ZOOM in portrait and more in landscape, and Jest's default window
+    // is wider than it is tall, so this asserts the rule rather than one of its values.
+    const fitZoom = getWorldFitZoom(Dimensions.get('window').width);
+    expect(camera.props.initialViewState).toEqual({ center: INITIAL_CENTER, zoom: fitZoom });
+    expect(camera.props.minZoom).toBe(fitZoom);
+    expect(camera.props.maxZoom).toBe(8);
+    expect(getWorldFitZoom(390)).toBe(INITIAL_ZOOM);
+  });
+
+  it('keeps the map tappable, unlike the quiz map', async () => {
+    await render();
+    expect(screen.getByTestId('world-map').props.onPress).toEqual(expect.any(Function));
   });
 });
