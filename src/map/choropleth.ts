@@ -143,6 +143,33 @@ export const CHOROPLETH_RAMPS: Record<ChoroplethMode, ChoroplethRamp> = {
 };
 
 /**
+ * The three ways of colouring the land, in the order they escalate: no data, one number,
+ * then that number against area.
+ *
+ * Lives here rather than in the component for the same reason the ramps do - the picker
+ * and the map are driven by one table, so a mode cannot exist in the menu but not on the
+ * map. Mirrors `LABEL_FIELDS` in `mapLabels.ts`, which is the other half of the same
+ * chrome.
+ *
+ * Short labels because this sits over the map on a phone; the description is what a
+ * screen reader reads, and what keeps "People" (a fill mode) distinguishable from
+ * "Population" (a label field) when both menus exist.
+ */
+export const FILL_MODES: readonly {
+  mode: 'flat' | ChoroplethMode;
+  label: string;
+  description: string;
+}[] = [
+  { mode: 'flat', label: 'Flat', description: 'Plain basemap, no colouring' },
+  { mode: 'population', label: 'People', description: 'Colour countries by population' },
+  {
+    mode: 'density',
+    label: 'Density',
+    description: 'Colour countries by people per square kilometre',
+  },
+];
+
+/**
  * The band a value falls into, for rendering the legend.
  *
  * This is a *bucket lookup, not a mirror of the map's colouring*: MapLibre blends

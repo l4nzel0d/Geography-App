@@ -51,9 +51,33 @@ const countryPressEvent = (iso3: string) => ({
 const pressCountry = (iso3: string) =>
   fireEvent(screen.getByTestId('source-countries'), 'press', countryPressEvent(iso3));
 
-/** The fill mode control is a three-way segmented group, one testID per segment. */
-const selectMode = (mode: 'flat' | 'population' | 'density') =>
-  fireEvent.press(screen.getByTestId(`mode-${mode}`));
+/**
+ * The fill mode control is a pill that opens a panel, so choosing a mode is two presses.
+ *
+ * It used to be a three-segment group, and had to stop being one: with the label pill
+ * added, the two rows of chrome were wider than the screen and overlapped. See
+ * `MapControls.tsx`.
+ *
+ * The panel is always mounted and merely parked off-screen, so its rows are reachable
+ * without opening it - but going through the pill is what a user does, and it is what
+ * keeps this helper honest about the panel actually opening.
+ */
+const selectMode = async (mode: 'flat' | 'population' | 'density') => {
+  // Awaited, both of them: RNTL v14 made fireEvent async, and the panel's rows are
+  // hidden from queries until the press that opens it has actually re-rendered.
+  await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+  await fireEvent.press(screen.getByTestId(`mode-${mode}`));
+};
+
+/** Same shape for the label field picker. */
+const selectLabelField = async (
+  field: 'none' | 'name' | 'capital' | 'languages' | 'currencies' | 'population',
+) => {
+  await fireEvent.press(screen.getByTestId('toggle-label-field'));
+  await fireEvent.press(screen.getByTestId(`label-field-${field}`));
+};
+
+const labelLayer = () => screen.getByTestId('layer-country-label');
 
 const fillColor = () => screen.getByTestId('layer-country-fill').props.paint['fill-color'];
 
@@ -382,5 +406,127 @@ describe('the explore camera', () => {
   it('keeps the map tappable, unlike the quiz map', async () => {
     await render();
     expect(screen.getByTestId('world-map').props.onPress).toEqual(expect.any(Function));
+  });
+});
+
+/**
+ * The map labels: the symbol layer's wiring, and the picker's mounted-but-hidden panel.
+ *
+ * What is NOT here is whether text actually appears on the map. That is drawn by the
+ * native renderer, which Jest replaces with a stub, and it is not visible to Maestro
+ * either because the glyphs live inside the MapLibre surface rather than the view
+ * hierarchy. Confirming labels render is a manual screenshot step; what these tests can
+ * do is prove the expressions are well-formed and the right property is being read.
+ */
+describe('map labels', () => {
+  const panel = () =>
+    // Required, like the legend: the panel marks itself accessibility-hidden while it is
+    // parked off-screen, and RNTL excludes those from queries by default.
+    screen.getByTestId('label-field-panel', { includeHiddenElements: true });
+
+  const panelShown = () => panel().props.accessibilityElementsHidden === false;
+
+  it('starts with no labels, and a filter that matches nothing', async () => {
+    await render();
+
+    // The layer is mounted in every mode - the empty-string idiom, same as the selection
+    // layers. Unmounting it would mean inserting a layer at runtime.
+    expect(labelLayer().props.filter).toEqual(['==', ['get', 'iso3'], '']);
+    expect(panelShown()).toBe(false);
+  });
+
+  it('opens and closes the picker from its pill', async () => {
+    await render();
+
+    await fireEvent.press(screen.getByTestId('toggle-label-field'));
+    expect(panelShown()).toBe(true);
+
+    await fireEvent.press(screen.getByTestId('toggle-label-field'));
+    expect(panelShown()).toBe(false);
+  });
+
+  it('reads the matching property once a field is chosen', async () => {
+    await render();
+    await selectLabelField('capital');
+
+    expect(labelLayer().props.layout['text-field']).toEqual(['get', 'tCapital']);
+    expect(labelLayer().props.filter).toEqual([
+      'all',
+      ['has', 'tCapital'],
+      ['<=', ['get', 'zCapital'], ['zoom']],
+    ]);
+  });
+
+  it.each(['name', 'capital', 'languages', 'currencies', 'population'] as const)(
+    'wires up the %s field',
+    async (field) => {
+      await render();
+      await selectLabelField(field);
+
+      const textField = labelLayer().props.layout['text-field'] as [string, string];
+      expect(textField[0]).toBe('get');
+      // The layout prop has to survive the mock, which used to strip it.
+      expect(typeof textField[1]).toBe('string');
+    },
+  );
+
+  it('closes the picker after a choice', async () => {
+    await render();
+    await selectLabelField('name');
+
+    expect(panelShown()).toBe(false);
+  });
+
+  it('goes back to matching nothing when labels are turned off', async () => {
+    await render();
+    await selectLabelField('name');
+    await selectLabelField('none');
+
+    expect(labelLayer().props.filter).toEqual(['==', ['get', 'iso3'], '']);
+    // Still well-formed rather than undefined: a malformed layout property is invisible
+    // here and fatal in the native renderer.
+    expect(labelLayer().props.layout['text-field']).toBe('');
+  });
+
+  it('lets labels sit on top of a choropleth', async () => {
+    // The two settings are independent on purpose - density plus capitals is useful.
+    await render();
+    await selectMode('density');
+    await selectLabelField('capital');
+
+    expect(fillColor()).toEqual(DENSITY_RAMP.fillColor);
+    expect(labelLayer().props.layout['text-field']).toEqual(['get', 'tCapital']);
+  });
+
+  it('keeps only one option panel open at a time', async () => {
+    await render();
+
+    await fireEvent.press(screen.getByTestId('toggle-label-field'));
+    expect(panelShown()).toBe(true);
+
+    await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
+    expect(panelShown()).toBe(false);
+    expect(
+      screen.getByTestId('fill-mode-panel', { includeHiddenElements: true }).props
+        .accessibilityElementsHidden,
+    ).toBe(false);
+  });
+
+  it('declutters natively rather than by hand', async () => {
+    // These three are the whole decluttering story: MapLibre drops overlapping labels,
+    // widest country first, and the filter above holds back labels bigger than their
+    // country. Losing any of them silently turns the map into a pile-up.
+    await render();
+    const layout = labelLayer().props.layout;
+
+    expect(layout['text-allow-overlap']).toBe(false);
+    expect(layout['symbol-sort-key']).toEqual(['get', 'rank']);
+    expect(layout['text-font']).toEqual(['Map Label']);
+  });
+
+  it('draws labels from their own point source, not the outlines', async () => {
+    // Labelling the polygons directly gives France six labels, one over South America.
+    await render();
+    expect(screen.getByTestId('source-country-labels')).toBeTruthy();
   });
 });

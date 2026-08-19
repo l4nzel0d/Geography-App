@@ -12,6 +12,11 @@ no font/glyph fetch. Everything ships inside the APK.
 style, a live API call — without flagging it explicitly. The offline acceptance test (release build,
 wifi + data disabled) is the gate that this must pass.
 
+The rule is **no remote URL**, not "no symbol layers". Map labels draw real text through a TTF bundled
+in the APK and referenced as `asset://`; see *Map labels* below. An older version of this file, and of
+`offlineStyle.ts`, said any symbol layer broke the requirement. That was wrong, and the label layer
+depends on it being wrong.
+
 ## Status
 
 **Working and verified on the emulator.** Tap a country → it highlights and the info sheet shows
@@ -93,6 +98,31 @@ Added 2026-08-18, verified on the emulator (`Medium_Phone`, x86_64, dev build ov
   Search adds no network call — names, aliases and geometry are all already bundled — but the gate is
   the gate, and this is now two features deep into owing it.
 
+Added 2026-08-20, verified on the emulator (`Medium_Phone`, x86_64, dev build over Metro **and** a
+release build):
+
+- **map labels** — a pill in the top-left row writes one fact on top of every country: name, capital,
+  languages, currencies or population. Independent of the fill mode. See *Map labels*.
+- **MapLibre draws real text, and the app is still fully offline.** A bundled Noto Sans TTF reached
+  through the style's `font-faces` and an `asset://` URL, embedded by `expo-font`'s config plugin.
+  **This disproves the old claim in this file and in `offlineStyle.ts` that any symbol layer breaks the
+  offline requirement** — the rule is no *remote* URL. Both comments have been corrected.
+- **the fill-mode toggle collapsed into a pill.** The three-segment control and the top-right row no
+  longer fitted side by side once a label pill existed — they overlapped on screen at 411 dp. Both
+  appearance settings are now pills opening an always-mounted panel, sharing the top-left row.
+- 520 Jest tests across 20 suites pass, typecheck clean, and **all six Maestro flows pass** — the five
+  existing ones unchanged in their tap points, because both panels are closed by default.
+- **the offline acceptance test has finally been re-run, and passes.** Release build, wifi and data
+  disabled, `ping` unreachable: the map renders, all five label fields draw, taps work, the info sheet
+  populates, and logcat shows nothing from the app but the platform's own boilerplate
+  `NetworkSecurityConfig` line — no HTTP, DNS, glyph or font request, and no errors. This was three
+  features overdue and is the first change that touched how the style resolves resources.
+- verified by hand: labels legible over the flat basemap and over both ends of the population ramp;
+  Türkiye, Brasília, Côte d'Ivoire and São Tomé all render their diacritics; microstates correctly
+  unlabelled at world zoom.
+- **still not re-verified on the S25.** The font adds 569 KB to the APK and the symbol layer adds a
+  native text buffer, so cold-start time and `dumpsys meminfo` are worth a look there.
+
 ## Stack
 
 | Concern | Choice | Notes |
@@ -167,11 +197,15 @@ src/
     WorldMap.tsx            # Map + GeoJSONSource + fill/selected/line Layers
     cameraFit.ts            # pure: zoom floors - world-fit width, and the both-axes fit
     choropleth.ts           # pure: population ramp + the fill-color paint expression
-    offlineStyle.ts         # inline style: background layer ONLY, no sources, no glyphs
+    offlineStyle.ts         # inline style: background layer, a bundled font-face, no sources
+    mapLabels.ts            # pure: label field catalogue + the symbol layer's expressions
+    labelFit.ts             # pure: text + country width -> the zoom a label appears at
   data/
     countries.geo.json      # 240 outlines, properties trimmed to { iso3, name }   (1.6 MB)
     countryFacts.json       # 250 fact records keyed by ISO-3                       (65 KB)
     countryFacts.ts         # synchronous lookup
+    labelPoints.json        # 240 label anchors + landmass widths                    (9 KB)
+    labelGeoJson.ts         # one label point per country, every field's text folded on
     worldGeoJson.ts         # outlines + population folded on, for the choropleth
     types.ts
   components/
@@ -179,8 +213,10 @@ src/
     infoSheetLayout.ts      # pure: sheet dock per orientation, and the map's unobstructed band
     palette.ts              # the shared chrome colours (was components/quiz/palette.ts)
     formatters.ts           # pure, unit-tested
-    MapControls.tsx         # the chrome: toggle + legend top-left, search + quiz pills top-right
-    MapModeToggle.tsx       # flat <-> population pill
+    MapControls.tsx         # the chrome: fill + label pills and their panels top-left,
+                            #   legend under them, search + quiz pills top-right
+    MapOptionPill.tsx       # a pill that opens one of the option panels
+    MapOptionPanel.tsx      # the always-mounted radio list behind a pill
     ChoroplethLegend.tsx    # stepped key, driven by the active ramp
     quiz/                   # QuizPanel, AnswerField, ChipInput, SubregionPicker,
                             #   FieldPicker, QuizLaunchButton, useKeyboardHeight
@@ -203,6 +239,7 @@ src/
   search/
     countrySearch.ts        # pure: the 237-country index and the ranked matcher
     pendingCountry.ts       # subscription handover from /search back to the map
+scripts/build-label-points.mjs      # offline; polylabel anchors from the committed geometry
 scripts/build-country-data.mjs      # full online rebuild
 scripts/enrich-country-facts.mjs    # offline facts-only re-derivation
 scripts/countryFactRecord.mjs       # the record shape, shared by both
@@ -387,6 +424,129 @@ Two more traps worth keeping:
 The map now has **chrome in the top-left** (`MapControls`, safe-area inset). It is the one corner free in
 both orientations — the info sheet docks bottom in portrait and right in landscape. Keep Maestro tap
 points clear of it; the portrait Greenland tap at `19%,13%` passes just under it.
+
+## Map labels
+
+A pill in the top-left row writes one fact on top of every country: **name, capital, languages,
+currencies or population**. Independent of the fill mode — the density choropleth with capital labels
+over it is a legal and useful combination — so it has its own state, its own pill and its own panel.
+
+### Real text, and still no network
+
+**This is the feature that corrected the "no symbol layers" rule at the top of this file.** MapLibre
+needs glyph data to draw text, but that data does not have to come over the wire:
+
+- **`font-faces`** (root of the style, spec 24.x) maps a font name to a real TTF/OTF file. The shipped
+  `libmaplibre.so` implements it — `mbgl::FontFace`, the error string `"Invalid font-face definition
+  for: "`, and FreeType plus HarfBuzz are all in the binary. Characters a face covers never touch the
+  `glyphs` URL, and there is no `glyphs` URL here at all.
+- **`asset://`** resolves against the APK's own `assets/` directory through the Android asset manager.
+  `mbgl::AssetFileSource` is in the same binary. No socket, no DNS, no permission.
+- **`expo-font`'s config plugin** puts the file there. Its Android path copies every plain-string entry
+  of the plugin's `fonts` array into `app/src/main/assets/fonts`, so
+  `asset://fonts/NotoSans-Regular.ttf` resolves. It has to be the plugin and not a hand-placed file,
+  because **`android/` is gitignored and regenerated by `expo prebuild`** — anything dropped in by hand
+  is destroyed on the next one.
+
+Noto Sans Regular, 569 KB, SIL Open Font License — **which belongs in the About screen** with Natural
+Earth, mledoze and the World Bank. It covers the Latin Extended-A these strings need: Türkiye, Côte
+d'Ivoire, São Tomé, Curaçao and Asunción all render.
+
+Adding the font means `app.json` changed, so this needs `expo prebuild` and a **native rebuild** — a JS
+reload is not enough.
+
+### Labels come from their own point source
+
+`GeoJSONSource id="country-labels"`, one Point per country, **not** a symbol layer on the outlines.
+
+MapLibre labels a polygon at its pole of inaccessibility, which is a good anchor, but it computes one
+**per polygon**. France is a MultiPolygon of the mainland plus five overseas departments, so labelling
+the outlines directly draws "France" six times, once over South America; Kiribati gets one per atoll.
+
+`scripts/build-label-points.mjs` (offline, `npm run labels:data`) picks each country's largest polygon
+by latitude-weighted area and runs **`polylabel`** on it, writing `{ at: [lng, lat], w: <degrees> }` to
+the committed `labelPoints.json`. `polylabel` is a **devDependency** — it never ships, and there is no
+startup cost.
+
+- **The anchor must be inside the country, and a bbox centre is not.** Norway, Chile, Croatia, Vietnam
+  and Indonesia all have centroids in the sea. `data-integrity.test.ts` asserts all 240 anchors pass
+  `booleanPointInPolygon` against their own geometry; if that fails after a geometry change, re-run the
+  script rather than editing the expectation.
+- **`polylabel`'s tolerance is relative, not absolute.** At a flat 0.01 degrees the Vatican — 0.011
+  degrees wide in total — came back with an anchor *outside its own outline*, because the search grid
+  was coarser than the country. It is now a fraction of the polygon's own bbox.
+- **Antarctica is an explicit allowlist entry.** The script fails any polygon spanning more than 180
+  degrees, on the assumption that it wrapped the antimeridian. Antarctica genuinely spans 360, being
+  drawn as one ring around the pole. `POLAR_SPAN_ALLOWLIST` names it, in keeping with the pipeline's
+  "explicit allowlist, never a silent skip" rule.
+
+`data/labelGeoJson.ts` folds every field's text onto those points at module load, following
+`worldGeoJson.ts`'s idioms: a module-scope constant so the `data` identity is stable, and a field the
+country has no value for is **absent, not null**, so the filter can split it off with `['has', …]`.
+Micronesia has no currency and Vatican no population; both simply go unlabelled in that field.
+
+### Decluttering is collision plus fit
+
+At the launch camera a 411 dp screen shows ~166° of longitude, so "Luxembourg" is ~60 dp of text over
+~1 dp of country. Two mechanisms, doing different halves of the job:
+
+- **Collision is MapLibre's**, and free: `text-allow-overlap: false` drops overlapping labels, and
+  `symbol-sort-key` (the negated landmass width) decides who wins — widest country first. This is the
+  single biggest reason labels are a native symbol layer rather than RN views over the map.
+- **Fit is ours.** Collision has no idea a country is too small for its own name; it would draw
+  "Luxembourg" at world zoom simply because nothing else is there. `labelFit.ts` precomputes, per
+  country **and per field**, the zoom at which the country is wide enough, and the layer filters
+  `['<=', ['get', zoomProp], ['zoom']]`.
+
+**`['zoom']` is legal inside a `filter`** — the spec says "Zoom expressions in filters are only
+evaluated at integer zoom levels" — which is what lets the fit test be declarative. The alternative was
+subscribing to camera changes and re-rendering on every pan.
+
+Mercator x is linear in longitude, so a country's on-screen width is exactly `w / 360 × 512 × 2^zoom`
+dp — no projection correction needed on the one axis a text width cares about. `FIT_TOLERANCE` is 0.55,
+meaning a label may be ~1.8× its country's width: requiring strict containment would permanently
+unlabel Chile, Norway, Vietnam and Italy, none of which is ever as wide as its own name. **It is the
+one number to turn if labels overhang more or less than you want.**
+
+Countries that lose show nothing — no dot, no abbreviation. Zoom in and they appear.
+
+Two consequences worth expecting: **population labels are far denser than name labels**, because "47m"
+is a quarter the width of "Uzbekistan" and clears the fit test at a much lower zoom. And the label
+source carries **no `onPress`**, so presses fall through to the outlines and `pickCountry` is
+unaffected.
+
+### The chrome had to be rebuilt around it
+
+The fill mode was a three-segment control until this landed. On the 411 dp emulator there are 379 dp
+between the safe areas, and the segmented group (~206 dp) plus a top-right row carrying the label pill
+(~187 dp idle, ~216 dp with "Currencies" selected) came to 393–422 dp. **They overlapped on screen.**
+
+So both appearance settings are now pills that open an always-mounted panel, sitting together in the
+top-left row, and search and quiz keep the top-right row they had before. `MapOptionPill` and
+`MapOptionPanel` are shared by both.
+
+- Choosing a fill mode is now **two taps**, which is why `choropleth-modes.yaml` opens
+  `toggle-fill-mode` before every `mode-*` tap, and why `MapScreen.test.tsx`'s `selectMode` helper does
+  the same — and must `await` both, because RNTL v14's `fireEvent` is async and the panel's rows are
+  hidden from queries until the opening press has re-rendered.
+- **Only one panel is open at a time.** Two opaque menus on a phone-sized map leave almost no map.
+- **Both panels are closed by default, which is what kept all five existing Maestro flows valid** —
+  they cover the map only while open, so no percentage tap moved.
+- The panels share the left column with the legend and are drawn over it while open, deliberately:
+  parking the legend below a panel's full height would push it into the Greenland tap permanently.
+
+### What the tests can and cannot see
+
+- **The Jest mock had to start forwarding `layout`.** It stripped it, exactly as it once stripped
+  `paint`, so `text-field`, `text-size` and `symbol-sort-key` were invisible to every test.
+- **The mock's `GeoJSONSource` testID is now `source-<id>`.** It was hardcoded to `countries-source`,
+  which was fine with one source and threw "found multiple elements" with two.
+- **Maestro cannot see the labels themselves.** They are drawn inside the MapLibre GPU surface, not the
+  view hierarchy, so no `assertVisible: 'Paris'` will ever match. `.maestro/map-labels.yaml` switches
+  each field on and re-asserts that the map and a country selection still work — the same proof-of-parse
+  trick `choropleth-modes.yaml` uses, and the only automated defence against a malformed layout
+  expression or a `text-font` naming a face that `font-faces` does not define. **Confirming that text
+  actually appears is a manual screenshot step.**
 
 ## Quiz mode
 

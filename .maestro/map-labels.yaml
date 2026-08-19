@@ -1,0 +1,129 @@
+# E2E: the map label picker, and the symbol layer behind it.
+#
+# ⚠️ This flow CANNOT see the labels themselves. They are drawn by MapLibre inside its
+# own GPU surface, so they are not views in the hierarchy and no `assertVisible: 'Paris'`
+# will ever match. Confirming that text actually appears on the map is a manual
+# screenshot step; there is no automated substitute.
+#
+# What this flow does prove is the thing unit tests cannot: `text-field`, `text-font`,
+# `symbol-sort-key` and the zoom filter are all evaluated inside the native renderer,
+# which Jest replaces with a stub. A malformed layout expression - or a `text-font` that
+# names a face the style's `font-faces` does not define - passes every unit test and then
+# drops the layer on a device. Switching each field on and still finding a working map
+# and a working selection is the proof that it parsed. Same reasoning as
+# choropleth-modes.yaml.
+#
+# The camera does not move, so the tap points are the ones tap-country.yaml pins.
+#
+#   maestro --device <serial> test .maestro/map-labels.yaml
+appId: com.boris.geographyapp
+---
+- launchApp:
+    clearState: true
+
+# Every point below is a portrait percentage.
+- setOrientation: PORTRAIT
+
+- assertVisible:
+    id: 'world-map'
+
+# Labels are off by default, so the panel is parked off-screen.
+- assertVisible:
+    id: 'toggle-label-field'
+- assertNotVisible:
+    id: 'label-field-panel'
+
+# --- the picker opens and closes from its own pill ---
+- tapOn:
+    id: 'toggle-label-field'
+- assertVisible:
+    id: 'label-field-panel'
+- assertVisible: 'Label each country with'
+
+- tapOn:
+    id: 'toggle-label-field'
+- assertNotVisible:
+    id: 'label-field-panel'
+
+# --- every field in turn ---
+# Each is a separate expression over a separate feature property, so one can parse while
+# another does not - exactly why choropleth-modes.yaml exercises both its ramps.
+- tapOn:
+    id: 'toggle-label-field'
+- tapOn:
+    id: 'label-field-name'
+# Choosing closes the panel, and the pill takes the field's name.
+- assertNotVisible:
+    id: 'label-field-panel'
+- assertVisible: 'Name'
+- assertVisible:
+    id: 'world-map'
+
+- tapOn:
+    id: 'toggle-label-field'
+- tapOn:
+    id: 'label-field-capital'
+- assertVisible: 'Capital'
+- assertVisible:
+    id: 'world-map'
+
+- tapOn:
+    id: 'toggle-label-field'
+- tapOn:
+    id: 'label-field-languages'
+- assertVisible: 'Languages'
+- assertVisible:
+    id: 'world-map'
+
+- tapOn:
+    id: 'toggle-label-field'
+- tapOn:
+    id: 'label-field-currencies'
+- assertVisible: 'Currencies'
+- assertVisible:
+    id: 'world-map'
+
+- tapOn:
+    id: 'toggle-label-field'
+- tapOn:
+    id: 'label-field-population'
+- assertVisible: 'Population'
+- assertVisible:
+    id: 'world-map'
+
+# --- labels compose with a choropleth ---
+# The two settings are independent on purpose, and only one panel is open at a time.
+- tapOn:
+    id: 'toggle-fill-mode'
+- assertNotVisible:
+    id: 'label-field-panel'
+- tapOn:
+    id: 'mode-density'
+- assertVisible:
+    id: 'choropleth-legend'
+- assertVisible:
+    id: 'world-map'
+
+# --- selection still works with a label layer mounted ---
+# The label source carries no onPress, so presses must still reach the outlines beneath
+# it and resolve through pickCountry. Russia, deep in Siberia.
+- tapOn:
+    point: '81%,20%'
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Russia'
+- assertVisible: 'Moscow'
+
+- tapOn:
+    id: 'close-info-sheet'
+- assertNotVisible:
+    id: 'country-info-sheet'
+
+# --- back to no labels ---
+- tapOn:
+    id: 'toggle-label-field'
+- tapOn:
+    id: 'label-field-none'
+- assertVisible: 'Labels'
+- assertVisible:
+    id: 'world-map'

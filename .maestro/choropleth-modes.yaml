@@ -11,6 +11,11 @@
 #
 # The camera does not move, so the tap points are the same ones tap-country.yaml pins.
 #
+# The fill mode is a PILL that opens a panel, not a segmented control, so every mode
+# change here is two taps: open, then choose. It collapsed when the label picker arrived
+# and the two rows of chrome stopped fitting side by side - see MapControls.tsx. The
+# panel closes itself on choice, so each pair is self-contained.
+#
 #   maestro --device <serial> test .maestro/choropleth-modes.yaml
 appId: com.boris.geographyapp
 ---
@@ -31,7 +36,14 @@ appId: com.boris.geographyapp
 
 # --- population ---
 - tapOn:
+    id: 'toggle-fill-mode'
+- assertVisible:
+    id: 'fill-mode-panel'
+- tapOn:
     id: 'mode-population'
+# Choosing closes the panel, so the map is unobstructed for the assertions below.
+- assertNotVisible:
+    id: 'fill-mode-panel'
 
 - assertVisible:
     id: 'choropleth-legend'
@@ -46,6 +58,8 @@ appId: com.boris.geographyapp
 # --- density ---
 # Straight from one ramp to the other, without passing through flat: the legend swaps
 # its contents in place rather than remounting, which is the thing most likely to break.
+- tapOn:
+    id: 'toggle-fill-mode'
 - tapOn:
     id: 'mode-density'
 
@@ -80,6 +94,8 @@ appId: com.boris.geographyapp
     id: 'country-info-sheet'
 
 # Back to the flat basemap.
+- tapOn:
+    id: 'toggle-fill-mode'
 - tapOn:
     id: 'mode-flat'
 - assertNotVisible:
