@@ -7,8 +7,11 @@
  */
 import worldCountries from 'world-countries';
 
+import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
+
 import geo from '@/data/countries.geo.json';
 import { allCountryFacts, getCountryFacts } from '@/data/countryFacts';
+import labelPoints from '@/data/labelPoints.json';
 import type { CountryFeatureProperties } from '@/data/types';
 
 /** Territories we knowingly ship without facts - mirrors the build script. */
@@ -291,5 +294,65 @@ describe('quiz data', () => {
     expect(allCountryFacts.CIV.altSpellings).toContain('Ivory Coast');
     expect(allCountryFacts.NLD.altSpellings).toContain('Holland');
     expect(allCountryFacts.KOR.altSpellings).toContain('Republic of Korea');
+  });
+});
+
+/**
+ * Mirrors what `scripts/build-label-points.mjs` enforces, so the committed anchors cannot
+ * rot against the geometry they were derived from.
+ *
+ * The containment check is the valuable one and the reason `polylabel` is used at all: a
+ * bbox centre lands in the sea for Norway, Chile, Croatia, Vietnam and Indonesia, and an
+ * anchor outside its own country puts the label over a neighbour with no visible error.
+ */
+describe('map label anchors', () => {
+  const anchors = labelPoints as unknown as Record<string, { at: [number, number]; w: number }>;
+
+  it('has an anchor for every country with an outline', () => {
+    for (const iso3 of isoCodes) {
+      expect(anchors).toHaveProperty(iso3);
+    }
+  });
+
+  it('has no anchor for a country that has no outline', () => {
+    expect(Object.keys(anchors).sort()).toEqual([...isoCodes].sort());
+  });
+
+  it('places every anchor inside its own country', () => {
+    const outside: string[] = [];
+
+    for (const feature of features) {
+      const anchor = anchors[feature.properties.iso3];
+      if (
+        !booleanPointInPolygon(
+          anchor.at,
+          feature.geometry as unknown as GeoJSON.Polygon | GeoJSON.MultiPolygon,
+        )
+      ) {
+        outside.push(feature.properties.iso3);
+      }
+    }
+
+    // If this fails after a geometry change, re-run `npm run labels:data` rather than
+    // editing the expectation - the anchors are derived, not authored.
+    expect(outside).toEqual([]);
+  });
+
+  it('records a positive longitude span for every country', () => {
+    // A zero span reaches log2(0) in labelFit.ts.
+    for (const [iso3, anchor] of Object.entries(anchors)) {
+      expect(Number.isFinite(anchor.w)).toBe(true);
+      expect(anchor.w).toBeGreaterThan(0);
+      expect(`${iso3} ${anchor.w <= 360}`).toBe(`${iso3} true`);
+    }
+  });
+
+  it('keeps coordinates in range', () => {
+    for (const { at } of Object.values(anchors)) {
+      expect(at[0]).toBeGreaterThanOrEqual(-180);
+      expect(at[0]).toBeLessThanOrEqual(180);
+      expect(at[1]).toBeGreaterThanOrEqual(-90);
+      expect(at[1]).toBeLessThanOrEqual(90);
+    }
   });
 });

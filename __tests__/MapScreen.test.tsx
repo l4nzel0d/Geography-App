@@ -49,7 +49,7 @@ const countryPressEvent = (iso3: string) => ({
 });
 
 const pressCountry = (iso3: string) =>
-  fireEvent(screen.getByTestId('countries-source'), 'press', countryPressEvent(iso3));
+  fireEvent(screen.getByTestId('source-countries'), 'press', countryPressEvent(iso3));
 
 /** The fill mode control is a three-way segmented group, one testID per segment. */
 const selectMode = (mode: 'flat' | 'population' | 'density') =>
@@ -125,7 +125,7 @@ describe('MapScreen', () => {
 
   it('ignores a press that carries no feature', async () => {
     await render();
-    await fireEvent(screen.getByTestId('countries-source'), 'press', {
+    await fireEvent(screen.getByTestId('source-countries'), 'press', {
       stopPropagation: jest.fn(),
       nativeEvent: { features: [] },
     });
@@ -271,7 +271,7 @@ describe('MapScreen', () => {
     // ever appears. Only reproducible on a device, hence this explicit assertion.
     await render();
     const event = countryPressEvent('BRA');
-    await fireEvent(screen.getByTestId('countries-source'), 'press', event);
+    await fireEvent(screen.getByTestId('source-countries'), 'press', event);
 
     expect(event.stopPropagation).toHaveBeenCalled();
   });

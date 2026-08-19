@@ -77,6 +77,22 @@ Added 2026-08-18, verified on the emulator (`Medium_Phone`, x86_64, dev build ov
   1:50m switch. Nothing in quiz mode adds a network call — the new fields come from the same bundled
   `countryFacts.json` — but the gate is the gate.
 
+Added 2026-08-18, verified on the emulator (`Medium_Phone`, x86_64, dev build over Metro):
+
+- **country search** — a pill in the top-right row opens `/search`; type a name, pick a result, and the
+  map highlights the country exactly as a tap would and flies to frame it clear of the info sheet.
+  See *Country search*.
+- **explore `maxZoom` is now 10**, up from 8, so a searched microstate is actually visible. At 8 Monaco
+  framed correctly and rendered as a 22 dp dot.
+- **quiz "Change settings" pops back** to the setup screen instead of building a fresh one, so the
+  round's subregions and fields are still selected. It now agrees with the back gesture.
+- 464 Jest tests across 18 suites pass, typecheck clean, and **all five Maestro flows pass**.
+- verified by hand on the emulator in both orientations: Netherlands, Liechtenstein, Russia (the
+  pole-clamped case), Fiji (antimeridian), the "Holland" alias, and a rotation mid-selection.
+- **still not re-verified on the S25, and the offline acceptance test has still not been re-run.**
+  Search adds no network call — names, aliases and geometry are all already bundled — but the gate is
+  the gate, and this is now two features deep into owing it.
+
 ## Stack
 
 | Concern | Choice | Notes |
@@ -145,10 +161,11 @@ and the slide distance is **measured via `onLayout`**, not a constant: `maxHeigh
 src/
   app/
     _layout.tsx             # GestureHandlerRootView + Stack
-    index.tsx               # MapScreen: owns selectedIso3 + fillMode state
+    index.tsx               # MapScreen: owns selectedIso3, fillMode, and the search camera stop
+    search.tsx              # /search: the country search route (no map on it)
   map/
     WorldMap.tsx            # Map + GeoJSONSource + fill/selected/line Layers
-    cameraFit.ts            # pure: zoom floor that stops the world tiling in landscape
+    cameraFit.ts            # pure: zoom floors - world-fit width, and the both-axes fit
     choropleth.ts           # pure: population ramp + the fill-color paint expression
     offlineStyle.ts         # inline style: background layer ONLY, no sources, no glyphs
   data/
@@ -159,16 +176,19 @@ src/
     types.ts
   components/
     CountryInfoSheet.tsx
-    infoSheetLayout.ts      # pure: portrait bottom sheet vs landscape side panel
+    infoSheetLayout.ts      # pure: sheet dock per orientation, and the map's unobstructed band
+    palette.ts              # the shared chrome colours (was components/quiz/palette.ts)
     formatters.ts           # pure, unit-tested
-    MapControls.tsx         # the chrome: toggle + legend top-left, quiz pill top-right
+    MapControls.tsx         # the chrome: toggle + legend top-left, search + quiz pills top-right
     MapModeToggle.tsx       # flat <-> population pill
     ChoroplethLegend.tsx    # stepped key, driven by the active ramp
     quiz/                   # QuizPanel, AnswerField, ChipInput, SubregionPicker,
-                            #   FieldPicker, QuizLaunchButton, palette, useKeyboardHeight
+                            #   FieldPicker, QuizLaunchButton, useKeyboardHeight
+    search/                 # SearchLaunchButton, CountryResultRow
   map/
     countryBounds.ts        # pure: which polygons to frame for one country
-    quizCamera.ts           # pure: bbox + viewport -> centre and zoom
+    quizCamera.ts           # pure: bbox + viewport -> centre and zoom, whole-viewport or
+                            #   into a focus rect (search frames around the info sheet)
   quiz/
     quizConfig.ts           # pure: FieldId, QuizConfig, router-param coercion
     quizCountries.ts        # the 193-country pool and the subregion catalogue
@@ -180,6 +200,9 @@ src/
     quizScore.ts            # pure: the tallies
     quizPanelLayout.ts      # pure: the map/panel split, and the map's own viewport
     quizResultStore.ts      # one-slot handover from the round to the score screen
+  search/
+    countrySearch.ts        # pure: the 237-country index and the ranked matcher
+    pendingCountry.ts       # subscription handover from /search back to the map
 scripts/build-country-data.mjs      # full online rebuild
 scripts/enrich-country-facts.mjs    # offline facts-only re-derivation
 scripts/countryFactRecord.mjs       # the record shape, shared by both
@@ -327,7 +350,7 @@ dump` showed the legend card, all seven swatches and every label exactly where t
 paints nothing at all; sampling the screenshot at those coordinates returns pure map pixels.
 
 So `ChoroplethLegend` is **mounted from startup and never conditionally rendered**. `MapControls` parks it
-at `left: -2000` when hidden and animates `left` — a **layout** property, on the **JS thread**
+at `left: -200` when hidden and animates `left` — a **layout** property, on the **JS thread**
 (`useNativeDriver: false`) — to slide it in. Every part of that sentence is load-bearing:
 
 - *Always mounted* gives it the same stable insertion order as the toggle pill, which never had the bug
@@ -499,6 +522,167 @@ round over Micronesia — drops out entirely rather than becoming a question wit
 Order is a **seeded** Fisher-Yates (`mulberry32`), so a round replays identically and a Maestro flow can
 pin it.
 
+## Country search
+
+A pill in the top-right row opens `/search`. Type a name, pick a result, and the map behind it
+highlights that country exactly as a tap would — same `selectedIso3`, same filtered layer, same info
+sheet — and flies the camera to frame it in the part of the map the sheet does not cover.
+
+### It is a route, not a dropdown
+
+**This is the structural answer to the paint bug, not a styling preference.** A results list that
+appears as you type is precisely "a view inserted over the MapLibre surface after the initial mount",
+which lays out perfectly and never paints. `/search` has no map on it, so the bug is unreachable rather
+than worked around — the same reasoning that made the quiz panel a flex sibling.
+
+Which means the **opposite** rule applies on that screen: ordinary conditional rendering is correct
+there. The always-mounted slots in `ChipInput`, the `display: 'none'` rows in `AnswerField` and the
+parked `ChoroplethLegend` exist only because those views share a window with the map surface. Copying
+that discipline into `/search` would mount 237 rows forever for nothing. The file says so in its own
+docstring, because someone will otherwise "fix" it.
+
+### The handover is a subscription, not a params round-trip
+
+`/search` is **pushed** over `MapScreen`, so the map stays mounted underneath the whole time and only
+needs telling what was picked. `src/search/pendingCountry.ts` is a module singleton with
+`selectCountry` / `subscribeToCountrySelection`; the screen announces, then calls `router.back()`.
+
+Three alternatives were rejected, each for a concrete reason:
+
+- `router.back()` cannot carry params.
+- `router.replace('/', { params })` would mount a **second `MapScreen`** and with it a second MapLibre
+  surface — an expensive teardown to deliver one ISO-3 code.
+- `useFocusEffect`, the obvious read-on-arrival shape, calls `useNavigation()` and so needs navigator
+  context at render time. `QuizLaunchButton` documents that the map's chrome deliberately uses the
+  imperative `router` singleton **so `MapScreen.test.tsx` can keep rendering the screen bare, with no
+  router mock at all**. A subscription keeps that true — and it fires while the search screen is still
+  sliding away, so the fly has already started by the time the map is uncovered.
+
+`SearchLaunchButton` uses the imperative `router.push('/search')` for the same reason.
+
+### Matching — forgiving in the opposite direction to grading
+
+`src/search/countrySearch.ts` reuses `normalizeText`, `nameAliases` and `editDistance`/`allowedEdits`
+from the quiz. **The duty is inverted, which is worth knowing before "fixing" it**: grading must
+*reject* a near-miss, because "Gambia" for Zambia would award a point nobody earned; search must
+*offer* one, because not knowing the spelling is why the box is open. So there is no confusable guard
+here, and partial input — which grading refuses outright — is the normal case.
+
+Ranked in tiers, best first, ties broken alphabetically (the index is pre-sorted and `sort` is stable):
+exact name, exact alias, name prefix, alias prefix, name word-start, alias word-start, name substring,
+alias substring, fuzzy. Ordinal rather than scored, because the tiers really are ordinal — and because
+`editDistance(a, b, max)` returns `max + 1` once the budget blows, so it may only be compared against a
+threshold, never used as a ranking score.
+
+- **Both the spaced and the space-free forms are compared.** `normalizeText` *deletes* hyphens and
+  apostrophes rather than replacing them with a space, so "Guinea-Bissau" indexes as `guineabissau`
+  while a player types `guinea bissau`. Squashing both sides closes that, and covers "timor leste" and
+  "bosnia herzegovina" too.
+- **Fuzzy is skipped below 4 characters.** `allowedEdits` returns 0 under 5, so a short fuzzy pass is a
+  pure no-op that only costs time — over 237 countries, on every keystroke.
+- **An empty query lists all 237 alphabetically**, uncapped; a real query caps at 50. The screen is a
+  browsable index of the world before a key is pressed, which costs nothing and is why the Maestro flow
+  can assert on `country-result-AFG`.
+
+The pool is **237**: every ISO-3 in *both* `countries.geo.json` and `countryFacts.json`. Deliberately
+wider than the quiz's 193 UN members — the map draws Greenland, Puerto Rico and Western Sahara, so
+search has to find them. The three excluded are exactly the geometry-only `FACTLESS_ALLOWLIST` entries
+(`SOL`, `CYN`, `KAS`), which would open an empty info sheet.
+
+`matchedAs` carries the alias that matched so the row can show it. Offering "Netherlands" for
+"holland" with no explanation reads like a bug, and that line is the only place alias support is
+discoverable at all.
+
+### Framing around the info sheet
+
+`getCountryCameraStop` centres a bbox in the **whole** viewport. That is right for the quiz, whose
+panel is a flex sibling, and wrong here, where the sheet is a genuine absolute overlay: the map is
+full-screen while only part of it is visible. So `quizCamera.ts` gained **`getFocusedCameraStop`** —
+the same arithmetic plus a focus rect. `getCountryCameraStop` is untouched so quiz framing cannot
+regress, and a test asserts the two agree exactly when the focus rect *is* the whole viewport.
+
+The camera always points at the viewport's centre, so putting a country somewhere else means pointing
+the camera **away** from it by the offset between the two centres. Zoom is fitted to the focus rect,
+then the centre is shifted by `dx / worldPx` and `dy / worldPx` at that zoom.
+
+**Both axes shift with the same sign, and the missing negation is deliberate.** `mercatorY` is 0 at the
+north pole and grows southward; screen y also grows downward. The two conventions cancel.
+
+`getMapFocusRect` (in `infoSheetLayout.ts`) says which band that is:
+
+| | Portrait | Landscape |
+|---|---|---|
+| Top | `safeArea.top + MAP_CHROME_HEIGHT` | same |
+| Bottom | the top of the sheet, 55% down | the foot of the window |
+| Width | full | `width − panelWidth` |
+
+- **It uses the sheet's MAXIMUM height, not its measured one.** The card is content-height and only
+  knows its extent after an `onLayout` pass; threading that up would change the camera's inputs once
+  per country and fire the fly **twice per search**. `PORTRAIT_MAX_HEIGHT_FRACTION` is the one literal,
+  and `CountryInfoSheet`'s `maxHeight` derives from it so the two cannot drift.
+- **`MAP_CHROME_HEIGHT` is why the band does not start at the top of the window.** Without it a country
+  is centred in the whole area above the sheet and its northern edge lands under the toggle —
+  Liechtenstein's tip disappeared behind it. An estimate mirroring `MapControls`' own spacing rather
+  than a measurement, for the same re-fire reason.
+
+### The pole clamp — load-bearing, and found by prototyping
+
+Without it, **searching Russia in portrait sends the camera to latitude −54** and Russia leaves the top
+of the screen entirely. Its fit zoom is already at the floor, so the world is barely taller than the
+screen and the 232 dp the offset wants is ~45% of the whole globe.
+
+```ts
+const half = viewport.height / 2 / worldPx;
+const camY = half >= 0.5 ? 0.5 : Math.max(half, Math.min(1 - half, wanted));
+```
+
+Exactly five countries reach it on today's geometry — `USA`, `RUS`, `GRL`, `CAN`, `ATA` — and the list
+is pinned in `focusedCamera.test.ts`. A sixth appearing there means the geometry moved, not the maths.
+
+Its companion is **`getViewportFitZoom`** in `cameraFit.ts`: the lowest zoom at which one world covers
+*both* axes. `getWorldFitZoom` only answers for the width, which is all the launch camera needs because
+MapLibre clamps the height itself. A stop fitted to *part* of the screen is different — asking for a
+zoom MapLibre will override means the offset was computed against a scale the map never used. This is a
+floor for the computed **stop** only; do not raise `Camera`'s `minZoom`, which is the pinch limit.
+
+### The rest of the wiring
+
+- `MapScreen` holds `focus: { iso3, nonce }`, set **only by a search**, never by a tap. The **nonce is
+  required**: keying on the iso3 alone yields an identical stop when the same country is searched
+  twice, and an identical stop is not a change, so the map would simply not move.
+- **The stop is state, not a memo, and is never withdrawn.** `WorldMap` spreads `{...(camera ?? {})}`,
+  so handing back `undefined` after a stop would take the native `stop` prop from
+  `{center, zoom, duration, easing}` to `{}` — a real prop change pushed into a renderer Jest replaces
+  with a stub. Clearing `focus` stops the recompute and leaves the last stop in place.
+- **A map press clears `focus`**, so a later rotation re-fits the map rather than yanking the camera
+  back to a country the user stopped looking at several gestures ago. Rotation *while* focused does
+  re-frame, which is correct and matches quiz mode.
+- **Explore `maxZoom` is 10**, matching the quiz. At 8 a 400 dp screen spans ~1.1° of longitude and
+  Monaco is a 22 dp dot — framed correctly and useless. It bounds interaction, not the launch camera,
+  so no Maestro coordinate tap depends on it.
+
+### `disableFullscreenUI` is not optional
+
+Found on the emulator, not in a test: **in landscape Android decides the field has too little vertical
+room and replaces the entire screen with its own IME "extract" editor** — a white full-screen box and a
+SEARCH button, with the app's screen and its results nowhere to be seen. `disableFullscreenUI` prevents
+it. `SearchScreen.test.tsx` asserts the prop, which is as close as Jest can get.
+
+The quiz's own `TextInput`s (`AnswerField`, `ChipInput`) do **not** set it and are likely to have the
+same problem in landscape — unverified, because `.maestro/quiz.yaml` only types in portrait.
+
+### Where the chrome actually is
+
+Search and quiz share **one row** in the top-right, at the same height, so the chrome does not grow
+downward into the portrait Greenland tap at `19%,13%`. Growing that row leftward is free — the nearest
+coordinate tap is Russia at `81%,20%`, some 80 dp below it. **Keep any future control the same height,
+and never put it on a second line.**
+
+One correction to an older claim in this file: top-right is *not* free in both orientations. With the
+card open in landscape it docks to the right edge full-height and **covers both pills**. That is
+pre-existing behaviour rather than something search introduced, and it only bites while the card is
+open — but do not assume the pills are reachable in landscape.
+
 ## Which country a press selects — `pickCountry.ts`
 
 `GeoJSONSource.onPress` returns **every feature the hitbox touches**, not the one under the finger, and
@@ -639,7 +823,7 @@ Windows** (no WSL) and needs JDK 17, which is already set up. It is installed at
 `C:\Users\Boris\maestro\maestro\bin\maestro.bat` and is **not on PATH** — either add it or call it by
 full path. `npm run test:e2e` assumes `maestro` is on PATH.
 
-There are **four flows**, and each pins its own orientation with `setOrientation` — the app rotates
+There are **five flows**, and each pins its own orientation with `setOrientation` — the app rotates
 freely now, so none can assume it:
 
 | Flow | Orientation | Journey |

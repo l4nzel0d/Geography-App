@@ -7,6 +7,7 @@ import { getMapFocusRect } from '@/components/infoSheetLayout';
 import { MapControls } from '@/components/MapControls';
 import { getViewportFitZoom } from '@/map/cameraFit';
 import { getCountryBounds } from '@/map/countryBounds';
+import type { LabelField } from '@/map/mapLabels';
 import { mapColors } from '@/map/offlineStyle';
 import { getFocusedCameraStop, type MapCameraStop } from '@/map/quizCamera';
 import { type FillMode, WorldMap } from '@/map/WorldMap';
@@ -21,6 +22,12 @@ const SEARCH_CAMERA_DURATION = 900;
 export default function MapScreen() {
   const [selectedIso3, setSelectedIso3] = useState<string | null>(null);
   const [fillMode, setFillMode] = useState<FillMode>('flat');
+
+  /**
+   * Which fact is drawn on top of every country. Independent of `fillMode` on purpose:
+   * a density choropleth with capital labels over it is a legal, useful combination.
+   */
+  const [labelField, setLabelField] = useState<LabelField>('none');
 
   /**
    * The country a SEARCH asked us to frame - never one the user tapped.
@@ -98,8 +105,14 @@ export default function MapScreen() {
         fillMode={fillMode}
         camera={camera}
         maxZoom={EXPLORE_MAX_ZOOM}
+        labelField={labelField}
       />
-      <MapControls fillMode={fillMode} onFillModeChange={setFillMode} />
+      <MapControls
+        fillMode={fillMode}
+        onFillModeChange={setFillMode}
+        labelField={labelField}
+        onLabelFieldChange={setLabelField}
+      />
       <CountryInfoSheet iso3={selectedIso3} onClose={() => select(null)} />
     </View>
   );

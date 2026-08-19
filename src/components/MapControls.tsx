@@ -3,9 +3,12 @@ import { Animated, type LayoutChangeEvent, StyleSheet, View } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CHOROPLETH_RAMPS, POPULATION_RAMP } from '@/map/choropleth';
+import type { LabelField } from '@/map/mapLabels';
 import type { FillMode } from '@/map/WorldMap';
 
 import { ChoroplethLegend } from './ChoroplethLegend';
+import { LabelFieldPicker } from './LabelFieldPicker';
+import { MapLabelPill } from './MapLabelPill';
 import { MapModeToggle } from './MapModeToggle';
 import { QuizLaunchButton } from './quiz/QuizLaunchButton';
 import { SearchLaunchButton } from './search/SearchLaunchButton';
@@ -13,10 +16,18 @@ import { SearchLaunchButton } from './search/SearchLaunchButton';
 type MapControlsProps = {
   fillMode: FillMode;
   onFillModeChange: (mode: FillMode) => void;
+  labelField: LabelField;
+  onLabelFieldChange: (field: LabelField) => void;
 };
 
 /** Height of the toggle before it has measured itself, for the first frame only. */
 const TOGGLE_FALLBACK_HEIGHT = 40;
+
+/** Same, for the top-right pill row. */
+const PILL_ROW_FALLBACK_HEIGHT = 36;
+
+/** Where the label picker parks when hidden - far enough right to clear any screen. */
+const OFFSCREEN_RIGHT = -240;
 
 /** Gap between the toggle and the legend. */
 const GAP = 8;
@@ -25,6 +36,13 @@ const GAP = 8;
 const OFFSCREEN_LEFT = -200;
 
 const SLIDE_DURATION = 800;
+
+/**
+ * Shorter than the legend's 800ms. The legend slides as a side effect of choosing a fill
+ * mode, where a leisurely reveal reads as polish; this one is the direct answer to a tap
+ * on the pill, and anything slower than a few frames reads as an unresponsive button.
+ */
+const PICKER_SLIDE_DURATION = 220;
 
 /**
  * The map's only chrome, stacked in the top-left corner.
@@ -41,12 +59,20 @@ const SLIDE_DURATION = 800;
  * insertion order as the toggle, and animating a layout property supplies the
  * re-layout that a transform or an opacity change does not.
  */
-export function MapControls({ fillMode, onFillModeChange }: MapControlsProps) {
+export function MapControls({
+  fillMode,
+  onFillModeChange,
+  labelField,
+  onLabelFieldChange,
+}: MapControlsProps) {
   const insets = useSafeAreaInsets();
   const [toggleHeight, setToggleHeight] = useState(TOGGLE_FALLBACK_HEIGHT);
+  const [pillRowHeight, setPillRowHeight] = useState(PILL_ROW_FALLBACK_HEIGHT);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const top = insets.top + 12;
   const left = insets.left + 16;
+  const right = insets.right + 16;
   const showLegend = fillMode !== 'flat';
 
   // The legend outlives the mode that opened it: on the way back to `flat` it goes on
@@ -72,8 +98,25 @@ export function MapControls({ fillMode, onFillModeChange }: MapControlsProps) {
     }).start();
   }, [showLegend, slide]);
 
+  // Same mechanism as the legend, and every part of it is load-bearing for the same
+  // reason: always mounted, and slid by animating `right` - a LAYOUT property, on the JS
+  // thread - so each frame commits through the shadow tree and supplies the re-layout
+  // that makes the view paint at all. A transform or an opacity change does not.
+  const pickerSlide = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(pickerSlide, {
+      toValue: pickerOpen ? 1 : 0,
+      duration: PICKER_SLIDE_DURATION,
+      useNativeDriver: false,
+    }).start();
+  }, [pickerOpen, pickerSlide]);
+
   const onToggleLayout = (event: LayoutChangeEvent) =>
     setToggleHeight(event.nativeEvent.layout.height);
+
+  const onPillRowLayout = (event: LayoutChangeEvent) =>
+    setPillRowHeight(event.nativeEvent.layout.height);
 
   return (
     <>
@@ -89,10 +132,44 @@ export function MapControls({ fillMode, onFillModeChange }: MapControlsProps) {
           portrait Greenland tap at 19%,13%; growing it leftward is free, because the
           nearest coordinate tap is Russia at 81%,20%, some 80 dp further down. Keep any
           future control the same height as these two. */}
-      <View style={[styles.anchor, styles.topRight, { top, right: insets.right + 16 }]}>
+      <View
+        style={[styles.anchor, styles.topRight, { top, right }]}
+        onLayout={onPillRowLayout}
+      >
+        <MapLabelPill
+          field={labelField}
+          expanded={pickerOpen}
+          onPress={() => setPickerOpen((open) => !open)}
+        />
         <SearchLaunchButton />
         <QuizLaunchButton />
       </View>
+
+      {/* Closed by default, which is what keeps every existing Maestro percentage tap
+          valid: it only covers the map while open. Mounted from the first frame
+          regardless - see LabelFieldPicker's docstring. */}
+      <Animated.View
+        style={[
+          styles.anchor,
+          {
+            top: top + pillRowHeight + GAP,
+            right: pickerSlide.interpolate({
+              inputRange: [0, 1],
+              outputRange: [OFFSCREEN_RIGHT, right],
+            }),
+            opacity: pickerSlide,
+          },
+        ]}
+      >
+        <LabelFieldPicker
+          field={labelField}
+          visible={pickerOpen}
+          onChange={(field) => {
+            onLabelFieldChange(field);
+            setPickerOpen(false);
+          }}
+        />
+      </Animated.View>
 
       <Animated.View
         style={[

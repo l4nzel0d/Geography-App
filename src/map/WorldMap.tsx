@@ -2,11 +2,13 @@ import { Camera, GeoJSONSource, Layer, Map } from '@maplibre/maplibre-react-nati
 import { StyleSheet, useWindowDimensions } from 'react-native';
 
 import type { CountryFeatureProperties } from '@/data/types';
+import { labelGeoJson } from '@/data/labelGeoJson';
 import { worldGeoJson } from '@/data/worldGeoJson';
 
 import { getWorldFitZoom } from './cameraFit';
 import { CHOROPLETH_RAMPS, type ChoroplethMode } from './choropleth';
-import { mapColors, OFFLINE_STYLE } from './offlineStyle';
+import { labelFilter, type LabelField, labelTextField, RANK_PROPERTY } from './mapLabels';
+import { LABEL_FONT, mapColors, OFFLINE_STYLE } from './offlineStyle';
 import { pickCountry } from './pickCountry';
 import type { MapCameraStop } from './quizCamera';
 
@@ -70,6 +72,11 @@ type WorldMapProps = {
    */
   camera?: MapCameraStop;
   maxZoom?: number;
+  /**
+   * Which fact to draw on top of every country. Defaults to `'none'`, so quiz mode and
+   * every existing test render exactly as they did.
+   */
+  labelField?: LabelField;
 };
 
 export function WorldMap({
@@ -79,6 +86,7 @@ export function WorldMap({
   selectionColor,
   camera,
   maxZoom = DEFAULT_MAX_ZOOM,
+  labelField = 'none',
 }: WorldMapProps) {
   // Landscape is wider than one world at zoom 0, so the floor is derived from the
   // window rather than pinned to INITIAL_ZOOM. Without this a cold launch into
@@ -203,6 +211,58 @@ export function WorldMap({
           type="line"
           filter={outlineFilter}
           paint={{ 'line-color': mapColors.selectionOutline, 'line-width': 2 }}
+        />
+
+      </GeoJSONSource>
+
+      {/*
+        Labels live on their OWN point source, not on the outlines above.
+
+        MapLibre labels a polygon at its pole of inaccessibility, which is a good anchor
+        but is computed **per polygon**: France is a MultiPolygon of the mainland plus
+        five overseas departments, so it would be labelled six times, once in South
+        America. See `data/labelGeoJson.ts`.
+
+        Mounted in every mode, including 'none', where `labelFilter` returns the same
+        empty-string-matches-nothing filter the selection layers use. Nothing is added to
+        or removed from the map at runtime.
+
+        No `onPress`: the source is decoration, and presses must keep reaching the
+        outlines below so `pickCountry` still resolves them.
+      */}
+      <GeoJSONSource id="country-labels" data={labelGeoJson}>
+        <Layer
+          id="country-label"
+          type="symbol"
+          filter={labelFilter(labelField)}
+          layout={{
+            'text-field': labelTextField(labelField),
+            // Must name a key of the style's `font-faces`; see offlineStyle.ts.
+            'text-font': [LABEL_FONT],
+            // Grows a little with zoom: 11 is the floor at which the halo still reads at
+            // world scale, and by zoom 6 there is room for something more comfortable.
+            'text-size': ['interpolate', ['linear'], ['zoom'], 0, 11, 6, 14],
+            // Must match TEXT_MAX_WIDTH_EM in labelFit.ts - the fit estimate caps the
+            // label's width here, because past this point long text wraps rather than
+            // growing wider.
+            'text-max-width': 8,
+            // The collision half of decluttering, and the reason this is a native symbol
+            // layer rather than RN views: MapLibre drops overlapping labels itself, at
+            // 60fps, with no projection maths on our side.
+            'text-allow-overlap': false,
+            'text-padding': 2,
+            // Widest country wins a collision. Negated in labelGeoJson.ts because the
+            // lowest sort key is placed first.
+            'symbol-sort-key': ['get', RANK_PROPERTY],
+          }}
+          paint={{
+            'text-color': mapColors.labelText,
+            // Not decoration. The land underneath ranges from mid-green through
+            // near-white to deep maroon depending on the fill mode, and no single text
+            // colour reads against all three without a contrasting halo.
+            'text-halo-color': mapColors.labelHalo,
+            'text-halo-width': 1.2,
+          }}
         />
       </GeoJSONSource>
     </Map>

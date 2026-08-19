@@ -24,13 +24,30 @@ export const Camera = ({ ref, children, ...props }: AnyProps & { ref?: unknown }
   <View testID="map-camera" {...props} />
 );
 
+/**
+ * One testID per source, derived from `id` like `Layer`'s is.
+ *
+ * It used to hardcode `countries-source`, which was fine while there was exactly one
+ * source. There are two now - the outlines and the label anchors - and a fixed testID
+ * made every `getByTestId` throw "found multiple elements", including the press helpers
+ * that have nothing to do with labels.
+ */
 export const GeoJSONSource = ({ children, data, ...props }: AnyProps) => (
-  <View testID="countries-source" {...props}>
+  <View testID={`source-${String(props.id)}`} {...props}>
     {children}
   </View>
 );
 
-export const Layer = ({ layout, ...props }: AnyProps) => (
+/**
+ * Forwards `layout` as well as `paint` and `filter`.
+ *
+ * It used to strip `layout`, exactly as it once stripped `paint` - and the consequence is
+ * the same one CLAUDE.md already records for that: a symbol layer's `text-field`,
+ * `text-size` and `symbol-sort-key` all live in `layout`, so no test could see the label
+ * expressions at all. A malformed one passes every unit test and then blanks the layer
+ * inside the native renderer, which is the one place Jest replaces with a stub.
+ */
+export const Layer = (props: AnyProps) => (
   <View testID={`layer-${String(props.id)}`} {...props} />
 );
 

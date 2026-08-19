@@ -28,12 +28,20 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFFFFF",
+          "backgroundColor": "#5595c1",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 180
         }
       ],
-      "@maplibre/maplibre-react-native"
+      "@maplibre/maplibre-react-native",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/NotoSans-Regular.ttf"
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
