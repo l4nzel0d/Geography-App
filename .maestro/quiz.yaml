@@ -1,12 +1,15 @@
 # E2E: play a round of the quiz.
 #
-# This flow exists for the two things Jest structurally cannot see:
+# This flow exists for the three things Jest structurally cannot see:
 #   1. that a camera stop computed by `quizCamera.ts` actually parses in the native
 #      renderer - a bad centre or an Infinity zoom passes every unit test and then
 #      blanks the map on a device, exactly like a malformed paint expression;
 #   2. that the answer panel PAINTS beside a live MapLibre surface. The panel is a flex
 #      sibling rather than an overlay precisely to avoid the bug in CLAUDE.md, and this
-#      is what proves it.
+#      is what proves it;
+#   3. that a back press is actually intercepted, and that the confirmation it raises
+#      paints OVER that surface. Jest resolves `BackHandler.ios.js`, a stub that stores
+#      no handlers, so no unit test can show that Android routes a press into ours.
 #
 # Unlike the other three flows, there is not a single coordinate tap here - it is
 # entirely testID-driven. That is deliberate and required: the quiz camera moves on
@@ -84,6 +87,38 @@ appId: com.boris.geographyapp
 - assertVisible:
     id: 'quiz-input-capital'
 
+# The back gesture must not silently bin a round. `pressKey: Back` is exactly the press
+# the edge swipe produces: `predictiveBackGestureEnabled` is false in app.json, so there
+# is no separate predictive gesture to drive here.
+#
+# This is also the only automated proof that the confirmation PAINTS. It covers a live
+# MapLibre surface, which the rest of this app may not do - it gets away with it by being
+# a `Modal`, hosted in its own window rather than inserted above the map. See CLAUDE.md.
+- pressKey: Back
+- assertVisible:
+    id: 'quiz-exit'
+- assertVisible: 'Leave quiz?'
+- assertVisible: 'You are on question 1 of 2.'
+# Nothing has been checked yet, so there is no score to offer and the button is absent.
+- assertNotVisible:
+    id: 'quiz-exit-score'
+
+# Discarding drops the round but pops back to the setup screen with its settings intact,
+# the same contract "Change settings" has on the results screen.
+- tapOn:
+    id: 'quiz-exit-discard'
+- assertVisible:
+    id: 'quiz-setup'
+- assertVisible: 'Start — 2 countries'
+
+# Start again. The seed is fresh, so the two countries may arrive in either order - which
+# is why nothing below asserts that the typed name was right.
+- tapOn:
+    id: 'quiz-start'
+- assertVisible:
+    id: 'quiz-panel'
+- assertVisible: '1 / 2'
+
 # Answer the country and leave the capital blank, so this one question exercises both
 # the correct and the wrong path at once.
 - tapOn:
@@ -101,6 +136,19 @@ appId: com.boris.geographyapp
 - assertVisible: 'Answer: .*'
 
 # The button relabels rather than being swapped for a second button.
+- assertVisible: 'Next'
+
+# With a question graded there is now a score to offer, so the dialog grows its third
+# button. Cancelling has to leave the round exactly where it stood.
+- pressKey: Back
+- assertVisible:
+    id: 'quiz-exit-score'
+- tapOn:
+    id: 'quiz-exit-cancel'
+- assertNotVisible:
+    id: 'quiz-exit'
+- assertVisible:
+    id: 'quiz-reveal-capital'
 - assertVisible: 'Next'
 
 # Rotating mid-question re-docks the panel to the right edge and re-fits the camera to

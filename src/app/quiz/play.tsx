@@ -1,8 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Dimensions, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, Dimensions, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { quizColors } from '@/components/palette';
 import { QuizPanel, type PanelAnswers } from '@/components/quiz/QuizPanel';
 import { useKeyboardHeight } from '@/components/quiz/useKeyboardHeight';
@@ -11,6 +12,7 @@ import { getCountryBounds } from '@/map/countryBounds';
 import { mapColors } from '@/map/offlineStyle';
 import { getCountryCameraStop } from '@/map/quizCamera';
 import { WorldMap } from '@/map/WorldMap';
+import { buildExitPrompt, type ExitAction } from '@/quiz/exitPrompt';
 import { gradeQuestion, type QuestionResult, toAnswerInput } from '@/quiz/gradeAnswer';
 import { buildQuiz } from '@/quiz/quizBuilder';
 import { type FieldId, parseQuizParams } from '@/quiz/quizConfig';
@@ -108,6 +110,56 @@ export default function QuizPlayScreen() {
 
   const end = () => finish(result ? [...history, result] : history, true);
 
+  /**
+   * Leaving mid-round asks first.
+   *
+   * A round is a lot of typing to lose to one edge swipe, and back used to throw it away
+   * silently. `predictiveBackGestureEnabled` is false in `app.json`, so on Android the
+   * swipe and the hardware button are the same plain back press and both arrive here.
+   *
+   * `BackHandler` rather than `usePreventRemove`: expo-router's own root handler is a
+   * `hardwareBackPress` listener, and RN calls those in REVERSE registration order, so a
+   * subscription added when this screen mounts runs first and `true` stops the pop dead.
+   * `usePreventRemove` would work too, but it lives at `expo-router/react-navigation` and
+   * needs navigator context at render time - which is exactly what `QuizLaunchButton` and
+   * `pendingCountry.ts` say this app avoids so its screens stay renderable bare in Jest.
+   *
+   * Two effects, not one. The listener must be registered ONCE for the whole round - a
+   * subscription rebuilt on every keystroke is churn, and the round's state changes on
+   * every one - so the handler is reached through a ref that the render-tracking effect
+   * keeps current. Writing that ref in an effect rather than during render is what keeps
+   * it safe under the React Compiler, which `app.json` has switched on.
+   */
+  const [confirmingExit, setConfirmingExit] = useState(false);
+  const handleBackRef = useRef<() => boolean>(() => false);
+
+  useEffect(() => {
+    handleBackRef.current = () => {
+      // The "nothing to ask" state has no round to protect; let back behave normally.
+      if (!question) return false;
+
+      // Belt and braces. The dialog is a `Modal`, so it holds window focus and Android
+      // routes back to its own `onRequestClose` instead of here - but if that ever stops
+      // being true, back must close the card rather than stack a second one behind it.
+      setConfirmingExit((open) => !open);
+      return true;
+    };
+  });
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () =>
+      handleBackRef.current()
+    );
+    return () => subscription.remove();
+  }, []);
+
+  const exit = (action: ExitAction) => {
+    setConfirmingExit(false);
+    // `cancel` is the no-op: closing the card IS staying in the round.
+    if (action === 'score') end();
+    else if (action === 'discard') router.back();
+  };
+
   if (!question) {
     return (
       <View style={styles.empty}>
@@ -191,6 +243,23 @@ export default function QuizPlayScreen() {
           landscape={layout.landscape}
         />
       </View>
+
+      {/*
+        Hosted in its own window by `Modal`, so this is NOT a view inserted above the
+        MapLibre surface - see ConfirmDialog. Its position in this tree is irrelevant.
+      */}
+      <ConfirmDialog
+        testID="quiz-exit"
+        visible={confirmingExit}
+        {...buildExitPrompt({
+          index,
+          total: questions.length,
+          // The open question counts once checked: `end` would score it too.
+          graded: history.length + (result ? 1 : 0),
+        })}
+        onDismiss={() => setConfirmingExit(false)}
+        onPress={exit}
+      />
     </View>
   );
 }

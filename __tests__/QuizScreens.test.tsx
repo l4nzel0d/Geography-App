@@ -8,6 +8,7 @@
  * RNTL v14 made `render` and `fireEvent` async; they must be awaited.
  */
 import { fireEvent, render as rtlRender, screen } from '@testing-library/react-native';
+import { BackHandler } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
 import QuizPlayScreen from '@/app/quiz/play';
@@ -54,7 +55,36 @@ jest.mock('expo-router', () => ({
 const render = (ui: React.ReactElement) =>
   rtlRender(<SafeAreaProvider initialMetrics={METRICS}>{ui}</SafeAreaProvider>);
 
+/**
+ * The Android back press.
+ *
+ * `BackHandler` is REAL under jest-expo - it is not in the RN jest preset's mock list -
+ * but the module Jest resolves is `BackHandler.ios.js`, whose `addEventListener` is a stub
+ * that stores nothing and returns `{ remove: emptyFunction }`. So the press is delivered
+ * by invoking the handler the screen registered, and the `remove` it hands back is wrapped
+ * below so unsubscribing can be asserted at all.
+ *
+ * The consequence is worth stating plainly: these tests prove OUR wiring, not that Android
+ * routes a back press to it. `.maestro/quiz.yaml` is what proves that.
+ */
+const addBackListener = jest.spyOn(BackHandler, 'addEventListener');
+
+const backRegistrations = () =>
+  addBackListener.mock.calls.filter(([event]) => event === 'hardwareBackPress');
+
+/** The last handler registered wins, which is the rule RN applies at runtime. */
+const pressBack = () => {
+  const registered = backRegistrations();
+  const handler = registered[registered.length - 1]?.[1];
+  if (!handler) throw new Error('nothing registered a hardwareBackPress handler');
+  return handler({} as never);
+};
+
 beforeEach(() => {
+  // The iOS stub returns a shared no-op `remove`, so wrap it to make unsubscribing
+  // observable without reimplementing the module.
+  addBackListener.mockClear();
+  addBackListener.mockImplementation(() => ({ remove: jest.fn() }));
   mockSearchParams = {};
   mockPush.mockClear();
   mockReplace.mockClear();
@@ -345,6 +375,123 @@ describe('the play screen', () => {
     const currency = screen.getByTestId('quiz-field-currency', { includeHiddenElements: true });
     expect(currency).toBeTruthy();
     expect(typeof currency.props.accessibilityElementsHidden).toBe('boolean');
+  });
+
+  describe('leaving mid-round', () => {
+    const dialog = () => screen.queryByTestId('quiz-exit');
+
+    it('asks before letting a back press throw the round away', async () => {
+      soloRound();
+      await render(<QuizPlayScreen />);
+      expect(dialog()).toBeNull();
+
+      // `true` is what stops expo-router's own root back handler popping the screen: RN
+      // calls hardwareBackPress subscriptions in reverse registration order and stops at
+      // the first that claims the press.
+      expect(pressBack()).toBe(true);
+      await screen.findByTestId('quiz-exit');
+
+      expect(screen.getByText('Leave quiz?')).toBeTruthy();
+      expect(mockBack).not.toHaveBeenCalled();
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it('says where in the round you are', async () => {
+      soloRound();
+      await render(<QuizPlayScreen />);
+      await fireEvent.press(screen.getByTestId('quiz-submit')); // check
+      await fireEvent.press(screen.getByTestId('quiz-submit')); // next
+
+      pressBack();
+
+      expect(await screen.findByText('You are on question 2 of 2.')).toBeTruthy();
+    });
+
+    it('stays put when the dialog is cancelled', async () => {
+      soloRound();
+      await render(<QuizPlayScreen />);
+      pressBack();
+
+      await fireEvent.press(await screen.findByTestId('quiz-exit-cancel'));
+
+      expect(dialog()).toBeNull();
+      expect(mockBack).not.toHaveBeenCalled();
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(screen.getByTestId('quiz-panel')).toBeTruthy();
+    });
+
+    it('stays put when the scrim behind the card is tapped', async () => {
+      soloRound();
+      await render(<QuizPlayScreen />);
+      pressBack();
+
+      await fireEvent.press(await screen.findByTestId('quiz-exit-scrim'));
+
+      expect(dialog()).toBeNull();
+      expect(mockBack).not.toHaveBeenCalled();
+    });
+
+    it('discards the round and pops back to the setup screen', async () => {
+      soloRound();
+      await render(<QuizPlayScreen />);
+      pressBack();
+
+      await fireEvent.press(await screen.findByTestId('quiz-exit-discard'));
+
+      expect(mockBack).toHaveBeenCalledTimes(1);
+      // Discarding must not leave a score behind for the results screen to find.
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it('offers a score once a question has been checked, and scores it', async () => {
+      soloRound();
+      await render(<QuizPlayScreen />);
+      await fireEvent.press(screen.getByTestId('quiz-submit')); // check question 1
+
+      pressBack();
+      await fireEvent.press(await screen.findByTestId('quiz-exit-score'));
+
+      // The same destination the panel's "End quiz" button reaches.
+      expect(mockReplace).toHaveBeenCalledWith('/quiz/results');
+      expect(mockBack).not.toHaveBeenCalled();
+    });
+
+    it('does not offer a score before anything has been checked', async () => {
+      soloRound();
+      await render(<QuizPlayScreen />);
+      pressBack();
+
+      await screen.findByTestId('quiz-exit');
+      expect(screen.queryByTestId('quiz-exit-score')).toBeNull();
+      expect(screen.getByTestId('quiz-exit-discard')).toBeTruthy();
+    });
+
+    it('registers one handler for the whole round, and removes it on unmount', async () => {
+      soloRound();
+      const view = await render(<QuizPlayScreen />);
+      const before = backRegistrations().length;
+
+      // Typing and grading must not churn the subscription - it is registered once.
+      await fireEvent.changeText(screen.getByTestId('quiz-input-name'), 'Aus');
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+      expect(backRegistrations().length).toBe(before);
+      expect(before).toBe(1);
+
+      const subscription = addBackListener.mock.results[before - 1].value;
+      await view.unmount();
+      expect(subscription.remove).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets back behave normally when there is no round to protect', async () => {
+      // No such subregion, so nothing is askable and the screen is the empty state.
+      // There is no round to lose, so back must pop as it always did.
+      mockSearchParams = { subregions: 'Nowhere', fields: 'name', seed: '1' };
+      await render(<QuizPlayScreen />);
+
+      expect(screen.getByTestId('quiz-empty')).toBeTruthy();
+      expect(pressBack()).toBe(false);
+      expect(dialog()).toBeNull();
+    });
   });
 
   it('ends early, storing what was answered so far', async () => {

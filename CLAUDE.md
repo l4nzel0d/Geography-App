@@ -123,6 +123,22 @@ release build):
 - **still not re-verified on the S25.** The font adds 569 KB to the APK and the symbol layer adds a
   native text buffer, so cold-start time and `dumpsys meminfo` are worth a look there.
 
+Added 2026-08-24, **not yet verified on any device**:
+
+- **leaving a round mid-way asks first.** A back press on `/quiz/play` raises a styled
+  confirmation — *See my score* / *Discard and leave* / *Cancel* — instead of silently
+  binning the round. See *Leaving mid-round asks first*.
+- the card is a `Modal` in the app's own palette, not the native `Alert` this was first
+  built as. That swap is the whole reason *The confirmation is a `Modal`* exists as a
+  section: it is the paint bug's one genuinely unavoidable case.
+- 535 Jest tests across 21 suites pass, typecheck clean.
+- **`.maestro/quiz.yaml` has not been run since the new steps were added**, and neither has
+  anything else here been seen on a screen. What is unproven is specifically: that Android
+  routes a back press into our handler at all (Jest resolves the iOS `BackHandler` stub, so
+  no unit test can show it), and that the card paints over the MapLibre surface. Both are
+  exactly what the new flow steps assert, so running that flow is the gate.
+- nothing here adds a network call.
+
 ## Stack
 
 | Concern | Choice | Notes |
@@ -210,6 +226,7 @@ src/
     types.ts
   components/
     CountryInfoSheet.tsx
+    ConfirmDialog.tsx       # a Modal-hosted confirmation card in the app's colours
     infoSheetLayout.ts      # pure: sheet dock per orientation, and the map's unobstructed band
     palette.ts              # the shared chrome colours (was components/quiz/palette.ts)
     formatters.ts           # pure, unit-tested
@@ -235,6 +252,7 @@ src/
     gradeAnswer.ts          # pure: the marking
     quizScore.ts            # pure: the tallies
     quizPanelLayout.ts      # pure: the map/panel split, and the map's own viewport
+    exitPrompt.ts           # pure: the wording and buttons of the leave-mid-round dialog
     quizResultStore.ts      # one-slot handover from the round to the score screen
   search/
     countrySearch.ts        # pure: the 237-country index and the ranked matcher
@@ -590,6 +608,67 @@ path assumes a resize and does nothing useful. `useKeyboardHeight` listens to `k
 
 **Add `insets.bottom` to the reported height.** Measured on the emulator, `endCoordinates.height` stops
 at the top of the navigation bar, so reserving it alone leaves the Check button 56 px under the keyboard.
+
+### Leaving mid-round asks first
+
+A back press on `/quiz/play` used to pop straight to the setup screen and bin the round
+without a word. It now raises a confirmation offering three ways out — **See my score**
+(the same thing the panel's *End quiz* button does), **Discard and leave**, and **Cancel**.
+The score button is dropped when nothing has been checked yet, because a score of nothing
+out of nothing is not an offer; the wording and the button list are `quiz/exitPrompt.ts`,
+pure and unit-tested, so what is on the dialog is decided somewhere Jest can read it.
+
+**It is `BackHandler`, not `usePreventRemove`.** Both work. `BackHandler` wins because
+expo-router's own root handler is itself a `hardwareBackPress` listener and RN calls those
+in **reverse registration order** — so a subscription added when this screen mounts runs
+first, and returning `true` stops the pop dead. `usePreventRemove` would need navigator
+context at render time, which is exactly what `QuizLaunchButton` and `pendingCountry.ts`
+record this app avoiding so its screens stay renderable bare in `QuizScreens.test.tsx`.
+It is also not a public export: expo-router 57 **vendors React Navigation** (there is no
+`@react-navigation` in `node_modules` at all) and reaches it only via the deep subpath
+`expo-router/react-navigation`.
+
+`predictiveBackGestureEnabled` is **false** in `app.json`, so the edge swipe and the
+hardware button are the same plain back press and there is no predictive-back animation to
+fight. If that is ever turned on, re-check this — a committed predictive gesture is not a
+press you can decline.
+
+The listener is registered **once for the whole round** and reached through a ref that a
+second, dependency-less effect keeps current. Re-subscribing on every keystroke would be
+churn, and the ref is written in an effect rather than during render because `app.json`
+has `reactCompiler: true`.
+
+### The confirmation is a `Modal`, and that is the paint bug again
+
+A dialog is the one thing the rest of this app is not allowed to be: it must **cover** the
+map and it must **appear on demand**, and a view inserted above the MapLibre surface after
+the first mount lays out perfectly and never paints. The quiz panel dodged that by being a
+flex sibling, the legend by being mounted from startup and parked, `/search` by being a
+route with no map on it. None of those is available to a confirmation.
+
+`Modal` sidesteps the question entirely: RN's Android backend hosts it in a **separate
+`Dialog` with its own window**, which the system composites over the app's. Nothing is
+added above the map surface, so the bug is unreachable rather than avoided — the same
+reason the native `Alert` this started as was safe. **The corollary is that ordinary
+conditional rendering is correct inside `ConfirmDialog`**, exactly as it is on `/search`.
+
+`ConfirmDialog` lives in `src/components/` and is generic; it takes its colours from
+`palette.ts`, so the card is the panel's navy, the primary button is the same filled accent
+pill as *Check*/*Next*, and the destructive one is outlined in the wrong-answer red.
+Buttons are **stacked**, not a row: three actions do not fit side by side at 411 dp once
+one of them is "Discard and leave".
+
+- **`onRequestClose` is required**, not optional. The dialog holds window focus, so
+  Android's back key goes to it and never reaches the screen's own `BackHandler` — without
+  it, back while the card is open does nothing at all.
+- **The button order changed when the native `Alert` was dropped.** `Alert.alert` on
+  Android pops the array from the **end** to fill its neutral/negative/positive slots, so
+  the list had to be written backwards to read forwards. Drawing it ourselves removed that
+  constraint. If it ever goes back to `Alert`, invert `buildExitPrompt`'s order again.
+- **Jest cannot see any of the interception.** It resolves `BackHandler.ios.js`, a stub
+  whose `addEventListener` stores nothing and returns a shared no-op `remove` — so the
+  tests invoke the registered handler directly and wrap that `remove` to observe it at all.
+  That a real Android back press arrives here is `.maestro/quiz.yaml`'s job.
 
 ### The camera
 
@@ -1030,7 +1109,7 @@ freely now, so none can assume it:
 | `.maestro/tap-country.yaml` | `PORTRAIT` | Russia → Greenland → close → ocean-deselect |
 | `.maestro/landscape-info-panel.yaml` | `LANDSCAPE_LEFT` | Brazil → Mali → close → ocean-deselect → rotate to portrait with the card open |
 | `.maestro/choropleth-modes.yaml` | `PORTRAIT` | toggle on → legend → Russia still selects → close → toggle off |
-| `.maestro/quiz.yaml` | `PORTRAIT` + rotate | Quiz → pick a subregion and fields → answer → reveal → rotate → end → score |
+| `.maestro/quiz.yaml` | `PORTRAIT` + rotate | Quiz → pick a subregion and fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score |
 
 Coordinate taps are only deterministic because `INITIAL_CENTER` and the derived zoom floor
 (`cameraFit.ts`) pin the camera on launch — **change either and you must re-derive every tap point in
