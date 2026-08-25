@@ -1,10 +1,10 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { goBack } from '@/navigation/goBack';
-import { useQuizScreenSize } from '@/quiz/useQuizScreenSize';
+import { quizScreenBox } from '@/quiz/quizScreenBox';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { quizColors } from '@/components/palette';
 import { QuizPanel, type PanelAnswers } from '@/components/quiz/QuizPanel';
@@ -38,10 +38,10 @@ export default function QuizPlayScreen() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
 
-  // A box the on-screen keyboard cannot move, because it feeds the camera stop and a box
-  // that changed mid-answer would re-frame the country on every keystroke. Each platform
-  // reaches that differently - see the hook.
-  const screen = useQuizScreenSize();
+  // `useWindowDimensions` stays INLINE here, not tucked inside a hook: it is what
+  // re-renders this screen on rotation, and moving it changes what the React Compiler
+  // memoises - which silently strands the panel in its portrait layout. See quizScreenBox.
+  const screen = quizScreenBox(useWindowDimensions());
   const keyboardHeight = useKeyboardHeight();
 
   // Params are only read once: re-parsing on every render would hand `buildQuiz` a new
