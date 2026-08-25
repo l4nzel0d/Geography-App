@@ -19,6 +19,39 @@
         "clear": true
       },
       "detail": "Release APK for the phone. Output: android/app/build/outputs/apk/release/"
+    },
+    {
+      "label": "android: run (dev build + Metro)",
+      "type": "shell",
+      "command": "npx expo run:android",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "detail": "Build/install the dev APK on the running emulator or device, then serve JS from Metro. Needs an emulator up (emulator -avd Medium_Phone)."
+    },
+    {
+      "label": "web: start dev server",
+      "type": "shell",
+      "command": "npx expo start --web",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "detail": "Expo dev server for the web target. Do NOT set CI=1 - it disables watch mode."
     }
   ]
 }
