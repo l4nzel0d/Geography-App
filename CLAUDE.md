@@ -1016,6 +1016,15 @@ npm run typecheck
 npm run test:e2e                   # maestro, needs a running emulator/device
 npm run build:data                 # one-off, needs network; rewrites BOTH json files
 npm run enrich:data                # offline; rewrites countryFacts.json only
+
+# web
+npm run web                        # expo start --web (dev; no service worker)
+npm run build:web                  # assets + icons + export + service worker -> dist/
+npm run serve:web                  # serve an existing dist/ on :4173
+npm run web:phone                  # build and serve for a phone on the LAN
+# A service worker needs a SECURE context, so a LAN IP shows the app but never the PWA.
+# `adb reverse tcp:4173 tcp:4173` makes the phone treat it as localhost, which counts.
+# Load any route with `?debug` to get the live map on `window.__geoMap`.
 ```
 
 ### A release build can package a stale JS bundle — `.json` is not a Gradle input
@@ -1146,6 +1155,104 @@ adb logcat | grep -i "http\|network"          # should show nothing from the app
 adb exec-out screencap -p > proof.png
 adb shell svc wifi enable
 ```
+
+## The web target
+
+The same app runs in a browser - phone and desktop - as an installable PWA that works
+offline. `feat/web` added it; **Android is unchanged in behaviour throughout.**
+
+Metro picks the platform by file extension, so the split is a set of `.web.tsx` siblings
+rather than `Platform.OS` branches. There are still **zero** `Platform.OS` checks in
+`src/`.
+
+| | native | web |
+|---|---|---|
+| Map | `WorldMap.tsx` - `@maplibre/maplibre-react-native` | `WorldMap.web.tsx` - `maplibre-gl` |
+| Style | `OFFLINE_STYLE` (`font-faces` + `asset://`) | `WEB_OFFLINE_STYLE` (no `font-faces`, no `glyphs`) |
+| Flags | emoji | `CountryFlag.web.tsx` - real SVGs where the platform has no flag glyphs |
+| Escape / keyboard play | no-ops | `useDismissKey.web.ts`, `keyboardPlay.web.ts` |
+| Window size | `useWindowDimensions` | `useWindowSize.web.ts` - DOM truth, hydration-safe |
+
+`worldMapProps.ts` holds the props and camera constants both implementations share, so
+the two cannot drift. Everything above the renderer - `worldGeoJson`, `labelGeoJson`,
+`CHOROPLETH_RAMPS`, `labelFilter`, `getWorldFitZoom`, `pickCountry`, all of
+`quizCamera.ts` - is used unmodified. **The style spec is the portability layer**, which
+is why this port is small.
+
+### Text still needs no network
+
+`font-faces` is MapLibre **Native** only, and the tempting conclusion - "so the web needs
+a glyph server" - is wrong and would break the whole point of this project. From
+maplibre-gl's `glyph_manager.ts`:
+
+```js
+if (!this.url || this._charUsesLocalIdeographFontFamily(id)) {
+    glyph = entry.glyphs[id] = await this._drawGlyph(entry, stack, id);
+```
+
+With **no `glyphs` key at all**, every glyph is rasterised locally through canvas/TinySDF
+using the `text-font` name as a CSS family. So `text-font: [LABEL_FONT]` carries over
+unchanged and `expo-font`'s runtime hook registers the family. Verified with the origin
+dead: zero glyph requests, zero external origins.
+
+### Traps, each of which cost real time
+
+- **MapLibre invents a viewport rather than waiting for one.** Given a zero-sized
+  container it does not warn - it falls back to a **400x300** canvas and carries on, so
+  every camera stop afterwards is arithmetic against a viewport that does not exist and
+  the country lands off screen. Resizing "fixes" it because that finally tells the
+  transform the truth. `WorldMap.web.tsx` therefore waits for a measured container before
+  creating the map, ignores zero sizes from its `ResizeObserver` (a navigator reports one
+  while `/search` sits over the map), re-syncs the transform before every stop, and holds
+  a stop that arrives too early rather than dropping it.
+- **React keeps the server's `className` on a hydration mismatch.** `web.output: "static"`
+  renders every route in Node, where there is no window, so responsive branches take their
+  smallest path - and the corrected classes computed on the client never reach the DOM.
+  Nothing throws. Anything responsive in a FIRST render must use `useWindowSize`, not
+  `useWindowDimensions`. Diagnose by comparing `element.className` against
+  `__reactProps$*.className`.
+- **`reactCompiler: true` punishes extracting a subscription into a hook.** Moving
+  `useWindowDimensions()` out of a component body changes what the compiler memoises;
+  the quiz then kept a stale layout through a rotation and `.maestro/quiz.yaml` failed
+  0/3 against master's 3/3. `quizScreenBox.ts` is a PURE function taking the window for
+  exactly this reason - keep the subscription inline.
+- **A redeploy takes two visits to appear** unless the page reloads on
+  `controllerchange`: the open page keeps its worker's assets and the new one only serves
+  the visit after. Every conclusion drawn from that first load describes the previous
+  build. Bit us twice.
+- **Workbox's 2 MB default silently skips the bundle**, which is ~5 MB. The worker then
+  registers, activates, looks perfect and fails offline. `scripts/build-web.mjs` asserts
+  the bundle is under the limit rather than trusting the summary line.
+- **Windows ships no country flag emoji at all.** Segoe UI Emoji has none, so a regional
+  indicator pair renders as two letters. Not fixable in CSS; `public/flags/` carries real
+  SVGs, fetched same-origin only where the platform needs them.
+
+### Framing is tested end to end, on purpose
+
+`searchFraming.test.ts` asserts a searched country is centred in, and fits inside, the
+band a person can actually see - across five real viewports and five awkward countries.
+
+It derives that band from **independently measured facts about the UI**, never from the
+code under test. That is the whole point: every earlier check asked "did it land at the
+centre of `getMapFocusRect(...)`", which agrees with that function however wrong it is,
+and is why framing measured perfect while a phone was visibly wrong. Reintroducing the
+original bug fails 28 of its 55 cases.
+
+Two things it must keep doing, both of which fooled its own first draft: measure the
+country **as drawn** (Mercator is not linear, so a tall country's latitude midpoint is
+not its visual centre), and via projected corners (New Zealand's bbox crosses the
+antimeridian, so `(west + east) / 2` lands in the Atlantic).
+
+### Deploying
+
+`vercel.json` pins the build to `npm run build:web` and the output to `dist/`. The
+headers there are not decoration: **`sw.js` must not be cached** or a deploy never
+reaches anyone, and the MapLibre worker needs a JavaScript content type. `cleanUrls`
+serves `/search` and `/quiz/play` from the per-route HTML the static export emits.
+
+Assets under `_expo/static/` and `assets/` are content-hashed and marked immutable;
+everything else the worker precaches carries a Workbox revision, so it updates despite
+the HTTP cache.
 
 ## Open risks
 

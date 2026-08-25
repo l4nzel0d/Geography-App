@@ -1,8 +1,10 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, Dimensions, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { BackHandler, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBack } from '@/navigation/goBack';
+import { quizScreenBox } from '@/quiz/quizScreenBox';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { quizColors } from '@/components/palette';
 import { QuizPanel, type PanelAnswers } from '@/components/quiz/QuizPanel';
@@ -36,13 +38,10 @@ export default function QuizPlayScreen() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
 
-  // The split is measured from the SCREEN, not the window, so the map's box - and
-  // therefore the camera stop - cannot change while someone is typing. The keyboard is
-  // handled separately, as padding, because edge-to-edge means the window never resizes
-  // for it anyway. `useWindowDimensions` is still subscribed to: it is what re-renders
-  // this component on rotation.
-  useWindowDimensions();
-  const screen = Dimensions.get('screen');
+  // `useWindowDimensions` stays INLINE here, not tucked inside a hook: it is what
+  // re-renders this screen on rotation, and moving it changes what the React Compiler
+  // memoises - which silently strands the panel in its portrait layout. See quizScreenBox.
+  const screen = quizScreenBox(useWindowDimensions());
   const keyboardHeight = useKeyboardHeight();
 
   // Params are only read once: re-parsing on every render would hand `buildQuiz` a new
@@ -157,7 +156,7 @@ export default function QuizPlayScreen() {
     setConfirmingExit(false);
     // `cancel` is the no-op: closing the card IS staying in the round.
     if (action === 'score') end();
-    else if (action === 'discard') router.back();
+    else if (action === 'discard') goBack();
   };
 
   if (!question) {

@@ -1,13 +1,19 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from "expo-router";
+import { useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { quizColors, quizRadii } from '@/components/palette';
-import { getCountryFacts } from '@/data/countryFacts';
-import { FIELD_LABELS, newSeed, toQuizParams } from '@/quiz/quizConfig';
-import { takeQuizResult } from '@/quiz/quizResultStore';
-import { summarize } from '@/quiz/quizScore';
+import { CountryFlag } from "@/components/CountryFlag";
+import {
+  getInfoSheetLayout,
+  MAX_CONTENT_WIDTH,
+} from "@/components/infoSheetLayout";
+import { quizColors, quizRadii } from "@/components/palette";
+import { useWindowSize } from "@/components/useWindowSize";
+import { getCountryFacts } from "@/data/countryFacts";
+import { FIELD_LABELS, newSeed, toQuizParams } from "@/quiz/quizConfig";
+import { takeQuizResult } from "@/quiz/quizResultStore";
+import { summarize } from "@/quiz/quizScore";
 
 /**
  * The score, and what you actually got wrong.
@@ -32,11 +38,18 @@ import { summarize } from '@/quiz/quizScore';
  */
 const goToSetup = () => {
   if (router.canGoBack()) router.back();
-  else router.replace('/quiz');
+  else router.replace("/quiz");
 };
 
 export default function QuizResultsScreen() {
   const insets = useSafeAreaInsets();
+
+  // A results list run edge to edge on a monitor puts each country a whole screen away
+  // from its verdict. Capped and centred on desktop; untouched on a phone.
+  const centred =
+    getInfoSheetLayout(useWindowSize()).tier === "desktop"
+      ? styles.centred
+      : null;
 
   // Read once, on mount. The store clears on read, so a back gesture or a dev reload
   // onto this URL finds nothing and bounces to setup rather than showing a stale round.
@@ -50,7 +63,7 @@ export default function QuizResultsScreen() {
         </Text>
         <Pressable
           testID="quiz-results-restart"
-          onPress={() => router.replace('/quiz')}
+          onPress={() => router.replace("/quiz")}
           style={styles.secondary}
           accessibilityRole="button"
         >
@@ -68,7 +81,11 @@ export default function QuizResultsScreen() {
       <ScrollView
         testID="quiz-results"
         style={styles.body}
-        contentContainerStyle={[styles.bodyContent, { paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[
+          styles.bodyContent,
+          centred,
+          { paddingBottom: insets.bottom + 24 },
+        ]}
       >
         <Text style={styles.title}>Round over</Text>
 
@@ -118,12 +135,19 @@ export default function QuizResultsScreen() {
               style={styles.review}
             >
               <View style={styles.reviewHeader}>
-                <Text style={styles.flag}>{facts?.flag ?? '🏳️'}</Text>
-                <Text style={styles.reviewName}>{facts?.name ?? result.iso3}</Text>
+                {/* Shared with the map and search, so a platform that cannot draw flag
+                    emoji gets a real image rather than a bare country code. */}
+                <CountryFlag flag={facts?.flag ?? null} size="xs" />
+                <Text style={styles.reviewName}>
+                  {facts?.name ?? result.iso3}
+                </Text>
                 <Text
-                  style={[styles.verdict, result.allCorrect ? styles.ok : styles.bad]}
+                  style={[
+                    styles.verdict,
+                    result.allCorrect ? styles.ok : styles.bad,
+                  ]}
                 >
-                  {result.allCorrect ? '✓' : '✗'}
+                  {result.allCorrect ? "✓" : "✗"}
                 </Text>
               </View>
 
@@ -133,10 +157,14 @@ export default function QuizResultsScreen() {
                     .filter((grade) => !grade.correct)
                     .map((grade) => (
                       <View key={grade.field} style={styles.missRow}>
-                        <Text style={styles.missField}>{FIELD_LABELS[grade.field]}</Text>
+                        <Text style={styles.missField}>
+                          {FIELD_LABELS[grade.field]}
+                        </Text>
                         <Text style={styles.missAnswer}>{grade.expected}</Text>
                         {grade.given ? (
-                          <Text style={styles.missGiven}>you said {grade.given}</Text>
+                          <Text style={styles.missGiven}>
+                            you said {grade.given}
+                          </Text>
                         ) : (
                           <Text style={styles.missGiven}>left blank</Text>
                         )}
@@ -147,37 +175,40 @@ export default function QuizResultsScreen() {
         })}
       </ScrollView>
 
+      {/* Full-bleed bar, capped content - matching the setup screen. */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        <Pressable
-          testID="quiz-play-again"
-          onPress={() =>
-            router.replace({
-              pathname: '/quiz/play',
-              params: toQuizParams({ ...run.config, seed: newSeed() }),
-            })
-          }
-          style={styles.primary}
-          accessibilityRole="button"
-        >
-          <Text style={styles.primaryText}>Play again</Text>
-        </Pressable>
-        <View style={styles.footerRow}>
+        <View style={[styles.footerInner, centred]}>
           <Pressable
-            testID="quiz-change-settings"
-            onPress={goToSetup}
-            style={styles.secondary}
+            testID="quiz-play-again"
+            onPress={() =>
+              router.replace({
+                pathname: "/quiz/play",
+                params: toQuizParams({ ...run.config, seed: newSeed() }),
+              })
+            }
+            style={styles.primary}
             accessibilityRole="button"
           >
-            <Text style={styles.secondaryText}>Change settings</Text>
+            <Text style={styles.primaryText}>Play again</Text>
           </Pressable>
-          <Pressable
-            testID="quiz-back-to-map"
-            onPress={() => router.dismissAll()}
-            style={styles.secondary}
-            accessibilityRole="button"
-          >
-            <Text style={styles.secondaryText}>Back to map</Text>
-          </Pressable>
+          <View style={styles.footerRow}>
+            <Pressable
+              testID="quiz-change-settings"
+              onPress={goToSetup}
+              style={styles.secondary}
+              accessibilityRole="button"
+            >
+              <Text style={styles.secondaryText}>Change settings</Text>
+            </Pressable>
+            <Pressable
+              testID="quiz-back-to-map"
+              onPress={() => router.dismissAll()}
+              style={styles.secondary}
+              accessibilityRole="button"
+            >
+              <Text style={styles.secondaryText}>Back to map</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     </View>
@@ -185,35 +216,42 @@ export default function QuizResultsScreen() {
 }
 
 const styles = StyleSheet.create({
+  /** Desktop only: a readable column instead of the full width of a monitor. */
+  centred: { width: "100%", maxWidth: MAX_CONTENT_WIDTH, alignSelf: "center" },
   screen: { flex: 1, backgroundColor: quizColors.surface },
-  centered: { alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
-  emptyText: { color: quizColors.textMuted, fontSize: 15, textAlign: 'center' },
+  centered: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    padding: 24,
+  },
+  emptyText: { color: quizColors.textMuted, fontSize: 15, textAlign: "center" },
   body: { flex: 1 },
   bodyContent: { paddingHorizontal: 20, gap: 12 },
-  title: { color: quizColors.text, fontSize: 26, fontWeight: '700' },
+  title: { color: quizColors.text, fontSize: 26, fontWeight: "700" },
   scoreCard: {
     backgroundColor: quizColors.surfaceRaised,
     borderRadius: quizRadii.card,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: quizColors.border,
     padding: 18,
-    alignItems: 'center',
+    alignItems: "center",
     gap: 2,
   },
-  scoreBig: { color: quizColors.accent, fontSize: 40, fontWeight: '700' },
+  scoreBig: { color: quizColors.accent, fontSize: 40, fontWeight: "700" },
   scoreLabel: {
     color: quizColors.textMuted,
     fontSize: 11,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
     letterSpacing: 0.8,
   },
   scoreSmall: { color: quizColors.text, fontSize: 14, marginTop: 8 },
   endedEarly: { color: quizColors.textFaint, fontSize: 12, marginTop: 4 },
-  perField: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  perField: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   fieldPill: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 6,
-    alignItems: 'center',
+    alignItems: "center",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: quizRadii.pill,
@@ -222,8 +260,13 @@ const styles = StyleSheet.create({
     borderColor: quizColors.border,
   },
   fieldPillLabel: { color: quizColors.textMuted, fontSize: 12 },
-  fieldPillValue: { color: quizColors.text, fontSize: 12, fontWeight: '700' },
-  section: { color: quizColors.text, fontSize: 15, fontWeight: '700', marginTop: 10 },
+  fieldPillValue: { color: quizColors.text, fontSize: 12, fontWeight: "700" },
+  section: {
+    color: quizColors.text,
+    fontSize: 15,
+    fontWeight: "700",
+    marginTop: 10,
+  },
   review: {
     backgroundColor: quizColors.surfaceRaised,
     borderRadius: quizRadii.card,
@@ -232,17 +275,21 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 8,
   },
-  reviewHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  flag: { fontSize: 20 },
-  reviewName: { color: quizColors.text, fontSize: 15, fontWeight: '600', flex: 1 },
-  verdict: { fontSize: 16, fontWeight: '700' },
+  reviewHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  reviewName: {
+    color: quizColors.text,
+    fontSize: 15,
+    fontWeight: "600",
+    flex: 1,
+  },
+  verdict: { fontSize: 16, fontWeight: "700" },
   ok: { color: quizColors.correct },
   bad: { color: quizColors.wrong },
   missRow: { gap: 1 },
   missField: {
     color: quizColors.textMuted,
     fontSize: 10,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
     letterSpacing: 0.8,
   },
   missAnswer: { color: quizColors.text, fontSize: 14 },
@@ -250,26 +297,34 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: 20,
     paddingTop: 12,
-    gap: 8,
     backgroundColor: quizColors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: quizColors.border,
   },
-  footerRow: { flexDirection: 'row', gap: 8 },
+  footerInner: { gap: 8 },
+  footerRow: { flexDirection: "row", gap: 8 },
   primary: {
     backgroundColor: quizColors.accent,
     borderRadius: quizRadii.pill,
     paddingVertical: 13,
-    alignItems: 'center',
+    alignItems: "center",
   },
-  primaryText: { color: quizColors.textInverted, fontSize: 15, fontWeight: '700' },
+  primaryText: {
+    color: quizColors.textInverted,
+    fontSize: 15,
+    fontWeight: "700",
+  },
   secondary: {
     flex: 1,
     borderRadius: quizRadii.pill,
     paddingVertical: 11,
-    alignItems: 'center',
+    alignItems: "center",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: quizColors.border,
   },
-  secondaryText: { color: quizColors.textMuted, fontSize: 13, fontWeight: '600' },
+  secondaryText: {
+    color: quizColors.textMuted,
+    fontSize: 13,
+    fontWeight: "600",
+  },
 });

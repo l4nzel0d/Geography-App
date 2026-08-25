@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { CountrySearchResult } from '@/search/countrySearch';
 
+import { CountryFlag } from '../CountryFlag';
 import { quizColors, quizRadii } from '../palette';
 
 type CountryResultRowProps = {
@@ -39,7 +40,9 @@ export const CountryResultRow = memo(function CountryResultRow({
       accessibilityRole="button"
       accessibilityLabel={matchedAs ? `${name}, also known as ${matchedAs}` : name}
     >
-      <Text style={styles.flag}>{flag ?? '⚑'}</Text>
+      {/* Shared with the info sheet, so a platform that cannot draw flag emoji gets a
+          real image here too rather than a bare country code. See flagEmoji.ts. */}
+      <CountryFlag flag={flag} size="sm" />
 
       <View style={styles.text}>
         <Text style={styles.name} numberOfLines={1}>
@@ -65,7 +68,6 @@ const styles = StyleSheet.create({
     borderRadius: quizRadii.field,
   },
   rowPressed: { backgroundColor: quizColors.surfaceRaised },
-  flag: { fontSize: 24 },
   text: { flex: 1 },
   name: { color: quizColors.text, fontSize: 16 },
   subregion: { color: quizColors.textMuted, fontSize: 13, marginTop: 2 },

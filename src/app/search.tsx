@@ -11,6 +11,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBack } from '@/navigation/goBack';
+import { getInfoSheetLayout, MAX_CONTENT_WIDTH } from '@/components/infoSheetLayout';
+import { useWindowSize } from '@/components/useWindowSize';
 import { quizColors, quizRadii } from '@/components/palette';
 import { useKeyboardHeight } from '@/components/quiz/useKeyboardHeight';
 import { CountryResultRow } from '@/components/search/CountryResultRow';
@@ -57,8 +60,18 @@ export default function SearchScreen() {
     selectCountry(iso3);
     // Otherwise the IME lingers over the map for a beat after the transition.
     Keyboard.dismiss();
-    router.back();
+    goBack();
   }, []);
+
+  /**
+   * A search list stretched across a 1920 dp monitor is a row of text with an acre of
+   * empty space after it. Cap the content column and centre it; on a phone the cap is
+   * never reached, so nothing about the compact layout changes.
+   */
+  // `useWindowSize`, NOT `useWindowDimensions`: this branch is in the first render, so
+  // it ends up in the statically exported HTML and must survive hydration. See the hook.
+  const { tier } = getInfoSheetLayout(useWindowSize());
+  const centred = tier === 'desktop' ? styles.centred : null;
 
   return (
     <View
@@ -74,10 +87,10 @@ export default function SearchScreen() {
         },
       ]}
     >
-      <View style={styles.header}>
+      <View style={[styles.header, centred]}>
         <Pressable
           testID="country-search-cancel"
-          onPress={() => router.back()}
+          onPress={goBack}
           style={styles.cancel}
           hitSlop={10}
           accessibilityRole="button"
@@ -137,7 +150,7 @@ export default function SearchScreen() {
         // the row never fires - which reads exactly like a dead list.
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, centred]}
         initialNumToRender={12}
         ListEmptyComponent={
           <View testID="country-search-empty" style={styles.empty}>
@@ -177,6 +190,13 @@ const styles = StyleSheet.create({
   input: { flex: 1, color: quizColors.text, fontSize: 16, paddingVertical: 10 },
   clear: { color: quizColors.textMuted, fontSize: 15 },
   list: { paddingBottom: 16, paddingHorizontal: 4 },
+  /**
+   * Desktop only. A results list spanning a 1920 dp monitor puts the country name at the
+   * far left of an otherwise empty row; capping the column keeps the flag, the name and
+   * the subregion within one comfortable scan. `width: '100%'` keeps the cap from
+   * shrink-wrapping the rows on narrower desktop windows.
+   */
+  centred: { width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
   empty: { paddingHorizontal: 20, paddingTop: 32, gap: 8 },
   emptyTitle: { color: quizColors.text, fontSize: 16 },
   emptyHint: { color: quizColors.textMuted, fontSize: 14, lineHeight: 20 },

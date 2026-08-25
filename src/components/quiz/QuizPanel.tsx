@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { QuestionResult } from '@/quiz/gradeAnswer';
@@ -7,6 +7,7 @@ import type { QuizQuestion } from '@/quiz/quizBuilder';
 import type { FieldId } from '@/quiz/quizConfig';
 
 import { AnswerField } from './AnswerField';
+import { KEYBOARD_PLAY } from './keyboardPlay';
 import { quizColors, quizRadii } from '../palette';
 
 export type PanelAnswers = {
@@ -58,6 +59,14 @@ export function QuizPanel({
   landscape,
 }: QuizPanelProps) {
   const inputs = useRef<Record<string, TextInput | null>>({});
+
+  /**
+   * The Check/Next button, so it can take focus once an answer is graded.
+   *
+   * Typed loosely on purpose: RN's `Pressable` exposes no cross-platform `focus`, but
+   * on the web the ref IS the DOM node and does. The optional call keeps native inert.
+   */
+  const submitRef = useRef<{ focus?: () => void } | null>(null);
   const askable = new Set(question.fields);
   const graded = result != null;
 
@@ -78,6 +87,30 @@ export function QuizPanel({
   };
 
   const visibleFields = configuredFields.filter((field) => askable.has(field));
+
+  /**
+   * A new country arrives: put the cursor in the first thing it can be asked.
+   *
+   * Keyed on the country rather than on the field list, which is rebuilt every render.
+   * Web only - see `keyboardPlay.ts` for why focusing a field is unwelcome on a phone.
+   */
+  useEffect(() => {
+    if (!KEYBOARD_PLAY) return;
+    inputs.current[visibleFields[0]]?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [question.iso3]);
+
+  /**
+   * An answer has been graded: move focus to the button that advances.
+   *
+   * This is the step that closes the loop - without it a player types every answer, hits
+   * Enter to check, and then has to reach for the mouse to carry on. With it, Enter
+   * checks and Enter again moves to the next country.
+   */
+  useEffect(() => {
+    if (!KEYBOARD_PLAY || !graded) return;
+    submitRef.current?.focus?.();
+  }, [graded]);
 
   const focusNext = (field: FieldId) => {
     const position = visibleFields.indexOf(field);
@@ -135,6 +168,7 @@ export function QuizPanel({
       </ScrollView>
 
       <Pressable
+        ref={submitRef as never}
         testID="quiz-submit"
         style={styles.button}
         onPress={() => {

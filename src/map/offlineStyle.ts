@@ -1,4 +1,4 @@
-import type { StyleSpecification } from '@maplibre/maplibre-react-native';
+import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 
 export const mapColors = {
   ocean: '#0d2b45',
@@ -90,3 +90,38 @@ export const OFFLINE_STYLE: StyleSpecification = {
     },
   ],
 };
+
+/**
+ * The same style, for MapLibre GL JS on the web.
+ *
+ * Two keys' worth of difference, and both are absences:
+ *
+ * - **no `font-faces`.** That property is implemented in native `libmaplibre.so`
+ *   (`mbgl::FontFace`, FreeType, HarfBuzz). `maplibre-gl` JS does not implement it.
+ * - **no `glyphs`, exactly as above** - and this is the part that is easy to get wrong.
+ *   The tempting conclusion from the line above is "so web needs a glyph server", which
+ *   would reintroduce the tile-server-shaped dependency this whole file exists to avoid.
+ *   It is not true. From maplibre-gl's own `glyph_manager.ts`:
+ *
+ *       if (!this.url || this._charUsesLocalIdeographFontFamily(id)) {
+ *           glyph = entry.glyphs[id] = await this._drawGlyph(entry, stack, id);
+ *
+ *   With no `glyphs` URL at all, `this.url` is falsy for every character, so every glyph
+ *   is rasterised locally through canvas/TinySDF - which builds a CSS `font-family` from
+ *   the `text-font` fontstack name and awaits `document.fonts.load` before drawing. So
+ *   `text-font: [LABEL_FONT]` is carried over UNCHANGED, and the family is registered by
+ *   the `@font-face` in `src/app/+html.tsx`, pointing at `public/fonts/`.
+ *
+ * The rule at the top of this file therefore holds identically on both platforms: **no
+ * remote URL of any kind.** Only the mechanism that gets glyph data differs.
+ *
+ * Known limitation: locally-drawn glyphs get no HarfBuzz shaping. Every string this app
+ * labels with is Latin with precomposed diacritics - Türkiye, Côte d'Ivoire, São Tomé,
+ * Curaçao, Asunción - which is one codepoint per glyph, so no shaping is needed.
+ */
+export const WEB_OFFLINE_STYLE: StyleSpecification = (() => {
+  // Derived rather than re-spelled, so the ocean colour and the background layer cannot
+  // drift between the two platforms.
+  const { 'font-faces': _fontFaces, ...web } = OFFLINE_STYLE;
+  return { ...web, name: 'geography-app-offline-web' };
+})();
