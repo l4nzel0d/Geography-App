@@ -497,10 +497,25 @@ export function WorldMap({
   const pendingStop = useRef<typeof camera>(undefined);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !camera || camera === lastStop.current) return;
+    if (!camera || camera === lastStop.current) return;
     lastStop.current = camera;
     pendingStop.current = camera;
+
+    /**
+     * The map may not exist yet, and the stop must NOT be dropped when it does not.
+     *
+     * Quiz mode hands over its first stop as the screen mounts - before the container has
+     * been measured and therefore before the map has been built - so a plain early return
+     * threw the opening question's framing away. The round then began at the world view
+     * and only jumped to the country when something else produced a fresh stop, which is
+     * why resizing the window "fixed" it: that rebuilds `mapViewport`, and a new stop
+     * object re-enters here with a map to apply it to.
+     *
+     * Recorded above as `pendingStop`, so whichever of the two effects below gets there
+     * first - the map being created, or the container gaining a size - places it.
+     */
+    const map = mapRef.current;
+    if (!map) return;
 
     /**
      * **Animate only when there are frames to animate in, and guarantee arrival either
@@ -558,6 +573,24 @@ export function WorldMap({
 
     return () => clearTimeout(deadline);
   }, [camera]);
+
+  /**
+   * Place whatever was owed as soon as there is a map to place it on.
+   *
+   * Pairs with the early return above: a stop that arrived before the map existed is
+   * held rather than dropped, and this is where it lands.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    const owed = pendingStop.current;
+    if (!ready || !map || !owed) return;
+    if (!syncMapSize(map, containerRef.current as unknown as HTMLElement | null)) return;
+
+    // No animation: this is the opening view of a screen, not a journey from one country
+    // to another, and there is nothing on screen yet for a fly to give context to.
+    applyStop(map, owed, false);
+    pendingStop.current = undefined;
+  }, [ready]);
 
   // Arriving clears the debt; anything still outstanding was starved.
   useEffect(() => {

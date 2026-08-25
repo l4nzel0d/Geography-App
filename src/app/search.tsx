@@ -12,7 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { goBack } from '@/navigation/goBack';
-import { getInfoSheetLayout, SEARCH_MAX_CONTENT_WIDTH } from '@/components/infoSheetLayout';
+import { getInfoSheetLayout, MAX_CONTENT_WIDTH } from '@/components/infoSheetLayout';
 import { useWindowSize } from '@/components/useWindowSize';
 import { quizColors, quizRadii } from '@/components/palette';
 import { useKeyboardHeight } from '@/components/quiz/useKeyboardHeight';
@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
    * the subregion within one comfortable scan. `width: '100%'` keeps the cap from
    * shrink-wrapping the rows on narrower desktop windows.
    */
-  centred: { width: '100%', maxWidth: SEARCH_MAX_CONTENT_WIDTH, alignSelf: 'center' },
+  centred: { width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
   empty: { paddingHorizontal: 20, paddingTop: 32, gap: 8 },
   emptyTitle: { color: quizColors.text, fontSize: 16 },
   emptyHint: { color: quizColors.textMuted, fontSize: 14, lineHeight: 20 },

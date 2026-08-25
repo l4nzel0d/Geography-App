@@ -5,7 +5,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { goBack } from '@/navigation/goBack';
 import { FieldPicker } from '@/components/quiz/FieldPicker';
+import { getInfoSheetLayout, MAX_CONTENT_WIDTH } from '@/components/infoSheetLayout';
 import { quizColors, quizRadii } from '@/components/palette';
+import { useWindowSize } from '@/components/useWindowSize';
 import { SubregionPicker } from '@/components/quiz/SubregionPicker';
 import { countriesIn } from '@/quiz/quizCountries';
 import { type FieldId, newSeed, toQuizParams } from '@/quiz/quizConfig';
@@ -19,6 +21,11 @@ import { type FieldId, newSeed, toQuizParams } from '@/quiz/quizConfig';
  */
 export default function QuizSetupScreen() {
   const insets = useSafeAreaInsets();
+
+  // Subregion checkboxes stretched across a monitor put the tick a whole screen from its
+  // label. Capped and centred on desktop; untouched on a phone.
+  const centred =
+    getInfoSheetLayout(useWindowSize()).tier === 'desktop' ? styles.centred : null;
   const [subregions, setSubregions] = useState<string[]>([]);
   const [fields, setFields] = useState<FieldId[]>(['name']);
 
@@ -35,7 +42,7 @@ export default function QuizSetupScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
-      <View style={styles.header}>
+      <View style={[styles.header, centred]}>
         <View style={styles.headerText}>
           <Text testID="quiz-setup-title" style={styles.title}>
             Quiz
@@ -59,7 +66,7 @@ export default function QuizSetupScreen() {
       <ScrollView
         testID="quiz-setup"
         style={styles.body}
-        contentContainerStyle={[styles.bodyContent, { paddingBottom: insets.bottom + 120 }]}
+        contentContainerStyle={[styles.bodyContent, centred, { paddingBottom: insets.bottom + 120 }]}
       >
         <Text style={styles.section}>What do you have to answer?</Text>
         <FieldPicker selected={fields} onChange={setFields} />
@@ -71,7 +78,7 @@ export default function QuizSetupScreen() {
         <SubregionPicker selected={subregions} onChange={setSubregions} />
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+      <View style={[styles.footer, centred, { paddingBottom: insets.bottom + 16 }]}>
         <Pressable
           testID="quiz-start"
           onPress={start}
@@ -93,6 +100,8 @@ export default function QuizSetupScreen() {
 }
 
 const styles = StyleSheet.create({
+  /** Desktop only: a readable column instead of the full width of a monitor. */
+  centred: { width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
   screen: { flex: 1, backgroundColor: quizColors.surface },
   header: {
     flexDirection: 'row',

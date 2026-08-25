@@ -98,11 +98,15 @@ export const DESKTOP_PANEL_WIDTH_FRACTION = 0.28;
 /**
  * Widest a text-first screen's content column gets on desktop.
  *
- * `/search` is a list of short rows; run edge to edge on a 1920 dp monitor it puts the
- * country name at the far left of an otherwise empty line. Roughly the width at which a
- * flag, a name and a subregion still read as one group.
+ * The map wants every pixel it can get; the screens that are lists and forms - search,
+ * quiz setup, quiz results - emphatically do not. Run edge to edge on a 1920 dp monitor
+ * they put a country name at the far left of an otherwise empty line and a checkbox a
+ * whole screen away from its label. Roughly the width at which a row still reads as one
+ * group.
+ *
+ * Only applied at the desktop tier, so nothing about the phone layouts changes.
  */
-export const SEARCH_MAX_CONTENT_WIDTH = 720;
+export const MAX_CONTENT_WIDTH = 720;
 
 export type WindowSize = { width: number; height: number };
 

@@ -3,7 +3,10 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CountryFlag } from '@/components/CountryFlag';
+import { getInfoSheetLayout, MAX_CONTENT_WIDTH } from '@/components/infoSheetLayout';
 import { quizColors, quizRadii } from '@/components/palette';
+import { useWindowSize } from '@/components/useWindowSize';
 import { getCountryFacts } from '@/data/countryFacts';
 import { FIELD_LABELS, newSeed, toQuizParams } from '@/quiz/quizConfig';
 import { takeQuizResult } from '@/quiz/quizResultStore';
@@ -38,6 +41,11 @@ const goToSetup = () => {
 export default function QuizResultsScreen() {
   const insets = useSafeAreaInsets();
 
+  // A results list run edge to edge on a monitor puts each country a whole screen away
+  // from its verdict. Capped and centred on desktop; untouched on a phone.
+  const centred =
+    getInfoSheetLayout(useWindowSize()).tier === 'desktop' ? styles.centred : null;
+
   // Read once, on mount. The store clears on read, so a back gesture or a dev reload
   // onto this URL finds nothing and bounces to setup rather than showing a stale round.
   const [run] = useState(takeQuizResult);
@@ -68,7 +76,7 @@ export default function QuizResultsScreen() {
       <ScrollView
         testID="quiz-results"
         style={styles.body}
-        contentContainerStyle={[styles.bodyContent, { paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[styles.bodyContent, centred, { paddingBottom: insets.bottom + 24 }]}
       >
         <Text style={styles.title}>Round over</Text>
 
@@ -118,7 +126,9 @@ export default function QuizResultsScreen() {
               style={styles.review}
             >
               <View style={styles.reviewHeader}>
-                <Text style={styles.flag}>{facts?.flag ?? '🏳️'}</Text>
+                {/* Shared with the map and search, so a platform that cannot draw flag
+                    emoji gets a real image rather than a bare country code. */}
+                <CountryFlag flag={facts?.flag ?? null} size="xs" />
                 <Text style={styles.reviewName}>{facts?.name ?? result.iso3}</Text>
                 <Text
                   style={[styles.verdict, result.allCorrect ? styles.ok : styles.bad]}
@@ -147,7 +157,7 @@ export default function QuizResultsScreen() {
         })}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+      <View style={[styles.footer, centred, { paddingBottom: insets.bottom + 16 }]}>
         <Pressable
           testID="quiz-play-again"
           onPress={() =>
@@ -185,6 +195,8 @@ export default function QuizResultsScreen() {
 }
 
 const styles = StyleSheet.create({
+  /** Desktop only: a readable column instead of the full width of a monitor. */
+  centred: { width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
   screen: { flex: 1, backgroundColor: quizColors.surface },
   centered: { alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
   emptyText: { color: quizColors.textMuted, fontSize: 15, textAlign: 'center' },
@@ -233,7 +245,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   reviewHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  flag: { fontSize: 20 },
   reviewName: { color: quizColors.text, fontSize: 15, fontWeight: '600', flex: 1 },
   verdict: { fontSize: 16, fontWeight: '700' },
   ok: { color: quizColors.correct },
