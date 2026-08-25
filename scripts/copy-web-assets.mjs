@@ -25,15 +25,24 @@
  *    `import ... from "./maplibre-gl-shared.mjs"`, resolved relative to the worker's own
  *    URL. Copying only the worker yields a worker that 404s on startup.
  *
+ * 2. **The flag images.** Windows draws no country flag emoji at all (see
+ *    `components/flagEmoji.ts`), so the web build ships real flag SVGs and reaches for
+ *    one only on the platforms that need it. They come from the `flag-icons`
+ *    devDependency and are copied per ISO 3166-1 alpha-2 code, so only the ~249 flags the
+ *    dataset actually references ship - not the 271 the package carries.
+ *
  * The label font deliberately does NOT need copying. Expo's static rendering already
  * emits `@font-face{font-family:"Map Label";src:url("/assets/.../NotoSans-Regular.<hash>.ttf")}`
  * into every exported HTML file, derived from the `useFonts` call in `WorldMap.web.tsx` -
  * so the family the label layer's `text-font` names is registered without any help, and a
  * second unhashed copy would only add 556 KB of never-requested bytes to the payload.
  */
-import { copyFileSync, mkdirSync, statSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const mlDist = join(root, 'node_modules', 'maplibre-gl', 'dist');
@@ -51,7 +60,67 @@ export function copyWebAssets() {
   }
 }
 
+/** U+1F1E6 REGIONAL INDICATOR SYMBOL LETTER A. Mirrors `components/flagEmoji.ts`. */
+const REGIONAL_INDICATOR_A = 0x1f1e6;
+
+/** The lowercase alpha-2 code a flag emoji encodes, or null if it is not a pair. */
+function isoFromFlag(flag) {
+  if (!flag) return null;
+  const codePoints = [...flag].map((c) => c.codePointAt(0));
+  if (codePoints.length !== 2) return null;
+  if (!codePoints.every((c) => c >= REGIONAL_INDICATOR_A && c <= REGIONAL_INDICATOR_A + 25)) {
+    return null;
+  }
+  return codePoints
+    .map((c) => String.fromCharCode(c - REGIONAL_INDICATOR_A + 97))
+    .join('');
+}
+
+export const FLAGS_DIR = join(root, 'public/flags');
+
+/**
+ * Copies one 4x3 SVG per flag the dataset references.
+ *
+ * Driven by `countryFacts.json` rather than by listing the package, so the set shipped is
+ * exactly the set the info sheet can ask for. A code with no matching SVG FAILS the
+ * script rather than being skipped - a silent gap here is a broken image in the UI, and
+ * the pipeline's rule throughout this project is an explicit allowlist, never a silent
+ * skip.
+ */
+export function copyFlagAssets() {
+  const facts = require('../src/data/countryFacts.json');
+  const source = join(dirname(require.resolve('flag-icons/package.json')), 'flags/4x3');
+
+  const codes = [...new Set(Object.values(facts).map((f) => isoFromFlag(f.flag)).filter(Boolean))]
+    .sort();
+
+  // Rebuilt from scratch so a country dropped upstream does not leave a stale file behind.
+  rmSync(FLAGS_DIR, { recursive: true, force: true });
+  mkdirSync(FLAGS_DIR, { recursive: true });
+
+  const missing = [];
+  let bytes = 0;
+  for (const code of codes) {
+    const from = join(source, `${code}.svg`);
+    try {
+      copyFileSync(from, join(FLAGS_DIR, `${code}.svg`));
+      bytes += statSync(join(FLAGS_DIR, `${code}.svg`)).size;
+    } catch {
+      missing.push(code);
+    }
+  }
+
+  if (missing.length) {
+    throw new Error(`No flag SVG for: ${missing.join(', ')}`);
+  }
+
+  console.log(
+    `  public/flags/  (${readdirSync(FLAGS_DIR).length} flags, ${(bytes / 1024).toFixed(0)} KB)`,
+  );
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   console.log('Copying web assets into public/');
   copyWebAssets();
+  copyFlagAssets();
 }
