@@ -153,12 +153,46 @@ describe('the setup screen', () => {
   });
 
   describe('choosing a mode', () => {
-    it('offers both, and starts on facts', async () => {
+    it('offers all three, and starts on facts', async () => {
       await render(<QuizSetupScreen />);
 
       expect(screen.getByTestId('mode-facts')).toBeTruthy();
       expect(screen.getByTestId('mode-locate')).toBeTruthy();
+      expect(screen.getByTestId('mode-flag')).toBeTruthy();
       expect(screen.getByTestId('field-picker')).toBeTruthy();
+    });
+
+    it('keeps the field picker for a flag round, which asks the same facts', async () => {
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('mode-flag'));
+
+      expect(screen.getByTestId('field-picker')).toBeTruthy();
+      expect(screen.getByTestId('quiz-setup-subtitle')).toHaveTextContent(/flag/);
+    });
+
+    it('cannot start a flag round with no field selected', async () => {
+      // The trap: gating the picker on `mode === 'facts'` also ungates `canStart`, so a
+      // flag round with nothing ticked becomes startable and `parseQuizParams` quietly
+      // falls back to asking the country's name - a round nobody configured.
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('mode-flag'));
+      await fireEvent.press(screen.getByTestId('field-name'));
+      await fireEvent.press(screen.getByTestId('quiz-start'));
+
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(screen.getByTestId('quiz-start')).toHaveTextContent(/Pick at least one fact/);
+    });
+
+    it('starts a flag round with the ticked fields in the params', async () => {
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('mode-flag'));
+      await fireEvent.press(screen.getByTestId('field-capital'));
+      await fireEvent.press(screen.getByTestId('quiz-start'));
+
+      expect(mockPush).toHaveBeenCalledWith({
+        pathname: '/quiz/play',
+        params: expect.objectContaining({ mode: 'flag', fields: 'name,capital' }),
+      });
     });
 
     it('drops the field picker for a locate round, which asks no facts', async () => {
@@ -748,6 +782,98 @@ describe('the play screen in locate mode', () => {
     const [first] = locateRound();
     await render(<QuizPlayScreen />);
     await tapCountry(first.iso3);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+    await fireEvent.press(screen.getByTestId('quiz-end'));
+
+    expect(mockReplace).toHaveBeenCalledWith('/quiz/results');
+  });
+});
+
+describe('the play screen in flag mode', () => {
+  /**
+   * No fake timers here, unlike the locate block: this mode has no delayed reveal. It is
+   * `facts` mode with the stimulus swapped, so everything below the stage - the fields,
+   * the grading, the Check/Next button - is the facts behaviour and is asserted as such.
+   */
+  const flagRound = (fields = 'name,capital') => {
+    mockSearchParams = {
+      mode: 'flag',
+      subregions: 'Australia and New Zealand',
+      fields,
+      seed: '1',
+    };
+    return buildQuiz(parseQuizParams(mockSearchParams));
+  };
+
+  it('mounts no map at all, which is what buys the stage ordinary rendering', async () => {
+    // The most important assertion in this mode. `FlagStage` renders like any other
+    // component - no always-mounted rows, no parked views - and that is only safe
+    // because there is no MapLibre surface in this tree to insert anything above.
+    flagRound();
+    await render(<QuizPlayScreen />);
+
+    expect(screen.queryByTestId('world-map')).toBeNull();
+    expect(screen.queryByTestId('map-camera')).toBeNull();
+    expect(screen.getByTestId('quiz-flag-stage')).toBeTruthy();
+  });
+
+  it('shows the flag, the panel and the progress from the first frame', async () => {
+    flagRound();
+    await render(<QuizPlayScreen />);
+
+    expect(screen.getByTestId('quiz-flag-stage')).toBeTruthy();
+    expect(screen.getByTestId('quiz-panel')).toBeTruthy();
+    expect(screen.getByTestId('quiz-progress')).toHaveTextContent(/1 \/ 2/);
+    expect(screen.getByTestId('quiz-input-name')).toBeTruthy();
+    expect(screen.getByTestId('quiz-input-capital')).toBeTruthy();
+  });
+
+  it('shows the flag of the country being asked about', async () => {
+    const [first] = flagRound();
+    await render(<QuizPlayScreen />);
+
+    // Jest resolves the native `CountryFlag`, which is a plain Text carrying the emoji.
+    expect(screen.getByTestId('quiz-flag-stage')).toHaveTextContent(first.facts.flag!);
+  });
+
+  it('never names the country, before or after checking', async () => {
+    // Before: it is the answer. After: `facts` mode does not name it either when the
+    // round did not ask for the name - a capital-only round reveals the capital and
+    // nothing else - and this mode is a copy of that one, not an improvement on it.
+    const [first] = flagRound('capital');
+    await render(<QuizPlayScreen />);
+
+    expect(screen.queryByText(first.facts.name)).toBeNull();
+
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+    expect(screen.queryByText(first.facts.name)).toBeNull();
+  });
+
+  it('grades a typed answer exactly as a facts round does', async () => {
+    const [first] = flagRound('name');
+    await render(<QuizPlayScreen />);
+    await fireEvent.changeText(screen.getByTestId('quiz-input-name'), first.facts.name);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+    expect(screen.getByTestId('quiz-reveal-name')).toHaveTextContent(/Correct/);
+    expect(screen.getByTestId('quiz-submit')).toHaveTextContent(/Next/);
+  });
+
+  it('moves to the next country with a clean panel and a new flag', async () => {
+    const [first, second] = flagRound('name');
+    await render(<QuizPlayScreen />);
+    await fireEvent.changeText(screen.getByTestId('quiz-input-name'), first.facts.name);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+    expect(screen.getByTestId('quiz-progress')).toHaveTextContent(/2 \/ 2/);
+    expect(screen.getByTestId('quiz-flag-stage')).toHaveTextContent(second.facts.flag!);
+    expect(screen.getByTestId('quiz-input-name').props.value).toBe('');
+  });
+
+  it('hands a finished flag round to the score screen', async () => {
+    flagRound('name');
+    await render(<QuizPlayScreen />);
     await fireEvent.press(screen.getByTestId('quiz-submit'));
     await fireEvent.press(screen.getByTestId('quiz-end'));
 

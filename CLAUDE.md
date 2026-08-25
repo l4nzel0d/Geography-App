@@ -158,6 +158,20 @@ Added 2026-08-25, **not yet verified on any device**:
 - nothing here adds a network call, and nothing here is a native change — no `app.json`
   edit, no new native dependency, so a JS reload is enough to see all of it.
 
+Added 2026-08-26, **partly verified on the emulator**:
+
+- **a third quiz mode, `flag`.** You are shown a country's flag and type the same facts a
+  `facts` round asks for. See *Flag mode*.
+- 689 Jest tests across 29 suites pass, typecheck clean.
+- **seen on a device, and not yet right.** The mode runs and the panel grades, but the
+  flag itself has been through three attempts at sitting centred in its frame and the
+  latest is unconfirmed — see *A flag emoji is not centred in its own line box*, which is
+  the useful part of this entry. Everything else here is unverified: landscape, the
+  keyboard-compact size swap, and the web path, which is the only one that draws an actual
+  image rather than a glyph.
+- nothing here adds a network call, and nothing here is a native change — no `app.json`
+  edit, no new dependency, so a JS reload covers all of it.
+
 ## Stack
 
 | Concern | Choice | Notes |
@@ -254,8 +268,8 @@ src/
     MapOptionPill.tsx       # a pill that opens one of the option panels
     MapOptionPanel.tsx      # the always-mounted radio list behind a pill
     ChoroplethLegend.tsx    # stepped key, driven by the active ramp
-    quiz/                   # QuizPanel, LocatePanel, AnswerField, ChipInput,
-                            #   SubregionPicker, FieldPicker, ModePicker,
+    quiz/                   # QuizPanel, LocatePanel, FlagStage, AnswerField,
+                            #   ChipInput, SubregionPicker, FieldPicker, ModePicker,
                             #   QuizLaunchButton, useKeyboardHeight
     search/                 # SearchLaunchButton, CountryResultRow
   map/
@@ -264,7 +278,8 @@ src/
                             #   into a focus rect (search frames around the info sheet);
                             #   and getFlightDuration - how long a move should take
   quiz/
-    quizConfig.ts           # pure: QuizMode, FieldId/GradedField, QuizConfig, params
+    quizConfig.ts           # pure: QuizMode + its exhaustive records, FieldId/
+                            #   GradedField, QuizConfig, router-param coercion
     quizCountries.ts        # the 193-country pool and the subregion catalogue
     quizBuilder.ts          # pure: seeded shuffle -> ordered questions
     normalizeText.ts        # pure
@@ -970,6 +985,140 @@ Worth knowing when one is written: unlike `quiz.yaml`, a locate flow **can** use
 the map sits at the launch camera for the whole question — there is no stop until the reveal. The
 percentages are not the explore flows' though: the map is a band between the top inset and the panel, not
 the whole window, so only the *x* percentages carry over.
+
+
+### Flag mode — the same facts, from a flag
+
+`facts` mode with the stimulus swapped: instead of the map zooming to a country, you get
+its flag. Everything downstream is literally the same code — `QuizPanel`, `answerableFields`,
+`gradeQuestion`, `summarize`, the review list — which is why the whole mode is one new
+component and four changed lines in `play.tsx`.
+
+**`buildQuiz` needed no change at all.** It already reads `config.mode === 'locate'`, so
+anything that is not locate takes the `answerableFields` path with the completeness filter
+still applied. A currency-only flag round drops Micronesia for the same reason a facts one
+does.
+
+**Nothing names the country, at any point.** Not before the answer is checked, obviously,
+and **not after it either** — because that is what `facts` mode does. A round asking only
+for the capital reveals `Answer: Kathmandu` and never says the word Nepal; the map is what
+answers "which country was that", and a flag round simply has no map. Adding a reveal the
+round never asked for would make this mode quietly different from the one it copies.
+
+That is also why `CountryFlag` gained a `label`: its default names the ISO-2 code, which on
+the web path becomes `alt="Flag of NP"` — the answer, handed to a screen reader or a
+find-in-page unasked. It does not hide the `<img src="/flags/np.svg">`, so view-source
+always spoils a web round; it fixes the case that matters.
+
+#### There is no map on the screen, and that is load-bearing
+
+`MODE_USES_MAP` in `quizConfig.ts` is a `Record<QuizMode, boolean>` rather than a
+`mode === 'flag'` test at the call site, and that is deliberate: a fourth mode fails to
+**compile** until someone answers it, and this is the one question on that screen that must
+never be answered by accident.
+
+`play.tsx` reads it from a `config` that is `useState`-parsed once and never re-read, so
+the ternary is decided on the first frame and cannot flip. A flag round therefore mounts no
+MapLibre surface at all, which puts `FlagStage` in the same position as `/search` and
+`/quiz`: **ordinary conditional rendering is correct in there.** The always-mounted
+discipline in `AnswerField` and `ChipInput` exists only where a view shares a window with a
+live map surface.
+
+Three things would break that licence, and each is named in the comment above the ternary:
+making the mode switchable mid-round (a "show me on the map" button would insert a surface
+*under* an already-mounted tree); mounting `WorldMap` with `display: 'none'` "to keep the
+tree stable", which mounts the surface and pays a full MapLibre init for nothing; and
+re-parsing the params on render, which is already forbidden because it would reseed
+`buildQuiz`.
+
+#### The panel keeps the `facts` split, however tempting the symmetry
+
+`getQuizPanelLayout`'s third parameter is now a `QuizMode`, not a `locate` boolean. `flag`
+takes the **facts** branch: its panel has the same rows, so it needs the same *definite*
+height. `QuizPanel`'s body `ScrollView` resolves its own `flex: 1` against that slot, and
+given the locate branch's auto height every answer field collapses to nothing — which looks
+exactly like the fields failing to render. `LocatePanel` gets away with an auto height only
+because it uses `flexGrow` instead. `quizPanelLayout.test.ts` pins this.
+
+`mapViewport` comes out of a flag round with no consumer at all. Left as it is rather than
+modelled away: it still means "what would be left if there were a map", and making it
+nullable would put non-null assertions into three call sites that never reach it.
+
+#### The stage, and the keyboard
+
+`FlagStage` replaces the map slot. It takes the map's flex shape — `flex: 1` plus a
+`minHeight` — because a flag cannot absorb the keyboard the way a map can: measured on a
+411x914 dp screen, a five-field round with the IME open leaves the stage a fair share of
+**60 dp**, which would crush the flag to a stripe.
+
+So the stage keeps a floor and the panel gives way instead; it already has `flexShrink: 1`
+and its body already scrolls, and you have to see the flag to answer. Paired with the
+`compact` size swap (to `md` while the IME is up, back to `lg` when it closes, and tapping
+the stage dismisses the keyboard to get it back), the floor while typing sits *below* the
+map's own 96 dp — so a flag round never leaves the panel less room than the facts round it
+is copied from.
+
+The plaque behind the flag is not decoration. Japan, Finland and Nigeria are mostly white,
+and against the screen's navy they read as a shapeless blob with no edge; the web path
+already solves this at small sizes with a hairline ring around its `<img>`.
+
+#### A flag emoji is not centred in its own line box
+
+**The single most useful thing in this section, and it cost three attempts.**
+
+A flag emoji does not sit in the middle of the box the text engine lays out for it. The
+font's metrics leave a tall empty band *above* the glyph and almost none below, so centring
+that box parks the flag on the floor of whatever contains it. Measured on Android from a
+120 dp flag in a 121 dp container: **35 dp of gap above the glyph and 3 dp below.**
+
+**The error is proportional to the font size**, which is why three call sites lived with it
+unnoticed for months — at `xs` it is barely 2 dp — and why it became glaring the moment the
+quiz asked for a 120 dp flag. It is also why the first diagnosis was wrong: the flag looked
+fine whenever the keyboard was up, which read like a layout bug and was really just `md`
+being small enough to hide it.
+
+Two traps on the way to the fix, both worth keeping:
+
+- **`transform: translateY` clips the glyph.** Android composites a transformed child
+  against the bounds it had *before* the transform, so lifting the flag moved half of it
+  out of its own drawing area and the bottom came off. Use a margin: it moves the layout
+  box, so the glyph travels with somewhere to be drawn. It is doubled, because the parent
+  centres what is left after the margin.
+- **The glyph can be drawn taller than its own line box**, which is the other half of the
+  same clipping. `nudge` therefore also sets a generous `lineHeight`, and `FlagStage` sizes
+  its box from *that* rather than from `FLAG_SIZES.height`. The plaque ends up taller than
+  the flag it frames, which is the deliberate trade: a roomy card that always draws the
+  whole flag beats a tight one that sometimes shaves the bottom off.
+
+`nudge` is **opt-in per call site**, not applied by size. The info sheet, the search row and
+the results row all set their flag beside text, where the same offset reads as ordinary
+baseline alignment; correcting them would move three settled layouts to fix something
+nobody can see. `GLYPH_NUDGE` in `FlagStage.tsx` is the one number to turn, and nothing
+else depends on it.
+
+None of this exists on the web path, which draws an `<img>` with explicit dimensions.
+`CountryFlag.web.tsx` accepts `nudge` and ignores it so the two keep one signature.
+
+#### `flagSizes.ts` gained `lg`
+
+`lg: { fontSize: 120, width: 140, height: 105 }`, keeping the ratios every other entry uses
+(width ~1.167x the font size, height ~0.875x, which is exactly 4:3) so the emoji and the
+4:3 SVG stay at the same optical weight.
+
+120 rather than something larger for a reason worth keeping: **Android draws emoji as
+scalable COLRv1 vectors only from 13 (API 33).** Below that they are 136x128 bitmap strikes,
+so on a 3x screen this is already a ~2.6x upscale and anything bigger starts to visibly mush
+the detailed flags — Mexico, Serbia, Croatia's chequerboard. The AVD (API 33) and the S25
+(Android 16) are both above that line, so this will look crisp on everything to hand and
+soft on an old phone. If that ever matters, the answer is a smaller `lg`, not rasterising
+the flags into the native bundle — that needs `react-native-svg`, a new native module, and
+a rebuild.
+
+#### What is not covered
+
+There is **no Maestro flow for flag mode**, matching locate. It would be the easiest of the
+three to write — no coordinate taps, no camera — but it cannot judge the one thing that has
+actually been wrong here, which is whether the flag looks right. That is a screenshot.
 
 
 ## Country search

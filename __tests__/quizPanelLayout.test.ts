@@ -37,19 +37,19 @@ describe('a locate round', () => {
     // Null, not a small number: the panel is exactly as tall as its content, so the
     // button sits under the last line on every screen size rather than being pushed to
     // the bottom of a box sized for answer fields that do not exist.
-    expect(getQuizPanelLayout(PORTRAIT, 0, true).panelHeight).toBeNull();
+    expect(getQuizPanelLayout(PORTRAIT, 0, 'locate').panelHeight).toBeNull();
   });
 
   it('still leaves the camera a viewport to fit a country into', () => {
     // An estimate, and the only consumer of LOCATE_PORTRAIT_HEIGHT - see the note there.
-    expect(getQuizPanelLayout(PORTRAIT, 0, true).mapViewport).toEqual({
+    expect(getQuizPanelLayout(PORTRAIT, 0, 'locate').mapViewport).toEqual({
       width: PORTRAIT.width,
       height: PORTRAIT.height - LOCATE_PORTRAIT_HEIGHT,
     });
   });
 
   it('gives the map more room than a facts round does', () => {
-    expect(getQuizPanelLayout(PORTRAIT, 0, true).mapViewport.height).toBeGreaterThan(
+    expect(getQuizPanelLayout(PORTRAIT, 0, 'locate').mapViewport.height).toBeGreaterThan(
       getQuizPanelLayout(PORTRAIT, 1).mapViewport.height,
     );
   });
@@ -57,12 +57,39 @@ describe('a locate round', () => {
   it('is left alone in landscape, where the panel is a width', () => {
     // The gap this fixes is a portrait one; landscape docks the panel to the side and
     // stretches it, which it should keep doing.
-    expect(getQuizPanelLayout(LANDSCAPE, 0, true)).toEqual(getQuizPanelLayout(LANDSCAPE, 0));
+    expect(getQuizPanelLayout(LANDSCAPE, 0, 'locate')).toEqual(getQuizPanelLayout(LANDSCAPE, 0));
   });
 
   it('ignores the field count entirely', () => {
     // A locate round carries whatever fields the player had ticked for facts mode, and
     // none of them may reach the layout.
-    expect(getQuizPanelLayout(PORTRAIT, 5, true)).toEqual(getQuizPanelLayout(PORTRAIT, 0, true));
+    expect(getQuizPanelLayout(PORTRAIT, 5, 'locate')).toEqual(
+      getQuizPanelLayout(PORTRAIT, 0, 'locate'),
+    );
+  });
+});
+
+describe('a flag round', () => {
+  /**
+   * The highest-value test in this file, and the one worth reading the reason for.
+   *
+   * A flag round has no map either, so folding it in with `locate` looks like the tidy
+   * move. It is not: `QuizPanel`'s body `ScrollView` resolves its own `flex: 1` against
+   * the slot, so given the locate branch's auto height every answer field collapses to
+   * nothing - which looks exactly like the fields failing to render.
+   */
+  it('splits the screen exactly as a facts round does', () => {
+    expect(getQuizPanelLayout(PORTRAIT, 3, 'flag')).toEqual(getQuizPanelLayout(PORTRAIT, 3));
+    expect(getQuizPanelLayout(PORTRAIT, 3, 'flag').panelHeight).toEqual(expect.any(Number));
+  });
+
+  it('grows the panel with the field count, which a locate round ignores', () => {
+    expect(getQuizPanelLayout(PORTRAIT, 5, 'flag').panelHeight!).toBeGreaterThan(
+      getQuizPanelLayout(PORTRAIT, 1, 'flag').panelHeight!,
+    );
+  });
+
+  it('is left alone in landscape', () => {
+    expect(getQuizPanelLayout(LANDSCAPE, 3, 'flag')).toEqual(getQuizPanelLayout(LANDSCAPE, 3));
   });
 });

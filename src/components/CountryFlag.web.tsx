@@ -40,7 +40,33 @@ export const NO_FLAG = '🏳️';
 /** Where `scripts/copy-web-assets.mjs` puts them. Same origin, no CDN. */
 const flagSource = (iso2: string) => `/flags/${iso2.toLowerCase()}.svg`;
 
-export function CountryFlag({ flag, size = 'md' }: { flag: string | null; size?: FlagSize }) {
+export function CountryFlag({
+  flag,
+  size = 'md',
+  label,
+}: {
+  flag: string | null;
+  size?: FlagSize;
+  /**
+   * What assistive tech is told this flag is. Defaults to naming the country's code.
+   *
+   * **The quiz's flag round overrides it**, because there the flag is the question and
+   * the default reads the answer out - `alt="Flag of BR"` is not much of a puzzle. Note
+   * what this does NOT hide: the `<img src="/flags/br.svg">` is still in the DOM, so
+   * view-source always spoils a web round. What it fixes is the case that matters, a
+   * screen reader or find-in-page handing over the answer unasked.
+   */
+  label?: string;
+  /**
+   * Accepted and ignored, so the two components keep one signature.
+   *
+   * It corrects for where an emoji glyph sits inside its line box - see the native
+   * sibling. Here the flag is an `<img>` with explicit dimensions on the platforms that
+   * need it, and on the platforms that do not, the emoji is small enough that the same
+   * proportional error is a dp or two. Nothing to correct either way.
+   */
+  nudge?: number;
+}) {
   const supported = useFlagSupport();
   const letters = flagLetters(flag);
   const { fontSize, width, height } = FLAG_SIZES[size];
@@ -70,7 +96,7 @@ export function CountryFlag({ flag, size = 'md' }: { flag: string | null; size?:
       <View testID="country-flag-badge" style={[styles.badge, { minWidth: width + 4 }]}>
         <Text
           style={[styles.badgeText, { fontSize: Math.round(fontSize * 0.44) }]}
-          accessibilityLabel={`Country code ${letters}`}
+          accessibilityLabel={label ?? `Country code ${letters}`}
         >
           {letters}
         </Text>
@@ -84,7 +110,7 @@ export function CountryFlag({ flag, size = 'md' }: { flag: string | null; size?:
     <img
       data-testid="country-flag-image"
       src={flagSource(letters)}
-      alt={`Flag of ${letters}`}
+      alt={label ?? `Flag of ${letters}`}
       width={width}
       height={height}
       onError={() => setFailed(true)}

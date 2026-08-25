@@ -55,6 +55,10 @@ describe('parseQuizParams', () => {
     expect(parseQuizParams({ mode: 'locate' }, seed).mode).toBe('locate');
   });
 
+  it('reads a flag round', () => {
+    expect(parseQuizParams({ mode: 'flag' }, seed).mode).toBe('flag');
+  });
+
   it('falls back to facts for a mode it does not recognise', () => {
     // A hand-typed deep link should start a quiz, not a red screen - same rule as the
     // rest of this parser.
@@ -131,6 +135,13 @@ describe('toQuizParams', () => {
 
   it('round-trips through parseQuizParams', () => {
     expect(parseQuizParams({ ...toQuizParams(config) })).toEqual(config);
+  });
+
+  it('round-trips a flag round, which is the claim that its fields carry over', () => {
+    // A flag round asks the same typed facts as a facts round, so the selection has to
+    // survive the trip through the URL that "Play again" and "Change settings" make.
+    const round = { ...config, mode: 'flag' as const };
+    expect(parseQuizParams({ ...toQuizParams(round) })).toEqual(round);
   });
 
   it('round-trips a locate round, fields and all', () => {

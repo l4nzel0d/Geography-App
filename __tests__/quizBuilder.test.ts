@@ -172,6 +172,30 @@ describe('buildQuiz', () => {
   });
 });
 
+describe('buildQuiz in flag mode', () => {
+  /**
+   * A flag round asks the same typed facts as a facts round, so it must take the same
+   * branch - fields populated, completeness filter applied. Only `locate` is special.
+   */
+  const flag = (over: Partial<QuizConfig> = {}) => buildQuiz(config({ mode: 'flag', ...over }));
+
+  it('populates the fields exactly as a facts round does', () => {
+    const asFlag = flag({ subregions: ['Western Europe'], fields: ['name', 'capital'] });
+    const asFacts = buildQuiz(
+      config({ subregions: ['Western Europe'], fields: ['name', 'capital'] }),
+    );
+    expect(asFlag).toEqual(asFacts);
+  });
+
+  it('still drops a country left with no askable field', () => {
+    // Micronesia has no currency upstream, so a currency-only round has nothing to ask
+    // it - which is as true of a flag round as of a facts one.
+    expect(flag({ subregions: ['Micronesia'], fields: ['currency'] }).map((q) => q.iso3)).not.toContain(
+      'FSM',
+    );
+  });
+});
+
 describe('buildQuiz in locate mode', () => {
   const locate = (over: Partial<QuizConfig> = {}) => buildQuiz(config({ mode: 'locate', ...over }));
 

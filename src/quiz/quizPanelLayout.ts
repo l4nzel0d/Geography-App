@@ -1,5 +1,7 @@
 import { getInfoSheetLayout, type WindowSize } from '@/components/infoSheetLayout';
 
+import { DEFAULT_MODE, type QuizMode } from './quizConfig';
+
 /**
  * How the quiz screen splits between the map and the answer panel.
  *
@@ -61,8 +63,17 @@ export type QuizPanelLayout = {
 export function getQuizPanelLayout(
   screen: WindowSize,
   fieldCount: number,
-  /** A `locate` round: no answer fields, and a content-height panel in portrait. */
-  locate = false,
+  /**
+   * `locate` is the only mode that changes the split: it has no answer fields, and its
+   * portrait panel is content-height.
+   *
+   * **`flag` deliberately shares the `facts` split**, however tempting the "neither of
+   * these is really a facts round" symmetry looks. Its panel has the same rows, so it
+   * needs the same DEFINITE height - `QuizPanel`'s body `ScrollView` resolves its own
+   * `flex: 1` against that parent, and given an auto height every answer field collapses
+   * to nothing. `LocatePanel` gets away with it only because it uses `flexGrow` instead.
+   */
+  mode: QuizMode = DEFAULT_MODE,
 ): QuizPanelLayout {
   const { landscape, panelWidth } = getInfoSheetLayout(screen);
 
@@ -75,7 +86,7 @@ export function getQuizPanelLayout(
     };
   }
 
-  if (locate) {
+  if (mode === 'locate') {
     return {
       landscape: false,
       panelWidth: null,
@@ -95,6 +106,10 @@ export function getQuizPanelLayout(
     landscape: false,
     panelWidth: null,
     panelHeight,
+    // In a `flag` round nothing reads this - there is no camera to fit anything into.
+    // Left as it is rather than modelled away: it still means "what would be left if
+    // there were a map", which is accurate, and making it nullable would put non-null
+    // assertions into three call sites for a value they never reach.
     mapViewport: { width: screen.width, height: Math.max(0, screen.height - panelHeight) },
   };
 }

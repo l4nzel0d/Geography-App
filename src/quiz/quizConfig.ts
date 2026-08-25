@@ -15,20 +15,58 @@
  *
  * - `facts` - the map zooms to a country and you type what you know about it.
  * - `locate` - you are given a country's name and have to find it on the map.
+ * - `flag` - you are shown a country's flag and type the same facts as `facts`.
  *
- * The two are mutually exclusive rather than a field you can add to a facts round,
- * because they run the map backwards from each other: `facts` paints the country and
- * asks about it, `locate` must NOT paint it, since that is the answer.
+ * Mutually exclusive rather than fields you can combine, because they use the map in
+ * incompatible ways: `facts` paints the country and asks about it, `locate` must NOT
+ * paint it since that is the answer, and `flag` does not put a map on screen at all.
  */
-export type QuizMode = 'facts' | 'locate';
+export type QuizMode = 'facts' | 'locate' | 'flag';
 
-export const QUIZ_MODES: readonly QuizMode[] = ['facts', 'locate'];
+export const QUIZ_MODES: readonly QuizMode[] = ['facts', 'locate', 'flag'];
 
 export const DEFAULT_MODE: QuizMode = 'facts';
 
 export const QUIZ_MODE_LABELS: Record<QuizMode, string> = {
   facts: 'Name the facts',
   locate: 'Find it on the map',
+  flag: 'Name it from the flag',
+};
+
+/** What each mode asks of you - the picker's subtitle, and the setup screen's. */
+export const QUIZ_MODE_HINTS: Record<QuizMode, string> = {
+  facts: 'The map zooms to a country and you type what you know about it',
+  locate: 'You are given a name and have to find the country on the map',
+  flag: 'You are shown a flag and type what you know about the country',
+};
+
+/**
+ * Whether the round puts a MapLibre surface on `/quiz/play`.
+ *
+ * A `Record` rather than a `mode === 'flag'` test at the call site, and for a stronger
+ * reason than the labels above: a fourth mode fails to COMPILE until someone answers
+ * this, and it is the one question on that screen that must never be answered by
+ * accident. `false` is what earns a flag round ordinary conditional rendering - see
+ * CLAUDE.md on views inserted above the map surface, and `FlagStage`'s own docstring.
+ */
+export const MODE_USES_MAP: Record<QuizMode, boolean> = {
+  facts: true,
+  locate: true,
+  flag: false,
+};
+
+/**
+ * Whether the round asks the player to type facts, and so needs a field selection.
+ *
+ * Not just which picker to show: it also decides whether an empty selection may start a
+ * round. Without it a flag round with every field unticked is startable, and
+ * `parseQuizParams` quietly falls back to asking the country's name - a round the player
+ * did not configure.
+ */
+export const MODE_ASKS_FIELDS: Record<QuizMode, boolean> = {
+  facts: true,
+  locate: false,
+  flag: true,
 };
 
 /** The facts a player can be asked to type. Area is deliberately not among them. */

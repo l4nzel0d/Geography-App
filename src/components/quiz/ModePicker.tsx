@@ -1,6 +1,11 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { type QuizMode, QUIZ_MODE_LABELS, QUIZ_MODES } from '@/quiz/quizConfig';
+import {
+  type QuizMode,
+  QUIZ_MODE_HINTS,
+  QUIZ_MODE_LABELS,
+  QUIZ_MODES,
+} from '@/quiz/quizConfig';
 
 import { quizColors, quizRadii } from '../palette';
 
@@ -9,18 +14,16 @@ type ModePickerProps = {
   onChange: (mode: QuizMode) => void;
 };
 
-/** What each mode actually asks of you, for the screen reader and the row's subtitle. */
-const MODE_HINTS: Record<QuizMode, string> = {
-  facts: 'The map zooms to a country and you type what you know about it',
-  locate: 'You are given a name and have to find the country on the map',
-};
-
 /**
  * Which way round a round runs.
  *
- * A radio rather than the `FieldPicker`'s checkboxes, and that is not styling: the two
- * modes use the map in opposite directions - one paints the country and asks about it,
- * the other must not paint it because that is the answer - so they cannot be combined.
+ * A radio rather than the `FieldPicker`'s checkboxes, and that is not styling: the modes
+ * use the map in incompatible ways - one paints the country and asks about it, one must
+ * not paint it because that is the answer, and one shows no map at all - so they cannot
+ * be combined.
+ *
+ * The hints live in `quizConfig.ts` rather than here because the setup screen's own
+ * subtitle says the same thing; two copies drifted apart the moment a third mode existed.
  */
 export function ModePicker({ selected, onChange }: ModePickerProps) {
   return (
@@ -35,13 +38,15 @@ export function ModePicker({ selected, onChange }: ModePickerProps) {
             style={[styles.row, active && styles.rowActive]}
             accessibilityRole="radio"
             accessibilityState={{ checked: active }}
-            accessibilityLabel={MODE_HINTS[mode]}
+            accessibilityLabel={QUIZ_MODE_HINTS[mode]}
           >
             <View style={styles.rowText}>
               <Text style={[styles.label, active && styles.labelActive]}>
                 {QUIZ_MODE_LABELS[mode]}
               </Text>
-              <Text style={[styles.hint, active && styles.hintActive]}>{MODE_HINTS[mode]}</Text>
+              <Text style={[styles.hint, active && styles.hintActive]}>
+                {QUIZ_MODE_HINTS[mode]}
+              </Text>
             </View>
             <Text style={[styles.tick, active && styles.tickActive]}>{active ? '✓' : ''}</Text>
           </Pressable>

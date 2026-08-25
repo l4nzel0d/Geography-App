@@ -7,6 +7,7 @@ import { goBack } from '@/navigation/goBack';
 import { quizScreenBox } from '@/quiz/quizScreenBox';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { quizColors } from '@/components/palette';
+import { FlagStage } from '@/components/quiz/FlagStage';
 import { LocatePanel } from '@/components/quiz/LocatePanel';
 import { QuizPanel, type PanelAnswers } from '@/components/quiz/QuizPanel';
 import { useKeyboardHeight } from '@/components/quiz/useKeyboardHeight';
@@ -24,7 +25,7 @@ import { buildExitPrompt, type ExitAction } from '@/quiz/exitPrompt';
 import { gradeQuestion, type QuestionResult, toAnswerInput } from '@/quiz/gradeAnswer';
 import { gradeLocation } from '@/quiz/gradeLocation';
 import { buildQuiz } from '@/quiz/quizBuilder';
-import { type FieldId, parseQuizParams } from '@/quiz/quizConfig';
+import { type FieldId, MODE_USES_MAP, parseQuizParams } from '@/quiz/quizConfig';
 import { getQuizPanelLayout } from '@/quiz/quizPanelLayout';
 import { setQuizResult } from '@/quiz/quizResultStore';
 
@@ -90,7 +91,26 @@ export default function QuizPlayScreen() {
   const [result, setResult] = useState<QuestionResult | null>(null);
   const [history, setHistory] = useState<QuestionResult[]>([]);
 
-  const locate = config.mode === 'locate';
+  const { mode } = config;
+  const locate = mode === 'locate';
+
+  /**
+   * Whether this round puts a MapLibre surface on screen.
+   *
+   * **Constant for the life of the screen**, and that is the whole basis for `FlagStage`
+   * rendering like an ordinary component: `config` is parsed once into state and never
+   * re-read, so the ternary below is decided on the first frame and never flips. Nothing
+   * is ever inserted above a map surface here because in a flag round there is no map
+   * surface at all.
+   *
+   * Three things would break that, and none of them is worth what it would cost:
+   * making the mode switchable mid-round (a "show me on the map" button would insert a
+   * surface UNDER an already-mounted tree, a novel variant of the bug); mounting
+   * `WorldMap` with `display: 'none'` to "keep the tree stable", which mounts the surface
+   * and pays a full MapLibre init for nothing; or re-parsing the params on render, which
+   * is already forbidden because it would reseed `buildQuiz`.
+   */
+  const showsMap = MODE_USES_MAP[mode];
 
   /** `locate` only: the country the player has tapped, cleared with each question. */
   const [picked, setPicked] = useState<string | null>(null);
@@ -114,7 +134,7 @@ export default function QuizPlayScreen() {
   // A `locate` round has no answer fields: in portrait its panel is content-height and
   // the map keeps everything else, which is most of the screen and the half that mode is
   // actually played in.
-  const layout = getQuizPanelLayout(screen, config.fields.length, locate);
+  const layout = getQuizPanelLayout(screen, config.fields.length, mode);
 
   /**
    * Where the map is looking before any stop is issued: `WorldMap`'s own default.
@@ -153,6 +173,12 @@ export default function QuizPlayScreen() {
    * it adds no re-fires.
    */
   const camera = useMemo(() => {
+    // No map, no camera. Worth an early return rather than leaving it to the caller:
+    // without it a flag round walks `getCountryBounds` - which clusters a country's
+    // polygons, and Canada has 141 of them - once per question, to build a stop that
+    // nothing will ever read.
+    if (!showsMap) return undefined;
+
     // `locate` mode drives the camera from `revealStop` instead: framing the country
     // being asked about is precisely the answer, so the map must not move to it. The
     // round therefore opens on `WorldMap`'s own default view - the whole world - and
@@ -180,7 +206,7 @@ export default function QuizPlayScreen() {
       easing: FLY,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locate, question, index, layout.mapViewport.width, layout.mapViewport.height]);
+  }, [mode, question, index, layout.mapViewport.width, layout.mapViewport.height]);
 
   const finish = (results: QuestionResult[], endedEarly: boolean) => {
     setQuizResult({ config, results, total: questions.length, endedEarly });
@@ -366,22 +392,29 @@ export default function QuizPlayScreen() {
         surface after the first mount lays out correctly and never paints, and this panel
         grows a chip every time the player names a language.
       */}
-      <View style={styles.map}>
-        <WorldMap
-          // The two modes run the map in opposite directions: `facts` paints the country
-          // it is asking about, `locate` must not - that is the answer - so it paints
-          // whatever the player has tapped instead, and nothing at all until they do.
-          selectedIso3={locate ? picked : question.iso3}
-          selectionColor={selectionColor}
-          revealIso3={locate && answerShown ? question.iso3 : null}
-          camera={locate ? revealStop : camera}
-          maxZoom={QUIZ_MAX_ZOOM}
-          // `facts` mode passes no handler at all, which makes the map read-only: tapping
-          // the answer out of it would rather defeat the question. `locate` mode is the
-          // opposite - the tap IS the answer - but only until it has been checked.
-          onSelect={locate && !result ? setPicked : undefined}
-        />
-      </View>
+      {showsMap ? (
+        <View style={styles.map}>
+          <WorldMap
+            // The two map modes run it in opposite directions: `facts` paints the country
+            // it is asking about, `locate` must not - that is the answer - so it paints
+            // whatever the player has tapped instead, and nothing at all until they do.
+            selectedIso3={locate ? picked : question.iso3}
+            selectionColor={selectionColor}
+            revealIso3={locate && answerShown ? question.iso3 : null}
+            camera={locate ? revealStop : camera}
+            maxZoom={QUIZ_MAX_ZOOM}
+            // `facts` mode passes no handler at all, which makes the map read-only:
+            // tapping the answer out of it would rather defeat the question. `locate` is
+            // the opposite - the tap IS the answer - but only until it has been checked.
+            onSelect={locate && !result ? setPicked : undefined}
+          />
+        </View>
+      ) : (
+        // The stimulus for a `flag` round, in the slot the map would have had. It never
+        // names the country - not even once graded - which is exactly what `facts` mode
+        // does when the round did not ask for the name. See FlagStage.
+        <FlagStage flag={question.facts.flag} compact={keyboardHeight > 0} />
+      )}
 
       <View
         style={[

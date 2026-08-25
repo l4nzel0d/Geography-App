@@ -17,7 +17,9 @@ import { countriesIn } from "@/quiz/quizCountries";
 import {
   DEFAULT_MODE,
   type FieldId,
+  MODE_ASKS_FIELDS,
   newSeed,
+  QUIZ_MODE_HINTS,
   type QuizMode,
   toQuizParams,
 } from "@/quiz/quizConfig";
@@ -44,8 +46,11 @@ export default function QuizSetupScreen() {
 
   const countryCount = countriesIn(subregions).length;
   // A `locate` round asks one thing of every country and needs no field at all, so the
-  // only way to make it unplayable is to select subregions that contain nobody.
-  const needsFields = mode === "facts";
+  // only way to make it unplayable is to select subregions that contain nobody. Both of
+  // the typing modes DO need one - this is not only which picker to show, it is also
+  // what stops a round starting with nothing ticked and silently falling back to asking
+  // the country's name.
+  const needsFields = MODE_ASKS_FIELDS[mode];
   const canStart = (!needsFields || fields.length > 0) && countryCount > 0;
 
   const start = () => {
@@ -63,10 +68,10 @@ export default function QuizSetupScreen() {
           <Text testID="quiz-setup-title" style={styles.title}>
             Quiz
           </Text>
+          {/* One source for the wording, shared with the mode picker's own rows - two
+              copies drifted apart the moment there was a third mode to describe. */}
           <Text testID="quiz-setup-subtitle" style={styles.subtitle}>
-            {needsFields
-              ? "The map zooms to a country. You type what you know about it."
-              : "You get a name. You find the country on the map."}
+            {QUIZ_MODE_HINTS[mode]}
           </Text>
         </View>
         <Pressable

@@ -9,6 +9,7 @@ import worldCountries from 'world-countries';
 
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 
+import { flagLetters } from '@/components/flagEmoji';
 import geo from '@/data/countries.geo.json';
 import { allCountryFacts, getCountryFacts } from '@/data/countryFacts';
 import labelPoints from '@/data/labelPoints.json';
@@ -213,6 +214,32 @@ describe('quiz data', () => {
     ([iso3, facts]) => facts.unMember && geometryCodes.has(iso3),
   );
   const pool = unMembers.filter(([iso3]) => iso3 !== OBSERVER_STATE);
+
+  it('has a flag for every quiz country', () => {
+    // A flag round shows this and nothing else, so a blank is an unanswerable question.
+    // Falsy rather than null: BES is `""` upstream, not null, and `??` would let it past.
+    expect(pool.filter(([, facts]) => !facts.flag).map(([iso3]) => iso3)).toEqual([]);
+  });
+
+  it('stores every quiz flag as a resolvable regional indicator pair', () => {
+    // Not pedantry. The web build resolves the pair back to an ISO-2 through
+    // `flagLetters` to find `public/flags/<iso2>.svg`; anything that does not resolve
+    // falls through to the two-letter badge - which in a flag round is the answer,
+    // printed on screen. Paired with webAssets.test.ts's "an SVG for every flag in the
+    // dataset", this closes the loop from quiz country to file on disk.
+    expect(pool.filter(([, facts]) => !flagLetters(facts.flag)).map(([iso3]) => iso3)).toEqual([]);
+  });
+
+  it('has exactly one flagless record, and it is outside the pool', () => {
+    // Exact rather than a containment check, matching this file's idiom: an allowlist
+    // entry that stopped being needed would otherwise hide the next genuine gap.
+    // BES (Caribbean Netherlands) is `""` in world-countries itself.
+    expect(
+      Object.entries(allCountryFacts)
+        .filter(([, facts]) => !facts.flag)
+        .map(([iso3]) => iso3),
+    ).toEqual(['BES']);
+  });
 
   it('flags exactly 194 UN members with geometry, giving a pool of 193', () => {
     // Pinned rather than bounded: a change here is a change to the dataset's idea of
