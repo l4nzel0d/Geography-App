@@ -1,16 +1,19 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from "expo-router";
+import { useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { goBack } from '@/navigation/goBack';
-import { FieldPicker } from '@/components/quiz/FieldPicker';
-import { getInfoSheetLayout, MAX_CONTENT_WIDTH } from '@/components/infoSheetLayout';
-import { quizColors, quizRadii } from '@/components/palette';
-import { useWindowSize } from '@/components/useWindowSize';
-import { SubregionPicker } from '@/components/quiz/SubregionPicker';
-import { countriesIn } from '@/quiz/quizCountries';
-import { type FieldId, newSeed, toQuizParams } from '@/quiz/quizConfig';
+import { goBack } from "@/navigation/goBack";
+import { FieldPicker } from "@/components/quiz/FieldPicker";
+import {
+  getInfoSheetLayout,
+  MAX_CONTENT_WIDTH,
+} from "@/components/infoSheetLayout";
+import { quizColors, quizRadii } from "@/components/palette";
+import { useWindowSize } from "@/components/useWindowSize";
+import { SubregionPicker } from "@/components/quiz/SubregionPicker";
+import { countriesIn } from "@/quiz/quizCountries";
+import { type FieldId, newSeed, toQuizParams } from "@/quiz/quizConfig";
 
 /**
  * Quiz setup: which subregions are in play, and which facts you have to supply.
@@ -25,9 +28,11 @@ export default function QuizSetupScreen() {
   // Subregion checkboxes stretched across a monitor put the tick a whole screen from its
   // label. Capped and centred on desktop; untouched on a phone.
   const centred =
-    getInfoSheetLayout(useWindowSize()).tier === 'desktop' ? styles.centred : null;
+    getInfoSheetLayout(useWindowSize()).tier === "desktop"
+      ? styles.centred
+      : null;
   const [subregions, setSubregions] = useState<string[]>([]);
-  const [fields, setFields] = useState<FieldId[]>(['name']);
+  const [fields, setFields] = useState<FieldId[]>(["name"]);
 
   const countryCount = countriesIn(subregions).length;
   const canStart = fields.length > 0 && countryCount > 0;
@@ -35,7 +40,7 @@ export default function QuizSetupScreen() {
   const start = () => {
     if (!canStart) return;
     router.push({
-      pathname: '/quiz/play',
+      pathname: "/quiz/play",
       params: toQuizParams({ subregions, fields, seed: newSeed() }),
     });
   };
@@ -66,34 +71,47 @@ export default function QuizSetupScreen() {
       <ScrollView
         testID="quiz-setup"
         style={styles.body}
-        contentContainerStyle={[styles.bodyContent, centred, { paddingBottom: insets.bottom + 120 }]}
+        contentContainerStyle={[
+          styles.bodyContent,
+          centred,
+          { paddingBottom: insets.bottom + 120 },
+        ]}
       >
         <Text style={styles.section}>What do you have to answer?</Text>
         <FieldPicker selected={fields} onChange={setFields} />
 
         <Text style={styles.section}>Which parts of the world?</Text>
         <Text style={styles.sectionNote}>
-          Leave everything unselected to play the whole world — all 193 UN member states.
+          Leave everything unselected to play the whole world — all 193 UN
+          member states.
         </Text>
         <SubregionPicker selected={subregions} onChange={setSubregions} />
       </ScrollView>
 
-      <View style={[styles.footer, centred, { paddingBottom: insets.bottom + 16 }]}>
-        <Pressable
-          testID="quiz-start"
-          onPress={start}
-          disabled={!canStart}
-          style={[styles.start, !canStart && styles.startDisabled]}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !canStart }}
-          accessibilityLabel={`Start a quiz of ${countryCount} countries`}
-        >
-          <Text style={styles.startText}>
-            {fields.length === 0
-              ? 'Pick at least one fact'
-              : `Start — ${countryCount} ${countryCount === 1 ? 'country' : 'countries'}`}
-          </Text>
-        </Pressable>
+      {/*
+        The bar itself stays full-bleed - it is `position: absolute` with `left: 0` and
+        `right: 0`, so a `maxWidth` on it clamps the width while the pin holds it against
+        the left edge, leaving a short bar stranded in the corner. Its background and top
+        border are also meant to span the window. Only the CONTENT is capped.
+      */}
+      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={centred}>
+          <Pressable
+            testID="quiz-start"
+            onPress={start}
+            disabled={!canStart}
+            style={[styles.start, !canStart && styles.startDisabled]}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canStart }}
+            accessibilityLabel={`Start a quiz of ${countryCount} countries`}
+          >
+            <Text style={styles.startText}>
+              {fields.length === 0
+                ? "Pick at least one fact"
+                : `Start — ${countryCount} ${countryCount === 1 ? "country" : "countries"}`}
+            </Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -101,17 +119,17 @@ export default function QuizSetupScreen() {
 
 const styles = StyleSheet.create({
   /** Desktop only: a readable column instead of the full width of a monitor. */
-  centred: { width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
+  centred: { width: "100%", maxWidth: MAX_CONTENT_WIDTH, alignSelf: "center" },
   screen: { flex: 1, backgroundColor: quizColors.surface },
   header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     gap: 12,
     paddingHorizontal: 20,
     paddingBottom: 8,
   },
   headerText: { flex: 1, gap: 4 },
-  title: { color: quizColors.text, fontSize: 26, fontWeight: '700' },
+  title: { color: quizColors.text, fontSize: 26, fontWeight: "700" },
   subtitle: { color: quizColors.textMuted, fontSize: 13 },
   close: { padding: 4 },
   closeText: { color: quizColors.textMuted, fontSize: 18 },
@@ -120,12 +138,12 @@ const styles = StyleSheet.create({
   section: {
     color: quizColors.text,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: "700",
     marginTop: 14,
   },
   sectionNote: { color: quizColors.textFaint, fontSize: 12, marginBottom: 2 },
   footer: {
-    position: 'absolute',
+    position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
@@ -139,8 +157,12 @@ const styles = StyleSheet.create({
     backgroundColor: quizColors.accent,
     borderRadius: quizRadii.pill,
     paddingVertical: 14,
-    alignItems: 'center',
+    alignItems: "center",
   },
   startDisabled: { opacity: 0.4 },
-  startText: { color: quizColors.textInverted, fontSize: 15, fontWeight: '700' },
+  startText: {
+    color: quizColors.textInverted,
+    fontSize: 15,
+    fontWeight: "700",
+  },
 });
