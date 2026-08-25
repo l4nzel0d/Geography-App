@@ -41,6 +41,7 @@
     "jest-expo": "~57.0.4",
     "polylabel": "^2.1.0",
     "typescript": "~6.0.3",
+    "workbox-build": "^7.4.1",
     "world-countries": "^5.1.0"
   },
   "scripts": {
@@ -57,7 +58,8 @@
     "enrich:data": "node scripts/enrich-country-facts.mjs",
     "labels:data": "node scripts/build-label-points.mjs",
     "web:assets": "node scripts/copy-web-assets.mjs",
-    "build:web": "node scripts/copy-web-assets.mjs && expo export -p web"
+    "build:web": "node scripts/build-web.mjs",
+    "web:icons": "node scripts/build-web-icons.mjs"
   },
   "jest": {
     "preset": "jest-expo",
