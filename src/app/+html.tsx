@@ -34,6 +34,12 @@ export default function Root({ children }: PropsWithChildren) {
           on-screen keyboard opens. That is exactly the behaviour `useKeyboardHeight`
           hand-rolls for edge-to-edge Android, so on web the search and quiz inputs get
           it from the platform for free.
+
+          The catch is that a shrunken viewport is WIDER THAN IT IS TALL on a phone in
+          portrait, and `getInfoSheetLayout` reads that as landscape - which docked the
+          quiz panel to the right edge of an upright phone the moment anyone typed.
+          `quizScreenBox.web.ts` adds the keyboard's bite back before any layout decision
+          is made; read it before changing this line.
         */}
         <meta
           name="viewport"
