@@ -7,7 +7,7 @@
  *
  * RNTL v14 made `render` and `fireEvent` async; they must be awaited.
  */
-import { fireEvent, render as rtlRender, screen } from '@testing-library/react-native';
+import { act, fireEvent, render as rtlRender, screen } from '@testing-library/react-native';
 import { BackHandler } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
@@ -150,6 +150,49 @@ describe('the setup screen', () => {
     await fireEvent.press(screen.getByTestId('region-toggle-Oceania'));
 
     expect(screen.getByTestId('quiz-start')).toHaveTextContent(/14 countries/);
+  });
+
+  describe('choosing a mode', () => {
+    it('offers both, and starts on facts', async () => {
+      await render(<QuizSetupScreen />);
+
+      expect(screen.getByTestId('mode-facts')).toBeTruthy();
+      expect(screen.getByTestId('mode-locate')).toBeTruthy();
+      expect(screen.getByTestId('field-picker')).toBeTruthy();
+    });
+
+    it('drops the field picker for a locate round, which asks no facts', async () => {
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('mode-locate'));
+
+      expect(screen.queryByTestId('field-picker')).toBeNull();
+      expect(screen.getByTestId('quiz-setup-subtitle')).toHaveTextContent(/find the country/);
+    });
+
+    it('starts a locate round with no field selected at all', async () => {
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('mode-locate'));
+      // The one thing that makes a facts round unstartable does not apply here.
+      await fireEvent.press(screen.getByTestId('quiz-start'));
+
+      expect(mockPush).toHaveBeenCalledWith({
+        pathname: '/quiz/play',
+        params: expect.objectContaining({ mode: 'locate' }),
+      });
+    });
+
+    it('keeps the ticked fields when the mode is switched back', async () => {
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('field-capital'));
+      await fireEvent.press(screen.getByTestId('mode-locate'));
+      await fireEvent.press(screen.getByTestId('mode-facts'));
+      await fireEvent.press(screen.getByTestId('quiz-start'));
+
+      expect(mockPush).toHaveBeenCalledWith({
+        pathname: '/quiz/play',
+        params: expect.objectContaining({ mode: 'facts', fields: 'name,capital' }),
+      });
+    });
   });
 });
 
@@ -516,9 +559,205 @@ describe('the play screen', () => {
   });
 });
 
+describe('the play screen in locate mode', () => {
+  /**
+   * The delayed reveal is the whole shape of this mode, so the clock is ours.
+   *
+   * Every advance is generously past `REVEAL_DELAY_MS` rather than equal to it - the
+   * assertion is "the reveal happened", never "it happened at exactly 700 ms", so tuning
+   * the delay must not turn these red.
+   */
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  const PAST_THE_DELAY = 2000;
+
+  /** A two-country round, so the answer is knowable without pinning the shuffle. */
+  const locateRound = () => {
+    mockSearchParams = {
+      mode: 'locate',
+      subregions: 'Australia and New Zealand',
+      fields: 'name',
+      seed: '1',
+    };
+    return buildQuiz(parseQuizParams(mockSearchParams));
+  };
+
+  const cameraProps = () => screen.getByTestId('map-camera').props;
+  const selectionFilter = () => screen.getByTestId('layer-country-selected').props.filter;
+  const selectionPaint = () =>
+    screen.getByTestId('layer-country-selected').props.paint['fill-color'];
+  const revealFilter = () => screen.getByTestId('layer-country-reveal').props.filter;
+  const revealPaint = () => screen.getByTestId('layer-country-reveal').props.paint['fill-color'];
+
+  const matching = (iso3: string) => ['==', ['get', 'iso3'], iso3];
+  /** The empty string matches nothing, which is how "no selection" is expressed. */
+  const MATCHES_NOTHING = matching('');
+
+  /**
+   * A synthetic country press. One candidate, so `pickCountry` short-circuits before it
+   * needs a coordinate - the resolution logic has its own tests.
+   */
+  const tapCountry = (iso3: string) =>
+    fireEvent(screen.getByTestId('source-countries'), 'press', {
+      stopPropagation: jest.fn(),
+      nativeEvent: { features: [{ properties: { iso3, name: iso3 } }] },
+    });
+
+  const settle = async () => {
+    await act(async () => {
+      jest.advanceTimersByTime(PAST_THE_DELAY);
+    });
+  };
+
+  it('names the country and paints nothing, because the map is the question', async () => {
+    const [first] = locateRound();
+    await render(<QuizPlayScreen />);
+
+    expect(screen.getByTestId('locate-prompt')).toHaveTextContent(first.facts.name);
+    // Painting `first.iso3` here would hand the player the answer.
+    expect(selectionFilter()).toEqual(MATCHES_NOTHING);
+    expect(revealFilter()).toEqual(MATCHES_NOTHING);
+  });
+
+  it('opens on the world view by issuing no camera stop at all', async () => {
+    locateRound();
+    await render(<QuizPlayScreen />);
+
+    // `WorldMap`'s own default IS the whole world, so the round needs to ask for nothing.
+    // A `center` here would mean the camera had been aimed somewhere - and the only
+    // somewhere worth aiming at is the answer.
+    expect(cameraProps().center).toBeUndefined();
+  });
+
+  it('highlights the country that was tapped', async () => {
+    locateRound();
+    await render(<QuizPlayScreen />);
+    await tapCountry('NZL');
+
+    expect(selectionFilter()).toEqual(matching('NZL'));
+    expect(selectionPaint()).toBe(mapColors.quizTarget);
+  });
+
+  it('never names the pick before it is checked', async () => {
+    // The spoiler: "Your pick - New Zealand" under a prompt reading "Find New Zealand"
+    // answers the question, and lets the player retap until the two agree. The map
+    // highlight is the only thing allowed to say which country is selected.
+    const [first] = locateRound();
+    await render(<QuizPlayScreen />);
+    await tapCountry(first.iso3);
+
+    expect(screen.getByTestId('locate-pick')).not.toHaveTextContent(first.facts.name);
+    expect(screen.getByTestId('locate-pick')).toHaveTextContent(/Check/);
+  });
+
+  it('names the pick once there is nothing left to spoil', async () => {
+    const [first] = locateRound();
+    const wrong = first.iso3 === 'AUS' ? 'NZL' : 'AUS';
+    await render(<QuizPlayScreen />);
+    await tapCountry(wrong);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+    expect(screen.getByTestId('locate-verdict')).toHaveTextContent(
+      wrong === 'AUS' ? /Australia/ : /New Zealand/,
+    );
+  });
+
+  it('marks a correct pick green and leaves the camera exactly where it was', async () => {
+    const [first] = locateRound();
+    await render(<QuizPlayScreen />);
+    await tapCountry(first.iso3);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+    expect(selectionPaint()).toBe(mapColors.quizCorrect);
+    expect(screen.getByTestId('locate-verdict')).toHaveTextContent(/Correct/);
+
+    // Nothing to show them: they found it. The camera must not move, now or later.
+    await settle();
+    expect(cameraProps().center).toBeUndefined();
+  });
+
+  it('reddens a wrong pick at once and reveals the answer a beat later', async () => {
+    const [first] = locateRound();
+    const wrong = first.iso3 === 'AUS' ? 'NZL' : 'AUS';
+    await render(<QuizPlayScreen />);
+    await tapCountry(wrong);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+    // Immediately: the pick is wrong, and the answer is still hidden.
+    expect(selectionFilter()).toEqual(matching(wrong));
+    expect(selectionPaint()).toBe(mapColors.quizWrong);
+    expect(revealFilter()).toEqual(MATCHES_NOTHING);
+    expect(cameraProps().center).toBeUndefined();
+
+    await settle();
+
+    // After the delay: the answer is green and the camera has gone to it.
+    expect(revealFilter()).toEqual(matching(first.iso3));
+    expect(revealPaint()).toBe(mapColors.quizCorrect);
+    expect(cameraProps().center).toEqual([expect.any(Number), expect.any(Number)]);
+    expect(cameraProps().zoom).toBeGreaterThan(0);
+    expect(screen.getByTestId('locate-verdict')).toHaveTextContent(/in green/);
+  });
+
+  it('drops the reveal when the player presses Next inside the delay', async () => {
+    const [first] = locateRound();
+    const wrong = first.iso3 === 'AUS' ? 'NZL' : 'AUS';
+    await render(<QuizPlayScreen />);
+    await tapCountry(wrong);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+    // Next, before the timer fires. Yanking the camera afterwards would land them
+    // somewhere they did not ask to be, on a question they have already moved on to.
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+    await settle();
+
+    expect(cameraProps().center).toBeUndefined();
+    expect(revealFilter()).toEqual(MATCHES_NOTHING);
+  });
+
+  it('stops taking taps once the answer is checked', async () => {
+    const [first] = locateRound();
+    const wrong = first.iso3 === 'AUS' ? 'NZL' : 'AUS';
+    await render(<QuizPlayScreen />);
+    await tapCountry(wrong);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+    await tapCountry(first.iso3);
+
+    // Still the wrong pick: the answer is committed, and re-tapping must not rewrite it.
+    expect(selectionFilter()).toEqual(matching(wrong));
+  });
+
+  it('clears the pick and the reveal for the next question', async () => {
+    const [first, second] = locateRound();
+    const wrong = first.iso3 === 'AUS' ? 'NZL' : 'AUS';
+    await render(<QuizPlayScreen />);
+    await tapCountry(wrong);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+    await settle();
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+    expect(screen.getByTestId('locate-prompt')).toHaveTextContent(second.facts.name);
+    expect(selectionFilter()).toEqual(MATCHES_NOTHING);
+    expect(revealFilter()).toEqual(MATCHES_NOTHING);
+    // The camera stop is NOT withdrawn - see the note in play.tsx. It stays put, which
+    // is exactly where the previous reveal left the player.
+    expect(cameraProps().center).toEqual([expect.any(Number), expect.any(Number)]);
+  });
+
+  it('hands a finished locate round to the score screen', async () => {
+    const [first] = locateRound();
+    await render(<QuizPlayScreen />);
+    await tapCountry(first.iso3);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+    await fireEvent.press(screen.getByTestId('quiz-end'));
+
+    expect(mockReplace).toHaveBeenCalledWith('/quiz/results');
+  });
+});
+
 describe('the results screen', () => {
   const run = {
-    config: { subregions: [], fields: ['name' as const], seed: 1 },
+    config: { mode: 'facts' as const, subregions: [], fields: ['name' as const], seed: 1 },
     total: 3,
     endedEarly: true,
     results: [

@@ -232,3 +232,126 @@ export function getFocusedCameraStop({
 
   return { center: [centerX, inverseMercatorY(cameraY)], zoom };
 }
+
+/**
+ * How long a camera move should take, given how far it actually travels.
+ *
+ * A fixed duration is wrong in both directions at once, and lengthening it only trades
+ * which half is wrong: 900 ms is a crawl between two neighbouring countries and a blur
+ * across an ocean. What a move should be paced by is not geographic distance but how
+ * many SCREENFULS of map go past - and that depends on the zoom at both ends as much as
+ * on the gap between them.
+ *
+ * This is the van Wijk & Nuij (2003) "Smooth and efficient zooming and panning" path
+ * length, which is the same thing `maplibre-gl` computes for a `flyTo` given no
+ * duration, with its own defaults (`curve` 1.42). Reproducing it rather than delegating
+ * is not a preference: **MapLibre Native Android cannot do it.** Its RN binding maps a
+ * missing duration to `moveCamera` - an instant jump - and a negative one to a FIXED
+ * `MapLibreConstants.ANIMATION_DURATION`, with a comment in `CameraUpdateItem.kt` saying
+ * as much: "On iOS a duration of -1 means default or dynamic duration (based on
+ * flight-path length). On Android we can fallback to MapLibre's default duration as
+ * there is no such API. TODO". Computing it here is what makes the two platforms agree,
+ * and it puts the number somewhere Jest can read it.
+ *
+ * Pairs with `easing: 'fly'` and only makes sense with it. `S` is the length of the
+ * ARC - the flight that zooms out on the way and back in at the end - so spending it on
+ * an `ease`, which interpolates the centre linearly at the starting scale, would be
+ * timing one animation and playing another.
+ */
+
+/** van Wijk's rho: how much the flight zooms out relative to how far it pans. */
+export const FLIGHT_CURVE = 1.42;
+
+/**
+ * Screenfuls per second, and **the one number to turn if the pacing feels off.**
+ *
+ * `maplibre-gl` defaults to 1.2, which is tuned for someone browsing a map: at that
+ * speed France to Japan takes over three seconds, which across twenty questions is a
+ * wait rather than an animation. 2 is the quiz's version of the same judgement.
+ *
+ * Measured against the committed geometry, on a 411x500 dp map box:
+ *
+ * | flight | ms |
+ * |---|---|
+ * | France - Germany, Brazil - Argentina | 450 (the floor) |
+ * | world view - Australia, USA - China | ~620 |
+ * | France - Turkey | 766 |
+ * | France - Japan | 1588 |
+ * | New Zealand - Iceland, world view - Monaco | 2000 (the ceiling) |
+ *
+ * Two of those look wrong until you remember the unit is screenfuls, not kilometres.
+ * USA to China is 600 ms because both countries frame at around zoom 1, so almost the
+ * whole world is already visible at each end and very little of it moves. Monaco to
+ * Liechtenstein is 2 s despite being 500 km apart, because at zoom 10 that is hundreds
+ * of screenfuls. Pacing by geographic distance would get both backwards.
+ */
+export const FLIGHT_SPEED = 2;
+
+/**
+ * Floor and ceiling, in ms.
+ *
+ * The floor keeps a very short hop from being a flicker that reads as a cut. The ceiling
+ * matters more: the formula is happy to spend four seconds crossing the world from a
+ * street-level zoom, and it is right that this is what "smooth" costs - but not twenty
+ * times a round. Past the ceiling the move is simply faster than optimal, which is a
+ * better failure than a player waiting on it.
+ */
+export const MIN_FLIGHT_MS = 450;
+export const MAX_FLIGHT_MS = 2000;
+
+/** Below this the two centres are the same point and the general formula divides by ~0. */
+const PURE_ZOOM_EPSILON = 2e-6;
+
+export type CameraPose = { center: [number, number]; zoom: number };
+
+export function getFlightDuration({
+  from,
+  to,
+  viewport,
+}: {
+  from: CameraPose;
+  to: CameraPose;
+  /** The MAP's box in dp. */
+  viewport: { width: number; height: number };
+}): number {
+  // maplibre measures a screenful by the LARGER dimension, so a flight is paced the same
+  // whichever way the device is held.
+  const w0 = Math.max(viewport.width, viewport.height);
+  if (!(w0 > 0)) return MIN_FLIGHT_MS;
+
+  // The viewport, in the pixels of the starting zoom - so `w1 < w0` means zooming in.
+  const w1 = w0 * 2 ** (from.zoom - to.zoom);
+
+  // The gap between the two centres, also in starting-zoom pixels. Longitude goes the
+  // short way round, so a flight across the antimeridian is a short one.
+  const worldSize = WORLD_WIDTH_AT_ZOOM_0 * 2 ** from.zoom;
+  const dx = (normalizeLongitude(to.center[0] - from.center[0]) / 360) * worldSize;
+  const dy = (mercatorY(to.center[1]) - mercatorY(from.center[1])) * worldSize;
+  const u1 = Math.hypot(dx, dy);
+
+  const rho = FLIGHT_CURVE;
+  const rho2 = rho * rho;
+
+  /** The zoom-out factor at one end of the arc. `descent` is the far end. */
+  const zoomOutFactor = (descent: boolean) => {
+    const b =
+      (w1 * w1 - w0 * w0 + (descent ? -1 : 1) * rho2 * rho2 * u1 * u1) /
+      (2 * (descent ? w1 : w0) * rho2 * u1);
+    return Math.log(Math.sqrt(b * b + 1) - b);
+  };
+
+  const r0 = zoomOutFactor(false);
+  let pathLength = (zoomOutFactor(true) - r0) / rho;
+
+  // Straight up or down: no panning at all, so the arc collapses to a zoom and the
+  // general formula's `u1` in the denominator would take it to Infinity.
+  if (u1 < PURE_ZOOM_EPSILON || !Number.isFinite(pathLength)) {
+    pathLength = Math.abs(Math.log(w1 / w0)) / rho;
+  }
+
+  const duration = (1000 * pathLength) / FLIGHT_SPEED;
+  // NaN survives every comparison, so test for a real number rather than clamping it.
+  if (!Number.isFinite(duration)) return MIN_FLIGHT_MS;
+
+  return Math.round(Math.max(MIN_FLIGHT_MS, Math.min(MAX_FLIGHT_MS, duration)));
+}

@@ -82,6 +82,7 @@ const WORKER_URL = '/maplibre/maplibre-gl-worker.mjs';
 const COUNTRY_LAYERS = {
   fill: 'country-fill',
   selected: 'country-selected',
+  reveal: 'country-reveal',
   border: 'country-border',
   casing: 'country-selected-casing',
   outline: 'country-selected-outline',
@@ -151,7 +152,7 @@ function syncMapSize(map: MapLibreMap, node: HTMLElement | null): boolean {
 }
 
 /** The selection filter, matching nothing when the empty string is handed in. */
-const selectionFilter = (iso3: string | null | false) =>
+const selectionFilter = (iso3: string | null | false | undefined) =>
   asFilter(['==', ['get', 'iso3'], iso3 || '']);
 
 export function WorldMap({
@@ -159,6 +160,8 @@ export function WorldMap({
   onSelect,
   fillMode = 'flat',
   selectionColor,
+  revealIso3,
+  revealColor,
   camera,
   maxZoom = DEFAULT_MAX_ZOOM,
   labelField = 'none',
@@ -331,6 +334,15 @@ export function WorldMap({
         filter: selectionFilter(null),
         paint: { 'fill-color': mapColors.landSelected, 'fill-opacity': 1 },
       });
+      // The `locate` answer. After the selection, so a correct guess - where both name
+      // the same country - resolves to the reveal colour rather than to draw order.
+      map.addLayer({
+        id: COUNTRY_LAYERS.reveal,
+        type: 'fill',
+        source: COUNTRIES_SOURCE,
+        filter: selectionFilter(null),
+        paint: { 'fill-color': mapColors.quizCorrect, 'fill-opacity': 1 },
+      });
       map.addLayer({
         id: COUNTRY_LAYERS.border,
         type: 'line',
@@ -440,15 +452,17 @@ export function WorldMap({
       'fill-color',
       selectionColor ?? mapColors.landSelected,
     );
+    map.setPaintProperty(COUNTRY_LAYERS.reveal, 'fill-color', revealColor ?? mapColors.quizCorrect);
 
     // Flat mode marks selection with a solid fill; the choropleth marks it with an
     // outline, because filling it would hide the very value you clicked to inspect. Both
     // layers stay mounted and the mode is expressed by handing the iso3 to only one.
     map.setFilter(COUNTRY_LAYERS.selected, selectionFilter(fillMode === 'flat' && selectedIso3));
+    map.setFilter(COUNTRY_LAYERS.reveal, selectionFilter(fillMode === 'flat' && revealIso3));
     const outline = selectionFilter(fillMode !== 'flat' && selectedIso3);
     map.setFilter(COUNTRY_LAYERS.casing, outline);
     map.setFilter(COUNTRY_LAYERS.outline, outline);
-  }, [ready, fillMode, selectedIso3, selectionColor]);
+  }, [ready, fillMode, selectedIso3, selectionColor, revealIso3, revealColor]);
 
   // --- label field ---------------------------------------------------------------
   useEffect(() => {

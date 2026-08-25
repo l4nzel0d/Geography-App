@@ -16,6 +16,7 @@ import {
 } from '@/quiz/quizCountries';
 
 const config = (over: Partial<QuizConfig> = {}): QuizConfig => ({
+  mode: 'facts',
   subregions: [],
   fields: ['name'],
   seed: 1,
@@ -168,6 +169,38 @@ describe('buildQuiz', () => {
     const fsm = micronesia.find((q) => q.iso3 === 'FSM');
     expect(fsm).toBeDefined();
     expect(fsm!.fields).toEqual(['name']);
+  });
+});
+
+describe('buildQuiz in locate mode', () => {
+  const locate = (over: Partial<QuizConfig> = {}) => buildQuiz(config({ mode: 'locate', ...over }));
+
+  it('asks for no typed field at all', () => {
+    expect(locate({ subregions: ['Western Europe'] }).every((q) => q.fields.length === 0)).toBe(
+      true,
+    );
+  });
+
+  it('still asks every country in the selection once', () => {
+    const questions = locate({ subregions: ['Western Europe'] });
+    expect(questions.map((q) => q.iso3).sort()).toEqual(
+      countriesIn(['Western Europe'])
+        .map((c) => c.iso3)
+        .sort(),
+    );
+  });
+
+  it('keeps a country the configured fields would have dropped', () => {
+    // The completeness filter exists to avoid a question with no inputs. A locate round
+    // has no inputs by design and asks something every country can answer, so carrying
+    // `fields: ['currency']` over from a previous facts round must not drop Micronesia.
+    expect(
+      locate({ subregions: ['Micronesia'], fields: ['currency'] }).map((q) => q.iso3),
+    ).toContain('FSM');
+  });
+
+  it('replays identically for the same seed', () => {
+    expect(locate({ seed: 7 }).map((q) => q.iso3)).toEqual(locate({ seed: 7 }).map((q) => q.iso3));
   });
 });
 

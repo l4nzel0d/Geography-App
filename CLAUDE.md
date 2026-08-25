@@ -139,6 +139,25 @@ Added 2026-08-24, **not yet verified on any device**:
   exactly what the new flow steps assert, so running that flow is the gate.
 - nothing here adds a network call.
 
+Added 2026-08-25, **not yet verified on any device**:
+
+- **quiz modes.** The setup screen now asks *how* you want to play before it asks what.
+  The second mode is **locate** — you are given a country's name and have to find it on
+  the map. See *Locate mode*.
+- **every camera move is now a `fly` whose duration is computed from how far it travels**,
+  replacing a flat 900 ms `ease`. This is not confined to the new mode: it changes the
+  pacing of **every question of an existing facts round**, and reverses a decision the old
+  comment recorded. See *Pacing a camera move*.
+- 669 Jest tests across 29 suites pass, typecheck clean.
+- **nothing here has been seen on a screen.** Three things in particular are unproven, and
+  each is the kind Jest structurally cannot reach: that the new `country-reveal` fill layer
+  paints at all, that a reveal camera stop parses in the native renderer rather than
+  blanking the map, and whether the new pacing actually *feels* better — which is a
+  judgement no test can make. There is **no Maestro flow for locate mode**, so the first
+  two are covered by nothing.
+- nothing here adds a network call, and nothing here is a native change — no `app.json`
+  edit, no new native dependency, so a JS reload is enough to see all of it.
+
 ## Stack
 
 | Concern | Choice | Notes |
@@ -210,7 +229,7 @@ src/
     index.tsx               # MapScreen: owns selectedIso3, fillMode, and the search camera stop
     search.tsx              # /search: the country search route (no map on it)
   map/
-    WorldMap.tsx            # Map + GeoJSONSource + fill/selected/line Layers
+    WorldMap.tsx            # Map + GeoJSONSource + fill/selected/reveal/line Layers
     cameraFit.ts            # pure: zoom floors - world-fit width, and the both-axes fit
     choropleth.ts           # pure: population ramp + the fill-color paint expression
     offlineStyle.ts         # inline style: background layer, a bundled font-face, no sources
@@ -235,23 +254,27 @@ src/
     MapOptionPill.tsx       # a pill that opens one of the option panels
     MapOptionPanel.tsx      # the always-mounted radio list behind a pill
     ChoroplethLegend.tsx    # stepped key, driven by the active ramp
-    quiz/                   # QuizPanel, AnswerField, ChipInput, SubregionPicker,
-                            #   FieldPicker, QuizLaunchButton, useKeyboardHeight
+    quiz/                   # QuizPanel, LocatePanel, AnswerField, ChipInput,
+                            #   SubregionPicker, FieldPicker, ModePicker,
+                            #   QuizLaunchButton, useKeyboardHeight
     search/                 # SearchLaunchButton, CountryResultRow
   map/
     countryBounds.ts        # pure: which polygons to frame for one country
     quizCamera.ts           # pure: bbox + viewport -> centre and zoom, whole-viewport or
-                            #   into a focus rect (search frames around the info sheet)
+                            #   into a focus rect (search frames around the info sheet);
+                            #   and getFlightDuration - how long a move should take
   quiz/
-    quizConfig.ts           # pure: FieldId, QuizConfig, router-param coercion
+    quizConfig.ts           # pure: QuizMode, FieldId/GradedField, QuizConfig, params
     quizCountries.ts        # the 193-country pool and the subregion catalogue
     quizBuilder.ts          # pure: seeded shuffle -> ordered questions
     normalizeText.ts        # pure
     editDistance.ts         # pure: Damerau, and the typo budget
     answerAliases.ts        # accepted spellings, plus NAME_INDEX for the confusable guard
     gradeAnswer.ts          # pure: the marking
+    gradeLocation.ts        # the marking for a locate round: one country, `===`
     quizScore.ts            # pure: the tallies
     quizPanelLayout.ts      # pure: the map/panel split, and the map's own viewport
+                            #   (a locate panel is content-height: panelHeight is null)
     exitPrompt.ts           # pure: the wording and buttons of the leave-mid-round dialog
     quizResultStore.ts      # one-slot handover from the round to the score screen
   search/
@@ -352,10 +375,17 @@ Highlight is a **filtered layer**, not feature-state:
 `filter: ['==', ['get','iso3'], selectedIso3 ?? '']`. An empty string matches nothing, which is how
 "no selection" is expressed.
 
-There are **two** such layers, because the choropleth needs a different marker (see below):
-`country-selected` (orange fill) and `country-selected-outline` (white line, drawn last so it sits over
-`country-border`). Both stay mounted in both modes and the fill mode is expressed by handing the ISO-3
-to only one of them — the same empty-string idiom, rather than adding and removing layers at runtime.
+There are **three** such layers. Two of them exist because the choropleth needs a different marker (see
+below): `country-selected` (orange fill) and `country-selected-outline` (white line, drawn last so it
+sits over `country-border`). Both stay mounted in both modes and the fill mode is expressed by handing
+the ISO-3 to only one of them — the same empty-string idiom, rather than adding and removing layers
+at runtime.
+
+The third is **`country-reveal`**, and it exists because one `selectedIso3` cannot say two things at
+once: locate mode has to show where the answer was *alongside* the country the player tapped, and
+whenever the guess was wrong those are two different countries. Same idiom, its own colour, drawn
+immediately after `country-selected` so that the one case where both name the same country — a correct
+guess — resolves to the reveal colour rather than to draw order.
 
 ### `GeoJSONSource.onPress` MUST call `event.stopPropagation()`
 
@@ -691,6 +721,78 @@ Liechtenstein a few pixels; 3 dp geometry makes 10 the honest ceiling. The stop 
 country and the map's box only — `Camera` is `memo()`'d and rebuilds its animation from its props, so a
 freshly allocated object would re-fire the fly on every keystroke.
 
+### Pacing a camera move — `getFlightDuration`
+
+A fixed duration is wrong in both directions at once. 900 ms is a crawl between two neighbouring
+countries and a blur across an ocean, and lengthening it only chooses which half to be wrong about. Time
+alone cannot fix the long case either: `ease` interpolates the centre linearly at the *starting* scale,
+so at zoom 8 the ground tears past however many seconds you give it. Zooming out on the way is what makes
+a long move readable — which is what `fly` is.
+
+So both modes now use **`easing: 'fly'` with a duration computed from the flight's length**, and the two
+halves are one change: a fly at a fixed 900 ms has to cover the distance *and* the arc in the time of a
+short hop, which is precisely the jank.
+
+**The unit is screenfuls, not kilometres**, and that is the whole idea. This is the van Wijk & Nuij
+(2003) path length — the same thing `maplibre-gl` computes for a `flyTo` given no duration, with its own
+`curve` of 1.42.
+
+#### Why it is reimplemented rather than delegated
+
+**MapLibre Native Android cannot do it.** From `CameraUpdateItem.kt` in the RN binding: a `duration` of
+`0` — which is what an absent one becomes — takes the `moveCamera` path, an instant jump; a negative one
+falls back to a **fixed** `MapLibreConstants.ANIMATION_DURATION`. The file says so itself:
+
+> On iOS a duration of -1 means default or dynamic duration (based on flight-path length). On Android we
+> can fallback to MapLibre's default duration as there is no such API. TODO: Implement in MapLibre Native
+> Android
+
+Web would compute it happily; Android is the primary target and would jump. Computing it ourselves is
+what makes the two agree, and it puts the number somewhere Jest can read it — the same argument
+`quizCamera.ts` already makes for doing the Mercator arithmetic here rather than handing MapLibre a
+`bounds`. The web implementation needs the number too: `applyStop`'s starvation deadline is
+`duration + ARRIVAL_GRACE_MS`, and there is no deadline to set without one.
+
+`CameraEasing.FLY` maps to `animateCamera` on Android and `flyTo` on web, so the arc is the renderer's;
+only its pacing is ours.
+
+#### The numbers, and the two that look wrong
+
+`FLIGHT_SPEED` is **the one number to turn.** It is screenfuls per second; `maplibre-gl` defaults to 1.2,
+tuned for someone browsing a map, at which France to Japan takes over three seconds — a wait rather than
+an animation, twenty times a round. **2** is the quiz's version of that judgement. Measured against the
+committed geometry on a 411x500 dp map box:
+
+| flight | ms |
+|---|---|
+| France - Germany, Brazil - Argentina | 450 (the floor) |
+| world view - Australia, USA - China | ~620 |
+| France - Turkey | 766 |
+| France - Japan | 1588 |
+| New Zealand - Iceland, world view - Monaco | 2000 (the ceiling) |
+
+Two of those read as wrong until you remember the unit. **USA to China is 620 ms** because both frame at
+about zoom 1, so nearly the whole world is already on screen at each end and very little of it moves.
+**Monaco to Liechtenstein is 2 s** despite being 500 km apart, because at zoom 10 that is hundreds of
+screenfuls. Any distance-based scheme gets both backwards, and `flightDuration.test.ts` pins them.
+
+The ceiling matters more than the floor: the formula will spend four seconds crossing the world from a
+street-level zoom and is *right* that this is what smooth costs — but not twenty times a round. Past it
+the move is simply faster than optimal, which is the better failure.
+
+#### Where the flight starts
+
+The formula needs the camera's current pose, and nothing reports it back — so it is derived:
+
+- **`facts`**: the previous question's country, which is a pure function of the question list. A player
+  who pans mid-question makes it an estimate (the map is read-only for *selection*, not for gestures).
+- **`locate`**: the last stop we sent, or the world view if there has not been one. Rougher, because
+  hunting for a country *is* panning and zooming.
+
+Being wrong costs a move paced for a slightly longer or shorter journey than the real one, never a wrong
+destination. Tracking the true pose would mean a camera-change event on both `WorldMap` implementations
+and a ref written on every pan, which is a lot of surface for a pacing estimate.
+
 ### Which polygons to frame — `countryBounds.ts`
 
 A plain bounding box is wrong, and the reason is France: Natural Earth draws French Guiana as part of
@@ -761,6 +863,114 @@ round over Micronesia — drops out entirely rather than becoming a question wit
 
 Order is a **seeded** Fisher-Yates (`mulberry32`), so a round replays identically and a Maestro flow can
 pin it.
+
+### Locate mode — find it on the map
+
+`QuizConfig` gained a **`mode`**: `facts` is everything above, `locate` gives you a country's name and
+makes you find it. They are mutually exclusive rather than a sixth field you can tick, because they run
+the map in opposite directions — `facts` paints the country and asks about it, and `locate` must **not**
+paint it, since that is the answer. The mode crosses into `/quiz/play` as one more router param, and an
+absent or unrecognised `mode` is `facts`, which is what every link written before this says by omission.
+
+The round: tap a country to highlight it, press **Check** to commit. Right → it turns green. Wrong → your
+pick turns red, and a beat later the camera goes to the country you were asked for and paints it green.
+
+**Nothing may name the pick before it is checked.** "Your pick — New Zealand" under a prompt reading
+*Find New Zealand* answers the question outright, and lets a player retap until the panel agrees with the
+prompt. So an open question gets a bare "Ready — press Check" and the highlight on the map is the only
+thing that says *which* country is selected, which is the judgement being tested. Once graded there is
+nothing left to spoil and the verdict names it.
+
+#### The camera never resets, and only ever moves to reveal
+
+A `locate` round issues **no camera stop at all** while a question is open. It does not need one:
+`WorldMap`'s own default is `INITIAL_CENTER` at the world-fit zoom, which is exactly the whole-world
+opening this mode wants, and the player pans and zooms from there. `MapScreen.test.tsx`'s rule that the
+explore camera is never handed a stop now has a sibling assertion here.
+
+The **only** stop the mode ever issues is the reveal, and it is deliberately **never withdrawn**:
+
+- handing the native `Camera` a stop and then taking it away turns its stop prop from
+  `{center, zoom, duration, easing}` into `{}` — a real prop change pushed into a renderer Jest replaces
+  with a stub. `MapScreen`'s search focus records the same rule.
+- and leaving it in place *is* the behaviour: the next question starts from wherever the reveal left you,
+  which is what makes a regional round playable without the map snapping back to the world every time.
+
+Three details that are each load-bearing:
+
+- **`easing: 'fly'`, not the `'ease'` the facts camera uses.** There the camera hops between countries
+  from a known world view. Here the player may be at zoom 8 in the Alps when the answer turns out to be
+  in Peru, and an ease across that is an unreadable blur. The objection that a fly telegraphs where you
+  are heading does not apply to a move that happens only after the answer is already out.
+- **The red sits for `REVEAL_DELAY_MS` (700) before the camera moves**, so the verdict reads as being
+  about the country you picked rather than as part of the camera move. `answerShown` and `revealStop` are
+  two pieces of state written by that one timer: the first is cleared per question, the second never is.
+  The panel takes `answerShown` as a prop rather than running its own timer, so the words and the map
+  cannot get out of step.
+- **Pressing Next inside the delay cancels the reveal.** They have moved on; yanking the camera
+  afterwards would land them somewhere they did not ask to be, on a question that is already over.
+
+A correct guess moves nothing at all. They found it — there is nothing to show them.
+
+#### What it reuses, and the two small things it did not
+
+`buildQuiz`, the seeded shuffle, the subregion pool, the exit confirmation, `summarize` and the whole
+results screen are untouched. Two things had to give:
+
+- **`location` is a `GradedField` but deliberately not a `FieldId`.** Everything that iterates
+  `ANSWERABLE_FIELDS` — the field picker, `toAnswerInput`, the `fields=` parser, `gradeField`'s exhaustive
+  switch — is about a fact you type into a box, and this is not one. Keeping it out of that union means
+  none of them needs a case for it, and no deep link can smuggle `fields=location` into a facts round. It
+  is still a `GradedField`, so `FieldGrade`, `perField` and the review list carry it unchanged.
+- **`buildQuiz` skips its completeness filter.** That filter exists to drop a country that cannot answer
+  any of the *chosen facts* — Micronesia in a currency-only round. A locate round asks something every
+  country can answer, and a config carrying `fields: ['currency']` over from a previous facts round must
+  not silently drop Micronesia from it.
+
+`gradeLocation.ts` is its own module rather than a sixth case in `gradeAnswer.ts`: everything there is
+about being forgiving with a *string*, and none of it — accents, a typo budget, the confusable guard —
+has anything to say about an ISO-3 code that came out of `pickCountry`. There is one right answer and
+comparing it is `===`.
+
+Checking with **nothing** picked is legal, scores as blank/wrong, and still reveals. It is the "no idea,
+show me" move, and it matches facts mode, where Check with every box empty has always been allowed.
+
+#### The panel is content-height, and `flexGrow` is why
+
+`LocatePanel` is a sibling of `QuizPanel`, not a mode branch inside it — they share only a frame, and
+this one has no inputs, so none of `QuizPanel`'s field rows, chip slots, focus chain or keyboard handling
+applies. It keeps the same testIDs (`quiz-panel`, `quiz-progress`, `quiz-end`, `quiz-submit`) so the
+screen's wiring does not care which mode is on screen.
+
+In portrait its slot is given **no explicit height** (`getQuizPanelLayout(..., locate)` returns
+`panelHeight: null`, which the screen spreads as `height: undefined`). A panel sized like a facts panel
+left a growing gap between the last line and the Check button — wider the taller the screen.
+
+**Which means its root uses `flexGrow: 1`, not `flex: 1`, and the two are not interchangeable.** RN's
+`flex: 1` also sets `flexBasis: 0`, so a panel carrying it reports a content height of zero to an
+auto-height parent and collapses. `flexGrow: 1` keeps `flexBasis: auto`: content-height in portrait, and
+still filling the stretched column in landscape, which is untouched. CLAUDE.md's warning that
+**`QuizPanel` needs `flex: 1`** still stands for that panel — its slot has a definite height and its body
+must fill it or every answer field collapses. This one has neither property.
+
+`LOCATE_PORTRAIT_HEIGHT` survives as an **estimate with exactly one consumer**: `mapViewport`, which the
+reveal camera fits a country into. Being a few dp out costs a marginally roomier frame, and
+`CONTEXT_MARGIN` already spends 12% on that. Measuring it for real would mean threading an `onLayout` up
+into the camera's inputs and re-firing the fly whenever it settled — the same trade `getMapFocusRect`
+refuses for the info sheet.
+
+#### What is not covered
+
+There is **no Maestro flow for locate mode**, which leaves the two things Jest structurally cannot see
+uncovered: that `country-reveal` paints at all, and that a reveal stop parses in the native renderer
+rather than blanking the map. Both are exactly the failure modes `choropleth-modes.yaml` and `quiz.yaml`
+exist for elsewhere.
+
+Worth knowing when one is written: unlike `quiz.yaml`, a locate flow **can** use coordinate taps, because
+the map sits at the launch camera for the whole question — there is no stop until the reveal. The
+percentages are not the explore flows' though: the map is a band between the top inset and the panel, not
+the whole window, so only the *x* percentages carry over.
+
 
 ## Country search
 
@@ -1110,7 +1320,7 @@ Windows** (no WSL) and needs JDK 17, which is already set up. It is installed at
 `C:\Users\Boris\maestro\maestro\bin\maestro.bat` and is **not on PATH** — either add it or call it by
 full path. `npm run test:e2e` assumes `maestro` is on PATH.
 
-There are **five flows**, and each pins its own orientation with `setOrientation` — the app rotates
+There are **six flows**, and each pins its own orientation with `setOrientation` — the app rotates
 freely now, so none can assume it:
 
 | Flow | Orientation | Journey |
@@ -1118,7 +1328,12 @@ freely now, so none can assume it:
 | `.maestro/tap-country.yaml` | `PORTRAIT` | Russia → Greenland → close → ocean-deselect |
 | `.maestro/landscape-info-panel.yaml` | `LANDSCAPE_LEFT` | Brazil → Mali → close → ocean-deselect → rotate to portrait with the card open |
 | `.maestro/choropleth-modes.yaml` | `PORTRAIT` | toggle on → legend → Russia still selects → close → toggle off |
+| `.maestro/map-labels.yaml` | `PORTRAIT` | each label field in turn → map and selection still work |
+| `.maestro/search-country.yaml` | `PORTRAIT` | open search → browse → type → pick → the map highlights and flies |
 | `.maestro/quiz.yaml` | `PORTRAIT` + rotate | Quiz → pick a subregion and fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score |
+
+**There is no flow for the quiz's `locate` mode**, which is the current gap — see *What is not
+covered* under *Locate mode*.
 
 Coordinate taps are only deterministic because `INITIAL_CENTER` and the derived zoom floor
 (`cameraFit.ts`) pin the camera on launch — **change either and you must re-derive every tap point in
@@ -1298,3 +1513,6 @@ cd android && ORG_GRADLE_PROJECT_reactNativeArchitectures=arm64-v8a ./gradlew.ba
 ## Launching the app on AVD
 emulator -avd Medium_Phone
 npx expo run:android
+
+## Launch web-dev server
+npx expo start --web

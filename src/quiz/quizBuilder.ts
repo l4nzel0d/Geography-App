@@ -14,7 +14,13 @@ import { answerableFields, countriesIn, type QuizCountry } from './quizCountries
 export type QuizQuestion = {
   iso3: string;
   facts: CountryFacts;
-  /** Only the fields this country can actually be asked - see `answerableFields`. */
+  /**
+   * Only the fields this country can actually be asked - see `answerableFields`.
+   *
+   * **Empty in `locate` mode**, where the only thing asked is where the country is and
+   * nothing is typed at all. `gradeLocation` grades those rounds; `gradeQuestion` never
+   * sees one.
+   */
   fields: FieldId[];
 };
 
@@ -47,16 +53,26 @@ export function buildQuiz(
   config: QuizConfig,
   pool: readonly QuizCountry[] = countriesIn(config.subregions),
 ): QuizQuestion[] {
+  /**
+   * Every country in the pool is askable in `locate` mode, and none of them needs a
+   * field list: the question is where it is, and having an outline to point at is
+   * already what `QUIZ_COUNTRIES` selects on. So the completeness filter below - which
+   * exists purely to drop a country that cannot answer any of the CHOSEN facts - has
+   * nothing to do here, and applying it would drop Micronesia from a currency-configured
+   * locate round for a reason that round never asks about.
+   */
+  const locate = config.mode === 'locate';
+
   const questions = pool
     .map((country) => ({
       iso3: country.iso3,
       facts: country.facts,
-      fields: answerableFields(country.facts, config.fields),
+      fields: locate ? [] : answerableFields(country.facts, config.fields),
     }))
     // A country with nothing askable would be a question with no inputs. Only reachable
     // when the config asks for a single field that this country lacks - currency and
     // Micronesia is the one real case.
-    .filter((question) => question.fields.length > 0);
+    .filter((question) => locate || question.fields.length > 0);
 
   return shuffle(questions, makeRng(config.seed));
 }

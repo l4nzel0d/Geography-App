@@ -36,6 +36,8 @@ export function WorldMap({
   onSelect,
   fillMode = 'flat',
   selectionColor,
+  revealIso3,
+  revealColor,
   camera,
   maxZoom = DEFAULT_MAX_ZOOM,
   labelField = 'none',
@@ -141,6 +143,21 @@ export function WorldMap({
           filter={['==', ['get', 'iso3'], (fillMode === 'flat' && selectedIso3) || '']}
           paint={{
             'fill-color': selectionColor ?? mapColors.landSelected,
+            'fill-opacity': 1,
+          }}
+        />
+
+        {/*
+          The answer, in `locate` mode. Drawn after the selection so that the one case
+          where both name the same country - a correct guess - resolves to the reveal
+          colour rather than depending on which layer happens to be on top.
+        */}
+        <Layer
+          id="country-reveal"
+          type="fill"
+          filter={['==', ['get', 'iso3'], (fillMode === 'flat' && revealIso3) || '']}
+          paint={{
+            'fill-color': revealColor ?? mapColors.quizCorrect,
             'fill-opacity': 1,
           }}
         />

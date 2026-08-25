@@ -4,7 +4,7 @@ import type { CountryFacts } from '@/data/types';
 import { currencyAliases, languageAliases, nameAliases, NAME_INDEX } from './answerAliases';
 import { allowedEdits, editDistance } from './editDistance';
 import { normalizeText } from './normalizeText';
-import { ANSWERABLE_FIELDS, type FieldId, isSetField } from './quizConfig';
+import { ANSWERABLE_FIELDS, type FieldId, type GradedField, isSetField } from './quizConfig';
 
 /**
  * Marking one country's answers.
@@ -29,7 +29,11 @@ export const CURRENCIES_REQUIRED = 3;
 export type MatchKind = 'exact' | 'alias' | 'fuzzy' | 'partial' | 'wrong' | 'blank';
 
 export type FieldGrade = {
-  field: FieldId;
+  /**
+   * `GradedField`, not `FieldId`: a `locate` round grades the country's location, which
+   * is answered by tapping and so is never one of the typed fields. See `gradeLocation`.
+   */
+  field: GradedField;
   correct: boolean;
   how: MatchKind;
   /** What the player gave, ready to display. */

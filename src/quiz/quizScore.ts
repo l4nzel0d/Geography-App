@@ -1,5 +1,5 @@
 import type { QuestionResult } from './gradeAnswer';
-import type { FieldId, QuizConfig } from './quizConfig';
+import type { GradedField, QuizConfig } from './quizConfig';
 
 /** One finished round, handed to the results screen. */
 export type QuizRun = {
@@ -17,7 +17,7 @@ export type QuizSummary = {
   countriesAllCorrect: number;
   fieldsAsked: number;
   fieldsCorrect: number;
-  perField: Partial<Record<FieldId, { asked: number; correct: number }>>;
+  perField: Partial<Record<GradedField, { asked: number; correct: number }>>;
 };
 
 /**

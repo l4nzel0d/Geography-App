@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { goBack } from "@/navigation/goBack";
 import { FieldPicker } from "@/components/quiz/FieldPicker";
+import { ModePicker } from "@/components/quiz/ModePicker";
 import {
   getInfoSheetLayout,
   MAX_CONTENT_WIDTH,
@@ -13,7 +14,13 @@ import { quizColors, quizRadii } from "@/components/palette";
 import { useWindowSize } from "@/components/useWindowSize";
 import { SubregionPicker } from "@/components/quiz/SubregionPicker";
 import { countriesIn } from "@/quiz/quizCountries";
-import { type FieldId, newSeed, toQuizParams } from "@/quiz/quizConfig";
+import {
+  DEFAULT_MODE,
+  type FieldId,
+  newSeed,
+  type QuizMode,
+  toQuizParams,
+} from "@/quiz/quizConfig";
 
 /**
  * Quiz setup: which subregions are in play, and which facts you have to supply.
@@ -31,17 +38,21 @@ export default function QuizSetupScreen() {
     getInfoSheetLayout(useWindowSize()).tier === "desktop"
       ? styles.centred
       : null;
+  const [mode, setMode] = useState<QuizMode>(DEFAULT_MODE);
   const [subregions, setSubregions] = useState<string[]>([]);
   const [fields, setFields] = useState<FieldId[]>(["name"]);
 
   const countryCount = countriesIn(subregions).length;
-  const canStart = fields.length > 0 && countryCount > 0;
+  // A `locate` round asks one thing of every country and needs no field at all, so the
+  // only way to make it unplayable is to select subregions that contain nobody.
+  const needsFields = mode === "facts";
+  const canStart = (!needsFields || fields.length > 0) && countryCount > 0;
 
   const start = () => {
     if (!canStart) return;
     router.push({
       pathname: "/quiz/play",
-      params: toQuizParams({ subregions, fields, seed: newSeed() }),
+      params: toQuizParams({ mode, subregions, fields, seed: newSeed() }),
     });
   };
 
@@ -52,8 +63,10 @@ export default function QuizSetupScreen() {
           <Text testID="quiz-setup-title" style={styles.title}>
             Quiz
           </Text>
-          <Text style={styles.subtitle}>
-            The map zooms to a country. You type what you know about it.
+          <Text testID="quiz-setup-subtitle" style={styles.subtitle}>
+            {needsFields
+              ? "The map zooms to a country. You type what you know about it."
+              : "You get a name. You find the country on the map."}
           </Text>
         </View>
         <Pressable
@@ -77,8 +90,21 @@ export default function QuizSetupScreen() {
           { paddingBottom: insets.bottom + 120 },
         ]}
       >
-        <Text style={styles.section}>What do you have to answer?</Text>
-        <FieldPicker selected={fields} onChange={setFields} />
+        <Text style={styles.section}>How do you want to play?</Text>
+        <ModePicker selected={mode} onChange={setMode} />
+
+        {/*
+          Ordinary conditional rendering, and correct here for the same reason it is on
+          `/search`: this screen has no map on it, so nothing can be inserted above a
+          MapLibre surface. The always-mounted discipline elsewhere in the quiz exists
+          only where a view shares a window with that surface.
+        */}
+        {needsFields ? (
+          <>
+            <Text style={styles.section}>What do you have to answer?</Text>
+            <FieldPicker selected={fields} onChange={setFields} />
+          </>
+        ) : null}
 
         <Text style={styles.section}>Which parts of the world?</Text>
         <Text style={styles.sectionNote}>
@@ -106,7 +132,7 @@ export default function QuizSetupScreen() {
             accessibilityLabel={`Start a quiz of ${countryCount} countries`}
           >
             <Text style={styles.startText}>
-              {fields.length === 0
+              {needsFields && fields.length === 0
                 ? "Pick at least one fact"
                 : `Start — ${countryCount} ${countryCount === 1 ? "country" : "countries"}`}
             </Text>

@@ -65,6 +65,20 @@ export type WorldMapProps = {
    */
   selectionColor?: string;
   /**
+   * A SECOND highlight, independent of the selection.
+   *
+   * It exists for one job: `locate` mode has to show where the answer actually was
+   * alongside the country the player tapped, and those are two different countries
+   * whenever the guess was wrong. One `selectedIso3` cannot say both.
+   *
+   * Same idiom as the selection - always-mounted layer, empty string matches nothing -
+   * and like it, it only draws in `flat` fill mode, since filling a country solid would
+   * hide the choropleth value underneath.
+   */
+  revealIso3?: string | null;
+  /** Overrides `mapColors.quizCorrect` on the reveal fill. */
+  revealColor?: string;
+  /**
    * A declarative camera stop. When absent the camera sits at `INITIAL_CENTER` and never
    * moves, which is what every Maestro percentage tap depends on - see CLAUDE.md.
    *

@@ -37,7 +37,29 @@ describe('parseQuizParams', () => {
   it('reads a well-formed set of params', () => {
     expect(
       parseQuizParams({ subregions: 'Western Europe', fields: 'name,capital', seed: '42' }, seed),
-    ).toEqual({ subregions: ['Western Europe'], fields: ['name', 'capital'], seed: 42 });
+    ).toEqual({
+      // Absent `mode` is a facts round - which is what every link written before modes
+      // existed says by omission.
+      mode: 'facts',
+      subregions: ['Western Europe'],
+      fields: ['name', 'capital'],
+      seed: 42,
+    });
+  });
+
+  it('defaults an absent mode to facts', () => {
+    expect(parseQuizParams({}, seed).mode).toBe('facts');
+  });
+
+  it('reads a locate round', () => {
+    expect(parseQuizParams({ mode: 'locate' }, seed).mode).toBe('locate');
+  });
+
+  it('falls back to facts for a mode it does not recognise', () => {
+    // A hand-typed deep link should start a quiz, not a red screen - same rule as the
+    // rest of this parser.
+    expect(parseQuizParams({ mode: 'pointing' }, seed).mode).toBe('facts');
+    expect(parseQuizParams({ mode: ['locate', 'facts'] }, seed).mode).toBe('locate');
   });
 
   it('accepts params repeated as an array', () => {
@@ -101,6 +123,7 @@ describe('parseQuizParams', () => {
 
 describe('toQuizParams', () => {
   const config: QuizConfig = {
+    mode: 'facts',
     subregions: ['Western Europe', 'Polynesia'],
     fields: ['name', 'population'],
     seed: 99,
@@ -108,6 +131,14 @@ describe('toQuizParams', () => {
 
   it('round-trips through parseQuizParams', () => {
     expect(parseQuizParams({ ...toQuizParams(config) })).toEqual(config);
+  });
+
+  it('round-trips a locate round, fields and all', () => {
+    // The fields are dead weight to a locate round and are carried anyway: "Change
+    // settings" and "Play again" both send the config back through the URL, and dropping
+    // them would silently clear what the player had ticked for facts mode.
+    const round = { ...config, mode: 'locate' as const };
+    expect(parseQuizParams({ ...toQuizParams(round) })).toEqual(round);
   });
 
   it('produces strings, which is all a URL can carry', () => {

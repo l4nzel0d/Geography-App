@@ -27,17 +27,43 @@ export const PORTRAIT_MIN_FRACTION = 0.34;
  */
 export const PORTRAIT_MAX_FRACTION = 0.58;
 
+/**
+ * What a `locate` panel costs in portrait - an ESTIMATE, and only for the camera.
+ *
+ * That panel is content-height on screen: a prompt, one status line and a button, none
+ * of which grows. So it is given no explicit height at all, which is what keeps the
+ * button sitting directly under the last line instead of being pushed to the foot of a
+ * facts-sized box - a gap that got wider the taller the screen was.
+ *
+ * The one thing that still needs a number is `mapViewport`, which the reveal camera fits
+ * a country into. Being a few dp out there costs a marginally roomier frame, and
+ * `CONTEXT_MARGIN` already spends 12% on exactly that. Measuring it for real would mean
+ * threading an `onLayout` up into the camera's inputs and re-firing the fly whenever it
+ * settled, which is the same trade `getMapFocusRect` refuses for the info sheet.
+ */
+export const LOCATE_PORTRAIT_HEIGHT = 220;
+
 export type QuizPanelLayout = {
   landscape: boolean;
   /** Landscape only; null in portrait, where the panel spans the width. */
   panelWidth: number | null;
-  /** Portrait only; null in landscape, where the panel spans the height. */
+  /**
+   * Portrait only; null in landscape, where the panel spans the height - and null in a
+   * portrait `locate` round too, where "no explicit height" is the answer rather than a
+   * missing one. The play screen spreads it as `height: panelHeight ?? undefined`, so
+   * null lands as an auto height and the panel sizes to its content.
+   */
   panelHeight: number | null;
   /** What is left for the map, in dp. Feeds `getCountryCameraStop`. */
   mapViewport: { width: number; height: number };
 };
 
-export function getQuizPanelLayout(screen: WindowSize, fieldCount: number): QuizPanelLayout {
+export function getQuizPanelLayout(
+  screen: WindowSize,
+  fieldCount: number,
+  /** A `locate` round: no answer fields, and a content-height panel in portrait. */
+  locate = false,
+): QuizPanelLayout {
   const { landscape, panelWidth } = getInfoSheetLayout(screen);
 
   if (landscape) {
@@ -46,6 +72,18 @@ export function getQuizPanelLayout(screen: WindowSize, fieldCount: number): Quiz
       panelWidth,
       panelHeight: null,
       mapViewport: { width: Math.max(0, screen.width - (panelWidth ?? 0)), height: screen.height },
+    };
+  }
+
+  if (locate) {
+    return {
+      landscape: false,
+      panelWidth: null,
+      panelHeight: null,
+      mapViewport: {
+        width: screen.width,
+        height: Math.max(0, screen.height - LOCATE_PORTRAIT_HEIGHT),
+      },
     };
   }
 
