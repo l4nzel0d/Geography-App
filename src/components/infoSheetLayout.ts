@@ -46,21 +46,74 @@ export const PORTRAIT_MAX_HEIGHT_FRACTION = 0.55;
  */
 export const MAP_CHROME_HEIGHT = 60;
 
+/**
+ * Where the desktop tier starts.
+ *
+ * Stated as a measured margin rather than a round number: the widest phone in landscape
+ * today is about 956 dp (iPhone 16 Pro Max), so 1024 leaves ~68 dp of headroom before a
+ * phone could ever be mistaken for a desktop. It is also the conventional `lg`
+ * breakpoint, so it is a number a reader recognises. A 1024x768 iPad lands exactly on it,
+ * which is fine - at that size the desktop panel is 380 and leaves the map 644, a better
+ * layout than a 360 strip either way.
+ *
+ * The tier is about ROOM, not input device. A desktop browser window dragged narrow
+ * correctly drops back to the phone layout.
+ */
+export const DESKTOP_MIN_WIDTH = 1024;
+
+/** Narrowest the desktop panel gets. Wide enough for the facts list to read as a column. */
+export const DESKTOP_PANEL_MIN_WIDTH = 380;
+
+/** Widest it gets, however large the monitor. */
+export const DESKTOP_PANEL_MAX_WIDTH = 480;
+
+/**
+ * Preferred share of a desktop window. Lower than the phone's 0.42 because 42% of 1920 is
+ * absurd - at this size the constraint is comfortable reading width, not fitting in.
+ */
+export const DESKTOP_PANEL_WIDTH_FRACTION = 0.28;
+
 export type WindowSize = { width: number; height: number };
 
+/**
+ * How much room there is, in three steps rather than the original two.
+ *
+ * - `compact`  - portrait. The bottom sheet.
+ * - `wide`     - landscape on a phone or small tablet. The 280-360 dp side panel.
+ * - `desktop`  - a genuinely large window. A 380-480 dp side panel and roomier chrome.
+ *
+ * Deliberately expressed here rather than as a branch inside a component, so the whole
+ * breakpoint story stays in one pure, unit-tested function - the same reason
+ * `PORTRAIT_MAX_HEIGHT_FRACTION` is shared with `getMapFocusRect` instead of re-spelled.
+ */
+export type InfoSheetTier = 'compact' | 'wide' | 'desktop';
+
 export type InfoSheetLayout = {
+  /**
+   * Unchanged in meaning and in value: `width > height`. Desktop is a KIND of landscape,
+   * so this stays true there and every existing caller - `CountryInfoSheet`'s dock edge,
+   * `quizPanelLayout`, `getMapFocusRect` - keeps working without knowing tiers exist.
+   */
   landscape: boolean;
   /** Panel width in dp, or `null` in portrait where the sheet spans the screen. */
   panelWidth: number | null;
+  tier: InfoSheetTier;
 };
 
 export function getInfoSheetLayout({ width, height }: WindowSize): InfoSheetLayout {
-  if (width <= height) return { landscape: false, panelWidth: null };
+  if (width <= height) return { landscape: false, panelWidth: null, tier: 'compact' };
 
-  const preferred = Math.max(PANEL_MIN_WIDTH, width * PANEL_WIDTH_FRACTION);
-  const panelWidth = Math.round(Math.min(PANEL_MAX_WIDTH, preferred, width * PANEL_MAX_FRACTION));
+  const desktop = width >= DESKTOP_MIN_WIDTH;
 
-  return { landscape: true, panelWidth };
+  const [minWidth, maxWidth, fraction] = desktop
+    ? [DESKTOP_PANEL_MIN_WIDTH, DESKTOP_PANEL_MAX_WIDTH, DESKTOP_PANEL_WIDTH_FRACTION]
+    : [PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, PANEL_WIDTH_FRACTION];
+
+  const preferred = Math.max(minWidth, width * fraction);
+  // The 60% cap still applies at every tier, so the map never drops below 40%.
+  const panelWidth = Math.round(Math.min(maxWidth, preferred, width * PANEL_MAX_FRACTION));
+
+  return { landscape: true, panelWidth, tier: desktop ? 'desktop' : 'wide' };
 }
 
 /**

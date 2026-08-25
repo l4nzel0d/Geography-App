@@ -3,6 +3,9 @@
  * rather than by faking `useWindowDimensions` in a render test.
  */
 import {
+  DESKTOP_MIN_WIDTH,
+  DESKTOP_PANEL_MAX_WIDTH,
+  DESKTOP_PANEL_MIN_WIDTH,
   getInfoSheetLayout,
   getMapFocusRect,
   MAP_CHROME_HEIGHT,
@@ -17,6 +20,7 @@ describe('getInfoSheetLayout', () => {
     expect(getInfoSheetLayout({ width: 411, height: 891 })).toEqual({
       landscape: false,
       panelWidth: null,
+      tier: 'compact',
     });
   });
 
@@ -31,8 +35,12 @@ describe('getInfoSheetLayout', () => {
     expect(panelWidth).toBe(PANEL_MAX_WIDTH); // 891 * 0.42 = 374, capped
   });
 
-  it('caps the panel at PANEL_MAX_WIDTH on a wide screen', () => {
-    expect(getInfoSheetLayout({ width: 1600, height: 900 }).panelWidth).toBe(PANEL_MAX_WIDTH);
+  it('caps the phone panel at PANEL_MAX_WIDTH just below the desktop tier', () => {
+    // 1023 is the widest 'wide' window there is; 1023 * 0.42 = 430, so the cap wins.
+    const { panelWidth, tier } = getInfoSheetLayout({ width: DESKTOP_MIN_WIDTH - 1, height: 700 });
+
+    expect(tier).toBe('wide');
+    expect(panelWidth).toBe(PANEL_MAX_WIDTH);
   });
 
   it('holds the panel at PANEL_MIN_WIDTH on a short-but-wide screen', () => {
@@ -52,6 +60,48 @@ describe('getInfoSheetLayout', () => {
       expect(panelWidth).not.toBeNull();
       expect(panelWidth! / width).toBeLessThanOrEqual(0.6);
     }
+  });
+});
+
+
+describe('the desktop tier', () => {
+  it('starts at DESKTOP_MIN_WIDTH and not a pixel earlier', () => {
+    expect(getInfoSheetLayout({ width: DESKTOP_MIN_WIDTH - 1, height: 700 }).tier).toBe('wide');
+    expect(getInfoSheetLayout({ width: DESKTOP_MIN_WIDTH, height: 700 }).tier).toBe('desktop');
+  });
+
+  it('is still landscape, so every existing caller keeps working', () => {
+    // quizPanelLayout and CountryInfoSheet both branch on `landscape`, not on `tier`.
+    expect(getInfoSheetLayout({ width: 1920, height: 1080 }).landscape).toBe(true);
+  });
+
+  it('gives the panel a real reading column rather than a phone strip', () => {
+    const { panelWidth } = getInfoSheetLayout({ width: 1920, height: 1080 });
+
+    // 1920 * 0.28 = 538, capped at 480.
+    expect(panelWidth).toBe(DESKTOP_PANEL_MAX_WIDTH);
+    expect(panelWidth!).toBeGreaterThan(PANEL_MAX_WIDTH);
+  });
+
+  it('holds the minimum on a window only just wide enough', () => {
+    // 1024 * 0.28 = 287, below the 380 floor.
+    expect(getInfoSheetLayout({ width: 1024, height: 768 }).panelWidth).toBe(
+      DESKTOP_PANEL_MIN_WIDTH,
+    );
+  });
+
+  it('never takes more than 40% of the window, at any monitor size', () => {
+    for (const width of [1024, 1280, 1440, 1920, 2560, 3840]) {
+      const { panelWidth } = getInfoSheetLayout({ width, height: 900 });
+
+      expect(panelWidth! / width).toBeLessThanOrEqual(0.4);
+    }
+  });
+
+  it('drops back to the phone layout when a desktop window is dragged narrow', () => {
+    // The tier is about room, not input device.
+    expect(getInfoSheetLayout({ width: 800, height: 700 }).tier).toBe('wide');
+    expect(getInfoSheetLayout({ width: 600, height: 900 }).tier).toBe('compact');
   });
 });
 

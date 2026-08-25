@@ -51,7 +51,15 @@ const FALLBACK_SIZE = { width: 360, height: 400 };
  */
 export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
   const insets = useSafeAreaInsets();
-  const { landscape, panelWidth } = getInfoSheetLayout(useWindowDimensions());
+  const { landscape, panelWidth, tier } = getInfoSheetLayout(useWindowDimensions());
+
+  /**
+   * A big window is not a stretched phone. At 1920 the phone type sizes leave the card
+   * looking like a mobile screenshot pasted onto a monitor, so the desktop tier scales
+   * the type and the spacing up to match its wider column. Keyed on available ROOM, not
+   * on pointer type, so an Android tablet in landscape gets it too - which is right.
+   */
+  const desktop = tier === 'desktop';
   const facts = getCountryFacts(iso3);
   const slide = useRef(new Animated.Value(0)).current;
 
@@ -169,6 +177,7 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
       style={[
         styles.sheet,
         landscape ? styles.sheetLandscape : styles.sheetPortrait,
+        desktop && styles.sheetDesktop,
         landscape
           ? {
               width: panelWidth ?? undefined,
@@ -189,14 +198,16 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
         style={landscape ? styles.handleLandscape : styles.handlePortrait}
       />
 
-      <View style={styles.header}>
+      <View style={[styles.header, desktop && styles.headerDesktop]}>
         <CountryFlag flag={visibleFacts.flag} />
         <View style={styles.headerText}>
-          <Text testID="country-name" style={styles.name}>
+          <Text testID="country-name" style={[styles.name, desktop && styles.nameDesktop]}>
             {visibleFacts.name}
           </Text>
           {visibleFacts.official && visibleFacts.official !== visibleFacts.name ? (
-            <Text style={styles.official}>{visibleFacts.official}</Text>
+            <Text style={[styles.official, desktop && styles.officialDesktop]}>
+              {visibleFacts.official}
+            </Text>
           ) : null}
         </View>
         <Pressable
@@ -213,7 +224,7 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
 
       <ScrollView
         style={landscape ? styles.bodyLandscape : styles.body}
-        contentContainerStyle={styles.bodyContent}
+        contentContainerStyle={[styles.bodyContent, desktop && styles.bodyContentDesktop]}
         // Portrait dismisses along the axis this list scrolls on, so the card may
         // only take the drag while the list is at the top. See `shouldCaptureDrag`.
         scrollEventThrottle={16}
@@ -246,6 +257,15 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
   );
 }
 
+/**
+ * One labelled fact.
+ *
+ * Reads the tier itself rather than taking it as a prop. Threading it through every call
+ * site is exactly the kind of thing that gets half-done - it already did, leaving three
+ * of five facts at phone sizes on a monitor - and there is no case where one fact should
+ * be sized differently from its neighbours. `useWindowDimensions` is a single shared
+ * resize subscription, so asking per fact costs nothing measurable.
+ */
 function Fact({
   label,
   value,
@@ -257,10 +277,12 @@ function Fact({
   note?: string;
   testID: string;
 }) {
+  const desktop = getInfoSheetLayout(useWindowDimensions()).tier === 'desktop';
+
   return (
     <View testID={testID} style={styles.fact}>
-      <Text style={styles.factLabel}>{label}</Text>
-      <Text style={styles.factValue}>{value}</Text>
+      <Text style={[styles.factLabel, desktop && styles.factLabelDesktop]}>{label}</Text>
+      <Text style={[styles.factValue, desktop && styles.factValueDesktop]}>{value}</Text>
       {note ? <Text style={styles.factNote}>{note}</Text> : null}
     </View>
   );
@@ -336,6 +358,19 @@ const styles = StyleSheet.create({
   // header and scroll within it.
   bodyLandscape: { flex: 1 },
   bodyContent: { gap: 14, paddingBottom: 8 },
+
+  /*
+   * The desktop tier. Only sizes and spacing - no layout branch, no second component,
+   * so there is exactly one info card and it cannot drift from itself. Every value here
+   * is the phone value scaled to suit a 380-480 dp column rather than a 280-360 one.
+   */
+  sheetDesktop: { paddingHorizontal: 28 },
+  headerDesktop: { gap: 16, paddingBottom: 18 },
+  nameDesktop: { fontSize: 28 },
+  officialDesktop: { fontSize: 15, marginTop: 4 },
+  bodyContentDesktop: { gap: 20, paddingBottom: 12 },
+  factLabelDesktop: { fontSize: 12, letterSpacing: 1 },
+  factValueDesktop: { fontSize: 20 },
   fact: { gap: 2 },
   factLabel: {
     color: '#8fa9bd',

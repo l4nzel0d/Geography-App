@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CountryInfoSheet } from '@/components/CountryInfoSheet';
 import { getMapFocusRect } from '@/components/infoSheetLayout';
+import { useDismissKey } from '@/components/useDismissKey';
 import { MapControls } from '@/components/MapControls';
 import { getViewportFitZoom } from '@/map/cameraFit';
 import { getCountryBounds } from '@/map/countryBounds';
@@ -96,6 +97,14 @@ export default function MapScreen() {
     setSelectedIso3(iso3);
     setFocus(null);
   }, []);
+
+  /**
+   * Escape closes the card. A no-op on native, which has no Escape key and already has
+   * the back gesture; on the web it is the convention a desktop user reaches for, and
+   * the close button alone makes the app feel like a phone app on a monitor.
+   */
+  const clearSelection = useCallback(() => select(null), [select]);
+  useDismissKey(clearSelection, selectedIso3 !== null);
 
   return (
     <View style={styles.container}>
