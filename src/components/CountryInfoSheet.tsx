@@ -25,7 +25,9 @@ import {
   formatLanguages,
   formatPopulation,
 } from './formatters';
+import { flagLetters } from './flagEmoji';
 import { getInfoSheetLayout, PORTRAIT_MAX_HEIGHT_FRACTION } from './infoSheetLayout';
+import { useFlagSupport } from './useFlagSupport';
 import { dismissDrag, dragProgress, shouldCaptureDrag, shouldDismiss } from './sheetDismiss';
 
 type CountryInfoSheetProps = {
@@ -40,6 +42,31 @@ const CLOSE_DURATION = 200;
 const FALLBACK_SIZE = { width: 360, height: 400 };
 
 /**
+ * The country's flag, or a deliberate two-letter badge where the platform cannot draw one.
+ *
+ * Windows ships no country flag glyphs, so the emoji would otherwise render as a bare
+ * "BR" in the body font - indistinguishable from a rendering bug. Drawing the same letters
+ * as an intentional badge is honest about what is known and looks designed rather than
+ * broken. Every other platform keeps the real flag.
+ */
+function CountryFlag({ flag, supported }: { flag: string | null; supported: boolean }) {
+  const letters = flagLetters(flag);
+
+  // `letters` is null for the no-flag "🏳️" fallback, which is a real glyph everywhere.
+  if (supported || !letters) {
+    return <Text style={styles.flag}>{flag ?? '🏳️'}</Text>;
+  }
+
+  return (
+    <View testID="country-flag-badge" style={styles.flagBadge}>
+      <Text style={styles.flagBadgeText} accessibilityLabel={`Country code ${letters}`}>
+        {letters}
+      </Text>
+    </View>
+  );
+}
+
+/**
  * Info card for the selected country: a bottom sheet in portrait, a right-hand side
  * panel in landscape. It slides in along whichever edge it is docked to.
  *
@@ -50,6 +77,9 @@ const FALLBACK_SIZE = { width: 360, height: 400 };
 export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
   const insets = useSafeAreaInsets();
   const { landscape, panelWidth } = getInfoSheetLayout(useWindowDimensions());
+
+  // Windows draws no flag emoji; the header falls back to a badge. See flagEmoji.ts.
+  const flagSupported = useFlagSupport();
   const facts = getCountryFacts(iso3);
   const slide = useRef(new Animated.Value(0)).current;
 
@@ -188,7 +218,7 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
       />
 
       <View style={styles.header}>
-        <Text style={styles.flag}>{visibleFacts.flag ?? '🏳️'}</Text>
+        <CountryFlag flag={visibleFacts.flag} supported={flagSupported} />
         <View style={styles.headerText}>
           <Text testID="country-name" style={styles.name}>
             {visibleFacts.name}
@@ -324,6 +354,27 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   flag: { fontSize: 34 },
+  /**
+   * The Windows fallback. Sized to sit on the same baseline as the 34px emoji it
+   * replaces, so the header does not reflow between platforms.
+   */
+  flagBadge: {
+    minWidth: 44,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#8fa9bd',
+    backgroundColor: 'rgba(246, 247, 242, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flagBadgeText: {
+    color: '#f6f7f2',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
   headerText: { flex: 1 },
   name: { color: '#f6f7f2', fontSize: 22, fontWeight: '700' },
   official: { color: '#8fa9bd', fontSize: 13, marginTop: 2 },
