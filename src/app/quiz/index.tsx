@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBack } from '@/navigation/goBack';
 import { FieldPicker } from '@/components/quiz/FieldPicker';
 import { quizColors, quizRadii } from '@/components/palette';
 import { SubregionPicker } from '@/components/quiz/SubregionPicker';
@@ -45,7 +46,7 @@ export default function QuizSetupScreen() {
         </View>
         <Pressable
           testID="quiz-setup-close"
-          onPress={() => router.back()}
+          onPress={goBack}
           hitSlop={16}
           accessibilityRole="button"
           accessibilityLabel="Back to the map"

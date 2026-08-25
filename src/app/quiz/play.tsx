@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Dimensions, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { goBack } from '@/navigation/goBack';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { quizColors } from '@/components/palette';
 import { QuizPanel, type PanelAnswers } from '@/components/quiz/QuizPanel';
@@ -157,7 +158,7 @@ export default function QuizPlayScreen() {
     setConfirmingExit(false);
     // `cancel` is the no-op: closing the card IS staying in the round.
     if (action === 'score') end();
-    else if (action === 'discard') router.back();
+    else if (action === 'discard') goBack();
   };
 
   if (!question) {

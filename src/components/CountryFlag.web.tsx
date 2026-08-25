@@ -1,29 +1,29 @@
 /**
- * The country's flag for the info sheet header, on the web.
+ * The country's flag, on the web.
  *
  * ## Why this is not just a `Text` like the native one
  *
  * `countryFacts.json` stores each flag as a regional indicator pair - "🇧🇷" is U+1F1E7
  * U+1F1F7, the letters B and R in a block fonts are expected to compose into a flag.
  * Android, iOS and macOS all do. **Windows ships no country flags in Segoe UI Emoji at
- * all**, so every browser there draws the two letters instead, and the header shows a
- * bare "BR" that reads like a bug.
+ * all**, so every browser there draws the two letters instead, and the UI shows a bare
+ * "BR" that reads like a bug.
  *
- * No font stack or CSS fixes that, so where the platform cannot draw a flag this fetches
- * a real one: `public/flags/<iso2>.svg`, placed by `scripts/copy-web-assets.mjs` from the
+ * No font stack or CSS fixes that, so where the platform cannot draw a flag this uses a
+ * real one: `public/flags/<iso2>.svg`, placed by `scripts/copy-web-assets.mjs` from the
  * `flag-icons` devDependency.
  *
  * ## This does not weaken the offline requirement
  *
  * The flags are **same-origin static assets**, not a third-party CDN - the page still
- * talks to exactly one origin, which is the property the offline acceptance test checks
- * for. They are ordinary files under `public/`, so the service worker precaches them with
- * everything else and they are a one-time download: after the first visit the app draws
- * flags with the network off, like the rest of it.
+ * talks to exactly one origin, which is the property the offline test checks for. They
+ * are ordinary files under `public/`, so the service worker precaches them with
+ * everything else: a one-time download, then flags with the network off. Verified with
+ * the server process killed, not merely throttled.
  *
- * They are also only fetched **where they are needed and when they are needed** - one
- * file per country actually opened, and nothing at all on a platform whose fonts already
- * work. A macOS or Android browser downloads zero flag images.
+ * They are also only fetched **where and when needed** - one file per country actually
+ * shown, and nothing at all on a platform whose fonts already work. A macOS or Android
+ * browser downloads zero flag images.
  *
  * Android is untouched by any of this; it resolves `CountryFlag.tsx`.
  */
@@ -31,6 +31,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { flagLetters } from './flagEmoji';
+import { FLAG_SIZES, type FlagSize } from './flagSizes';
 import { useFlagSupport } from './useFlagSupport';
 
 /** No flag in the dataset - a real white-flag glyph, which every platform draws. */
@@ -39,9 +40,10 @@ export const NO_FLAG = '🏳️';
 /** Where `scripts/copy-web-assets.mjs` puts them. Same origin, no CDN. */
 const flagSource = (iso2: string) => `/flags/${iso2.toLowerCase()}.svg`;
 
-export function CountryFlag({ flag }: { flag: string | null }) {
+export function CountryFlag({ flag, size = 'md' }: { flag: string | null; size?: FlagSize }) {
   const supported = useFlagSupport();
   const letters = flagLetters(flag);
+  const { fontSize, width, height } = FLAG_SIZES[size];
 
   /**
    * Reset per country, so a country whose image failed does not poison the next one.
@@ -54,7 +56,7 @@ export function CountryFlag({ flag }: { flag: string | null }) {
   // The platform can draw it, or there is no pair to look up (the NO_FLAG glyph, which
   // renders correctly everywhere). Either way, the emoji is the right answer.
   if (supported || !letters) {
-    return <Text style={styles.flag}>{flag ?? NO_FLAG}</Text>;
+    return <Text style={{ fontSize }}>{flag ?? NO_FLAG}</Text>;
   }
 
   /**
@@ -65,8 +67,11 @@ export function CountryFlag({ flag }: { flag: string | null }) {
    */
   if (failed) {
     return (
-      <View testID="country-flag-badge" style={styles.badge}>
-        <Text style={styles.badgeText} accessibilityLabel={`Country code ${letters}`}>
+      <View testID="country-flag-badge" style={[styles.badge, { minWidth: width + 4 }]}>
+        <Text
+          style={[styles.badgeText, { fontSize: Math.round(fontSize * 0.44) }]}
+          accessibilityLabel={`Country code ${letters}`}
+        >
           {letters}
         </Text>
       </View>
@@ -80,16 +85,18 @@ export function CountryFlag({ flag }: { flag: string | null }) {
       data-testid="country-flag-image"
       src={flagSource(letters)}
       alt={`Flag of ${letters}`}
-      width={40}
-      height={30}
+      width={width}
+      height={height}
       onError={() => setFailed(true)}
       style={{
-        // Matches the 34px emoji's optical size so the header does not reflow between
-        // platforms, and the radius/border keep a white flag legible on the navy card.
-        width: 40,
-        height: 30,
+        // Sized from FLAG_SIZES so the image occupies the space the emoji would have and
+        // a Windows user gets the same layout as everyone else. The hairline ring keeps a
+        // mostly-white flag legible against the navy surfaces.
+        width,
+        height,
         borderRadius: 3,
         objectFit: 'cover',
+        flexShrink: 0,
         boxShadow: '0 0 0 1px rgba(143, 169, 189, 0.45)',
       }}
     />
@@ -97,11 +104,9 @@ export function CountryFlag({ flag }: { flag: string | null }) {
 }
 
 const styles = StyleSheet.create({
-  flag: { fontSize: 34 },
   badge: {
-    minWidth: 44,
     paddingHorizontal: 6,
-    paddingVertical: 5,
+    paddingVertical: 4,
     borderRadius: 5,
     borderWidth: 1,
     borderColor: '#8fa9bd',
@@ -109,5 +114,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badgeText: { color: '#f6f7f2', fontSize: 15, fontWeight: '700', letterSpacing: 1 },
+  badgeText: { color: '#f6f7f2', fontWeight: '700', letterSpacing: 1 },
 });

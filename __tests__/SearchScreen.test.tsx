@@ -23,12 +23,28 @@ const METRICS: Metrics = {
   insets: { top: 47, left: 0, right: 0, bottom: 34 },
 };
 
-/** Prefixed `mock` because `jest.mock` is hoisted above this declaration. */
+/** Prefixed `mock` because `jest.mock` is hoisted above these declarations. */
 const mockBack = jest.fn();
+const mockReplace = jest.fn();
+/**
+ * Whether there is anything to go back TO. False is the web case that matters: every
+ * route is a real URL in the static export, so `/search` can be opened directly.
+ */
+let mockCanGoBack = true;
 
 jest.mock('expo-router', () => ({
-  router: { back: () => mockBack(), push: jest.fn() },
+  router: {
+    back: () => mockBack(),
+    replace: (href: string) => mockReplace(href),
+    canGoBack: () => mockCanGoBack,
+    push: jest.fn(),
+  },
 }));
+
+beforeEach(() => {
+  mockCanGoBack = true;
+  mockReplace.mockClear();
+});
 
 const render = () =>
   rtlRender(
@@ -151,5 +167,38 @@ describe('the handover', () => {
     await fireEvent.press(screen.getByTestId('country-result-NLD'));
 
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Arriving directly at `/search` - a bookmark, a shared link, a new tab. Only reachable
+ * on the web, where `web.output: "static"` gives every route its own HTML file, but the
+ * guard is platform-free so it is tested once here.
+ */
+describe('when there is no history to go back to', () => {
+  it('goes home rather than doing nothing at all', async () => {
+    mockCanGoBack = false;
+    await render();
+
+    await fireEvent.press(screen.getByTestId('country-search-cancel'));
+
+    expect(mockBack).not.toHaveBeenCalled();
+    // `replace`, not `push`: the dead-end screen should not stay behind the map for a
+    // second Back press to land on again.
+    expect(mockReplace).toHaveBeenCalledWith('/');
+  });
+
+  it('still hands the country over before leaving', async () => {
+    mockCanGoBack = false;
+    const seen: (string | null)[] = [];
+    const stop = subscribeToCountrySelection((iso3) => seen.push(iso3));
+
+    await render();
+    await type('nether');
+    await fireEvent.press(screen.getByTestId('country-result-NLD'));
+
+    expect(seen).toEqual(['NLD']);
+    expect(mockReplace).toHaveBeenCalledWith('/');
+    stop();
   });
 });
