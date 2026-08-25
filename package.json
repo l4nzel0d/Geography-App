@@ -59,6 +59,7 @@
     "enrich:data": "node scripts/enrich-country-facts.mjs",
     "labels:data": "node scripts/build-label-points.mjs",
     "web:assets": "node scripts/copy-web-assets.mjs",
+    "flags:data": "node scripts/build-flag-assets.mjs",
     "build:web": "node scripts/build-web.mjs",
     "web:icons": "node scripts/build-web-icons.mjs",
     "serve:web": "serve dist -l 4173",

@@ -11,6 +11,8 @@ import { act, fireEvent, render as rtlRender, screen } from '@testing-library/re
 import { BackHandler } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
+import { FLAG_ASSETS } from '@/components/flagAssets';
+import { flagLetters } from '@/components/flagEmoji';
 import QuizPlayScreen from '@/app/quiz/play';
 import QuizResultsScreen from '@/app/quiz/results';
 import QuizSetupScreen from '@/app/quiz/index';
@@ -828,12 +830,26 @@ describe('the play screen in flag mode', () => {
     expect(screen.getByTestId('quiz-input-capital')).toBeTruthy();
   });
 
+  /**
+   * The bundled SVG the stage should be showing.
+   *
+   * Asserted on the `source` rather than on any text: the flag stopped being an emoji
+   * glyph and became a real image, which is what deleted a whole class of layout bug -
+   * see `CountryFlag`.
+   */
+  const assetFor = (flag: string | null) => FLAG_ASSETS[flagLetters(flag)!.toLowerCase()];
+
+  /** `expo-image` normalises `source` into an array, so unwrap before comparing. */
+  const shownFlag = () => {
+    const source = screen.getByTestId('country-flag-image').props.source;
+    return Array.isArray(source) ? source[0] : source;
+  };
+
   it('shows the flag of the country being asked about', async () => {
     const [first] = flagRound();
     await render(<QuizPlayScreen />);
 
-    // Jest resolves the native `CountryFlag`, which is a plain Text carrying the emoji.
-    expect(screen.getByTestId('quiz-flag-stage')).toHaveTextContent(first.facts.flag!);
+    expect(shownFlag()).toBe(assetFor(first.facts.flag));
   });
 
   it('never names the country, before or after checking', async () => {
@@ -867,7 +883,7 @@ describe('the play screen in flag mode', () => {
     await fireEvent.press(screen.getByTestId('quiz-submit'));
 
     expect(screen.getByTestId('quiz-progress')).toHaveTextContent(/2 \/ 2/);
-    expect(screen.getByTestId('quiz-flag-stage')).toHaveTextContent(second.facts.flag!);
+    expect(shownFlag()).toBe(assetFor(second.facts.flag));
     expect(screen.getByTestId('quiz-input-name').props.value).toBe('');
   });
 

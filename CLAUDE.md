@@ -158,19 +158,24 @@ Added 2026-08-25, **not yet verified on any device**:
 - nothing here adds a network call, and nothing here is a native change — no `app.json`
   edit, no new native dependency, so a JS reload is enough to see all of it.
 
-Added 2026-08-26, **partly verified on the emulator**:
+Added 2026-08-26, verified on the emulator:
 
 - **a third quiz mode, `flag`.** You are shown a country's flag and type the same facts a
   `facts` round asks for. See *Flag mode*.
+- **country flags are now real SVGs on every platform**, bundled in the app, replacing the
+  emoji. That was not a polish pass: a flag emoji cannot be made large without running into
+  four separate properties of glyph layout, and switching deleted every workaround at once.
+  **This is the part of the entry worth reading** — see *The flags are real SVGs, on every
+  platform*.
 - 689 Jest tests across 29 suites pass, typecheck clean.
-- **seen on a device, and not yet right.** The mode runs and the panel grades, but the
-  flag itself has been through three attempts at sitting centred in its frame and the
-  latest is unconfirmed — see *A flag emoji is not centred in its own line box*, which is
-  the useful part of this entry. Everything else here is unverified: landscape, the
-  keyboard-compact size swap, and the web path, which is the only one that draws an actual
-  image rather than a glyph.
-- nothing here adds a network call, and nothing here is a native change — no `app.json`
-  edit, no new dependency, so a JS reload covers all of it.
+- **verified on the emulator**: the mode runs, the panel grades, and a bundled SVG does
+  decode through `expo-image`'s Android Glide decoder, which was the one assumption Jest
+  could not test. The flag fills the stage on both Android and the browser.
+- **still unverified**: landscape, the S25, and a Windows browser specifically — which is
+  the only path that was already drawing an image and so the only one this did not change.
+- nothing here adds a network call — the SVGs are bundled, not fetched — and nothing here
+  is a native change: `expo-image` was already a dependency and ships the SVG decoder, so
+  no `react-native-svg`, no `expo prebuild`, no rebuild.
 
 ## Stack
 
@@ -258,6 +263,8 @@ src/
     worldGeoJson.ts         # outlines + population folded on, for the choropleth
     types.ts
   components/
+    CountryFlag.tsx         # the flag, as a bundled SVG through expo-image
+    flagAssets.ts           # GENERATED: 249 static requires, one per flag
     CountryInfoSheet.tsx
     ConfirmDialog.tsx       # a Modal-hosted confirmation card in the app's colours
     infoSheetLayout.ts      # pure: sheet dock per orientation, and the map's unobstructed band
@@ -295,6 +302,7 @@ src/
   search/
     countrySearch.ts        # pure: the 237-country index and the ranked matcher
     pendingCountry.ts       # subscription handover from /search back to the map
+scripts/build-flag-assets.mjs       # offline; assets/flags + the generated require map
 scripts/build-label-points.mjs      # offline; polylabel anchors from the committed geometry
 scripts/build-country-data.mjs      # full online rebuild
 scripts/enrich-country-facts.mjs    # offline facts-only re-derivation
@@ -1062,57 +1070,83 @@ The plaque behind the flag is not decoration. Japan, Finland and Nigeria are mos
 and against the screen's navy they read as a shapeless blob with no edge; the web path
 already solves this at small sizes with a hairline ring around its `<img>`.
 
-#### A flag emoji is not centred in its own line box
+#### The flags are real SVGs, on every platform
 
-**The single most useful thing in this section, and it cost three attempts.**
+**And the reason they are is worth the whole of this subsection**, because the emoji route
+looked obviously cheaper and cost most of an afternoon.
 
-A flag emoji does not sit in the middle of the box the text engine lays out for it. The
-font's metrics leave a tall empty band *above* the glyph and almost none below, so centring
-that box parks the flag on the floor of whatever contains it. Measured on Android from a
-120 dp flag in a 121 dp container: **35 dp of gap above the glyph and 3 dp below.**
+The flag used to be the regional indicator pair in a `Text`, which Android, iOS and macOS
+all compose into a flag for free. That works at 20 dp. It falls apart the moment you want a
+big one, because **an emoji is a glyph, not an image**, and every one of these is a property
+of glyph layout rather than a bug to be fixed:
 
-**The error is proportional to the font size**, which is why three call sites lived with it
-unnoticed for months — at `xs` it is barely 2 dp — and why it became glaring the moment the
-quiz asked for a 120 dp flag. It is also why the first diagnosis was wrong: the flag looked
-fine whenever the keyboard was up, which read like a layout bug and was really just `md`
-being small enough to hide it.
+- **It is not centred in the box the text engine lays out for it.** The font's metrics leave
+  a tall empty band above the glyph and almost none below, so centring that box parks the
+  flag on the floor of its frame. Measured on Android at 120 dp: 35 dp of gap above and 3
+  below.
+- **The error is proportional to the font size**, so it hid at 20 dp for three call sites
+  and was glaring at 120. It also made the first diagnosis wrong: the flag looked fine
+  whenever the keyboard was up, because that swapped to a smaller size.
+- **The glyph can be drawn taller than its own line box**, and Android then clips it.
+- **`transform: translateY` to correct any of that clips it too**, because Android
+  composites a transformed child against the bounds it had *before* the transform.
+- **Below Android 13 emoji are 136x128 bitmap strikes**, so any large flag is an upscale.
 
-Two traps on the way to the fix, both worth keeping:
+An image has none of those properties: it occupies exactly the width and height it is
+given, centres by arithmetic, and is vector all the way up. Switching deleted the nudge
+constant, the line-box-derived frame, `useFlagSupport` and its canvas measurement, and the
+emoji branch on web — and made the flag responsive, which is what it should always have
+been.
 
-- **`transform: translateY` clips the glyph.** Android composites a transformed child
-  against the bounds it had *before* the transform, so lifting the flag moved half of it
-  out of its own drawing area and the bottom came off. Use a margin: it moves the layout
-  box, so the glyph travels with somewhere to be drawn. It is doubled, because the parent
-  centres what is left after the margin.
-- **The glyph can be drawn taller than its own line box**, which is the other half of the
-  same clipping. `nudge` therefore also sets a generous `lineHeight`, and `FlagStage` sizes
-  its box from *that* rather than from `FLAG_SIZES.height`. The plaque ends up taller than
-  the flag it frames, which is the deliberate trade: a roomy card that always draws the
-  whole flag beats a tight one that sometimes shaves the bottom off.
+**It needed no new native module and no rebuild.** `expo-image` was already a dependency
+and ships its own Android SVG support: it vendors AndroidSVG and registers a Glide decoder,
+`InputStream -> SVG -> Drawable`. `react-native-svg` is *not* installed and was not needed.
+Verified on the emulator.
 
-`nudge` is **opt-in per call site**, not applied by size. The info sheet, the search row and
-the results row all set their flag beside text, where the same offset reads as ordinary
-baseline alignment; correcting them would move three settled layouts to fix something
-nobody can see. `GLYPH_NUDGE` in `FlagStage.tsx` is the one number to turn, and nothing
-else depends on it.
+**And it does not weaken the offline requirement.** The SVGs are bundled in the APK, not
+fetched: `scripts/build-flag-assets.mjs` (`npm run flags:data`, offline, output committed)
+copies the 249 the dataset references into `assets/flags/` and writes
+`src/components/flagAssets.ts`. They live under `assets/` rather than `public/` because
+Metro only bundles what the app `require`s and `public/` is web staging that never reaches
+an APK.
 
-None of this exists on the web path, which draws an `<img>` with explicit dimensions.
-`CountryFlag.web.tsx` accepts `nudge` and ignores it so the two keep one signature.
+**The map is generated because Metro cannot do a dynamic `require`.** There is no way to
+write ``require(`../assets/flags/${{iso2}}.svg`)`` — the bundler resolves requires at build
+time, so every path has to appear literally. 249 literals in a generated file is the honest
+way to say that.
 
-#### `flagSizes.ts` gained `lg`
+#### Sizing: the flag is sized by its box, not by a number
 
-`lg: { fontSize: 120, width: 140, height: 105 }`, keeping the ratios every other entry uses
-(width ~1.167x the font size, height ~0.875x, which is exactly 4:3) so the emoji and the
-4:3 SVG stay at the same optical weight.
+`FLAG_SIZES` has **no `lg`**, deliberately, and the file says so. The flag round passes
+`fill` and lets the frame do the sizing: `width: '100%'` with `aspectRatio: 4/3` (every
+`flag-icons` SVG is 4:3), `maxHeight: '100%'` so it gives way when height is the binding
+constraint — which is what makes landscape work — and `maxWidth: 460` so a desktop browser
+does not render a flag as wallpaper. On a 411 dp phone that is a 379x284 flag.
 
-120 rather than something larger for a reason worth keeping: **Android draws emoji as
-scalable COLRv1 vectors only from 13 (API 33).** Below that they are 136x128 bitmap strikes,
-so on a 3x screen this is already a ~2.6x upscale and anything bigger starts to visibly mush
-the detailed flags — Mexico, Serbia, Croatia's chequerboard. The AVD (API 33) and the S25
-(Android 16) are both above that line, so this will look crisp on everything to hand and
-soft on an old phone. If that ever matters, the answer is a smaller `lg`, not rasterising
-the flags into the native bundle — that needs `react-native-svg`, a new native module, and
-a rebuild.
+Two consequences. The keyboard no longer swaps the flag to a smaller size, because it
+shrinks with its box on its own; `compact` now only lowers the stage's floor. And the frame
+carries **no padding**, because padding inside an `aspectRatio` box would make the picture
+some other shape — it is a border directly around the flag, with `overflow: 'hidden'` to
+round its corners. That clipping is safe here and only here: the thing being clipped is an
+image that occupies exactly the box, not a glyph hanging out of its own line box.
+
+`FLAG_SIZES` survives for the three fixed-size call sites (info sheet, search row, results
+row), and its `fontSize` for exactly one case: BES, the only record with no flag at all,
+where the white-flag glyph is still text.
+
+#### The web draws the image unconditionally now
+
+It used to reach for an SVG only on Windows, where Segoe UI Emoji has no flags, and use the
+emoji everywhere else. It no longer does — the native side stopped using emoji too, and the
+two should not disagree about what a flag looks like.
+
+**The cost is worth naming:** macOS and Android browsers previously downloaded nothing and
+now fetch flag SVGs like Windows does. In production the service worker precaches all of
+them so it is a one-time cost, but in dev there is no worker at all (`+html.tsx` registers
+it only for `NODE_ENV === 'production'`), so every flag is a cold fetch from Metro, once per
+question. That is the reported "flags take forever on web", and it now applies to every web
+platform rather than just Windows. The fix, unbuilt, is to prefetch the next question's flag
+— this app knows the whole question order up front, which a normal image gallery does not.
 
 #### What is not covered
 

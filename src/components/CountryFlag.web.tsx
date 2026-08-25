@@ -1,6 +1,15 @@
 /**
  * The country's flag, on the web.
  *
+ * ## The image is now unconditional, and the native sibling agrees
+ *
+ * This used to draw the emoji wherever the platform could compose one and reach for an
+ * SVG only on Windows. It no longer does: **the flag is always the image**, because the
+ * native side stopped using emoji too and the two should not disagree about what a flag
+ * looks like. `useFlagSupport` and its canvas measurement went with that decision.
+ *
+ * The reasoning below is what made the SVGs exist in the first place, and still stands.
+ *
  * ## Why this is not just a `Text` like the native one
  *
  * `countryFacts.json` stores each flag as a regional indicator pair - "🇧🇷" is U+1F1E7
@@ -32,7 +41,6 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { flagLetters } from './flagEmoji';
 import { FLAG_SIZES, type FlagSize } from './flagSizes';
-import { useFlagSupport } from './useFlagSupport';
 
 /** No flag in the dataset - a real white-flag glyph, which every platform draws. */
 export const NO_FLAG = '🏳️';
@@ -44,6 +52,7 @@ export function CountryFlag({
   flag,
   size = 'md',
   label,
+  fill = false,
 }: {
   flag: string | null;
   size?: FlagSize;
@@ -58,16 +67,10 @@ export function CountryFlag({
    */
   label?: string;
   /**
-   * Accepted and ignored, so the two components keep one signature.
-   *
-   * It corrects for where an emoji glyph sits inside its line box - see the native
-   * sibling. Here the flag is an `<img>` with explicit dimensions on the platforms that
-   * need it, and on the platforms that do not, the emoji is small enough that the same
-   * proportional error is a dp or two. Nothing to correct either way.
+   * Fill the parent instead of taking a size from `FLAG_SIZES`. See the native sibling.
    */
-  nudge?: number;
+  fill?: boolean;
 }) {
-  const supported = useFlagSupport();
   const letters = flagLetters(flag);
   const { fontSize, width, height } = FLAG_SIZES[size];
 
@@ -79,9 +82,11 @@ export function CountryFlag({
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [letters]);
 
-  // The platform can draw it, or there is no pair to look up (the NO_FLAG glyph, which
-  // renders correctly everywhere). Either way, the emoji is the right answer.
-  if (supported || !letters) {
+  /**
+   * No pair to look up - a record with no flag, which is BES alone. The white-flag glyph
+   * renders correctly everywhere, so a `Text` is still the right answer for it.
+   */
+  if (!letters) {
     return <Text style={{ fontSize }}>{flag ?? NO_FLAG}</Text>;
   }
 
@@ -111,20 +116,25 @@ export function CountryFlag({
       data-testid="country-flag-image"
       src={flagSource(letters)}
       alt={label ?? `Flag of ${letters}`}
-      width={width}
-      height={height}
+      {...(fill ? null : { width, height })}
       onError={() => setFailed(true)}
-      style={{
-        // Sized from FLAG_SIZES so the image occupies the space the emoji would have and
-        // a Windows user gets the same layout as everyone else. The hairline ring keeps a
-        // mostly-white flag legible against the navy surfaces.
-        width,
-        height,
-        borderRadius: 3,
-        objectFit: 'cover',
-        flexShrink: 0,
-        boxShadow: '0 0 0 1px rgba(143, 169, 189, 0.45)',
-      }}
+      style={
+        fill
+          ? // The parent owns the shape; this just occupies it. `contain` rather than
+            // `cover` for the same reason as the native sibling - a cropped flag is a
+            // different flag - and no ring, because at that size the parent frames it.
+            { width: '100%', height: '100%', objectFit: 'contain', display: 'block' }
+          : {
+              // Sized from FLAG_SIZES so the layout does not depend on the platform. The
+              // hairline ring keeps a mostly-white flag legible against the navy surfaces.
+              width,
+              height,
+              borderRadius: 3,
+              objectFit: 'cover',
+              flexShrink: 0,
+              boxShadow: '0 0 0 1px rgba(143, 169, 189, 0.45)',
+            }
+      }
     />
   );
 }
