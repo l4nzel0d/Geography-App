@@ -1,0 +1,6 @@
+# Verbatim copies of maplibre-gl's shipped worker files, placed by
+# scripts/copy-web-assets.mjs. `__tests__/webAssets.test.ts` asserts they are
+# byte-identical to their source in node_modules, so git must not rewrite their line
+# endings on checkout - CRLF conversion would fail that test on every fresh clone on
+# Windows, for a difference that is not real.
+public/maplibre/** -text

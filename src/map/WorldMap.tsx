@@ -6,78 +6,30 @@ import { labelGeoJson } from '@/data/labelGeoJson';
 import { worldGeoJson } from '@/data/worldGeoJson';
 
 import { getWorldFitZoom } from './cameraFit';
-import { CHOROPLETH_RAMPS, type ChoroplethMode } from './choropleth';
-import { labelFilter, type LabelField, labelTextField, RANK_PROPERTY } from './mapLabels';
+import { CHOROPLETH_RAMPS } from './choropleth';
+import { labelFilter, labelTextField, RANK_PROPERTY } from './mapLabels';
 import { LABEL_FONT, mapColors, OFFLINE_STYLE } from './offlineStyle';
 import { pickCountry } from './pickCountry';
-import type { MapCameraStop } from './quizCamera';
+import {
+  DEFAULT_MAX_ZOOM,
+  INITIAL_CENTER,
+  PRESS_HITBOX_DP,
+  type WorldMapProps,
+} from './worldMapProps';
 
-/**
- * Fixed starting viewport.
- *
- * Deliberately a constant rather than a fit-to-content calculation - Maestro taps
- * the map by screen percentage, so the same percentage must land on the same
- * country on every run. Changing this invalidates the E2E flows.
- *
- * Not `bounds`: fitting [-180,-60,180,85] on a tall phone fills the screen height
- * with the latitude range and crops most of the longitude range, so half the world
- * is off-screen. An explicit centre and zoom is predictable on any screen shape.
+/*
+ * The props, the camera constants and the hitbox now live in `worldMapProps.ts`, shared
+ * with `WorldMap.web.tsx` so the two implementations cannot drift. They are re-exported
+ * here because callers and tests have always imported them from this module.
  */
-export const INITIAL_CENTER: [number, number] = [10, 20];
-
-/**
- * Portrait baseline. The effective floor is `getWorldFitZoom(width)`, which is exactly
- * this in portrait and higher in landscape - see cameraFit.ts.
- */
-export const INITIAL_ZOOM = 0;
-
-/**
- * How the land is coloured: the flat basemap, or one of the choropleth ramps in
- * `choropleth.ts`. Adding a ramp there is all it takes to add a mode here.
- */
-export type FillMode = 'flat' | ChoroplethMode;
-
-/**
- * Highest zoom the explore map allows. Quiz mode passes its own; see quiz/play.tsx.
- *
- * Raised from 8 when search arrived. At 8 a 400 dp screen spans about 1.1 degrees of
- * longitude, which leaves Monaco a 22 dp dot - a poor answer to "show me Monaco", and
- * searching for a microstate is one of the likelier reasons to open the search box at
- * all. 10 is the ceiling CLAUDE.md already argues is honest for 3 dp geometry, and it is
- * what the quiz uses. This bounds interaction, not the launch camera, so no Maestro
- * coordinate tap depends on it.
- */
-const DEFAULT_MAX_ZOOM = 10;
-
-type WorldMapProps = {
-  selectedIso3: string | null;
-  /**
-   * Omit to make the map read-only: no press handler is attached at all, which is what
-   * quiz mode wants - tapping the answer out of the map would rather defeat it.
-   */
-  onSelect?: (iso3: string | null) => void;
-  fillMode?: FillMode;
-  /**
-   * Overrides `mapColors.landSelected` on the highlight fill. Quiz mode swaps this from
-   * yellow to green or red once an answer is graded.
-   */
-  selectionColor?: string;
-  /**
-   * A declarative camera stop. When absent the camera sits at `INITIAL_CENTER` and never
-   * moves, which is what every Maestro percentage tap depends on - see CLAUDE.md.
-   *
-   * **Must be referentially stable.** `Camera` is memoised and rebuilds its stop from
-   * these props, so a freshly-allocated object each render re-fires the animation on
-   * every keystroke. Callers should `useMemo` it.
-   */
-  camera?: MapCameraStop;
-  maxZoom?: number;
-  /**
-   * Which fact to draw on top of every country. Defaults to `'none'`, so quiz mode and
-   * every existing test render exactly as they did.
-   */
-  labelField?: LabelField;
-};
+export {
+  DEFAULT_MAX_ZOOM,
+  type FillMode,
+  INITIAL_CENTER,
+  INITIAL_ZOOM,
+  PRESS_HITBOX_DP,
+  type WorldMapProps,
+} from './worldMapProps';
 
 export function WorldMap({
   selectedIso3,
@@ -139,7 +91,12 @@ export function WorldMap({
         // fingertip while letting `pickCountry` resolve by containment, and it means a
         // press in open water yields no candidates at all so the ocean handler can
         // deselect. See pickCountry.ts.
-        hitbox={{ top: 10, right: 10, bottom: 10, left: 10 }}
+        hitbox={{
+          top: PRESS_HITBOX_DP,
+          right: PRESS_HITBOX_DP,
+          bottom: PRESS_HITBOX_DP,
+          left: PRESS_HITBOX_DP,
+        }}
         onPress={(event) => {
           if (!onSelect) return;
 

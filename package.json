@@ -20,6 +20,7 @@
     "expo-symbols": "~57.0.2",
     "expo-system-ui": "~57.0.2",
     "expo-web-browser": "~57.0.2",
+    "maplibre-gl": "^6.6.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.2",
@@ -31,6 +32,7 @@
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
+    "@maplibre/maplibre-gl-style-spec": "^24.8.5",
     "@testing-library/react-native": "^14.0.1",
     "@types/jest": "29.5.14",
     "@types/react": "~19.2.2",
@@ -52,7 +54,9 @@
     "test:e2e": "maestro test .maestro",
     "build:data": "node scripts/build-country-data.mjs",
     "enrich:data": "node scripts/enrich-country-facts.mjs",
-    "labels:data": "node scripts/build-label-points.mjs"
+    "labels:data": "node scripts/build-label-points.mjs",
+    "web:assets": "node scripts/copy-web-assets.mjs",
+    "build:web": "node scripts/copy-web-assets.mjs && expo export -p web"
   },
   "jest": {
     "preset": "jest-expo",
