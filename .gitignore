@@ -41,3 +41,6 @@ example
 # generated native folders
 /ios
 /android
+
+# Scratch space for screenshots and one-off files shared during a session.
+temp/
