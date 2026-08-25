@@ -352,9 +352,11 @@ describe('the explore camera', () => {
     expect(camera.props.center[0]).toBeCloseTo(centred.center[0], 6);
     expect(camera.props.center[1]).toBeLessThan(centred.center[1]);
 
-    // ...and it is framed smaller than it would be with the whole window to play with,
-    // because it has to fit the 45% the sheet leaves.
-    expect(camera.props.zoom).toBeLessThan(centred.zoom);
+    // ...and never framed LARGER than it would be with the whole window, because it has
+    // to fit the band the card leaves. Not strictly smaller: Jest's window is 1334 dp
+    // tall, where the card takes ~440 rather than 55%, so the band is generous enough
+    // that the fit is limited by width in both cases and the two agree.
+    expect(camera.props.zoom).toBeLessThanOrEqual(centred.zoom);
     expect(camera.props.duration).toBe(900);
     expect(screen.getByTestId('country-name')).toHaveTextContent('France');
   });

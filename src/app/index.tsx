@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CountryInfoSheet } from '@/components/CountryInfoSheet';
 import { getMapFocusRect } from '@/components/infoSheetLayout';
 import { useDismissKey } from '@/components/useDismissKey';
+import { useWindowSize } from '@/components/useWindowSize';
 import { MapControls } from '@/components/MapControls';
 import { getViewportFitZoom } from '@/map/cameraFit';
 import { getCountryBounds } from '@/map/countryBounds';
@@ -49,7 +50,25 @@ export default function MapScreen() {
    */
   const [camera, setCamera] = useState<MapCameraStop | undefined>(undefined);
 
-  const window = useWindowDimensions();
+  /**
+   * `useWindowSize`, not `useWindowDimensions`: this feeds the search camera, whose whole
+   * job is to offset by a pixel distance measured against the box MapLibre draws into.
+   * RN Web's window can lag the real layout, and framing against a stale height puts the
+   * country off centre until something else forces a re-render. See the hook.
+   */
+  const window = useWindowSize();
+
+  /**
+   * How tall the info card actually is, once it has laid out.
+   *
+   * A REF, not state, and deliberately absent from the camera effect's dependencies: the
+   * card measures itself as it opens, so making the camera react to that would recompute
+   * the stop mid-flight and fire a second fly for every search. Each search reads
+   * whatever the last measurement was, which is accurate because the card's content
+   * barely varies between countries. Before the very first measurement the focus rect
+   * falls back to `PORTRAIT_SHEET_HEIGHT_ESTIMATE`.
+   */
+  const sheetHeight = useRef<number | undefined>(undefined);
   // Only `top` is used, to keep the framed country clear of the chrome row.
   const insets = useSafeAreaInsets();
 
@@ -68,14 +87,13 @@ export default function MapScreen() {
     if (!bounds) return;
 
     const viewport = { width: window.width, height: window.height };
-
     setCamera({
       ...getFocusedCameraStop({
         bbox: bounds.bbox,
         viewport,
         // Frame it into the band that is actually visible - below the toggle and the
         // pills, above the sheet - rather than into the middle of the window.
-        focus: getMapFocusRect(viewport, insets.top),
+        focus: getMapFocusRect(viewport, insets.top, sheetHeight.current),
         minZoom: getViewportFitZoom(viewport.width, viewport.height),
         maxZoom: EXPLORE_MAX_ZOOM,
       }),
@@ -122,7 +140,13 @@ export default function MapScreen() {
         labelField={labelField}
         onLabelFieldChange={setLabelField}
       />
-      <CountryInfoSheet iso3={selectedIso3} onClose={() => select(null)} />
+      <CountryInfoSheet
+        iso3={selectedIso3}
+        onClose={() => select(null)}
+        onMeasured={(height) => {
+          sheetHeight.current = height;
+        }}
+      />
     </View>
   );
 }

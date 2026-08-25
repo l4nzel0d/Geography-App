@@ -110,11 +110,11 @@ describe('the offset', () => {
   });
 
   it('never frames the country larger than the whole window would', () => {
-    // Portrait strictly shrinks it: France's fit is height-limited and the sheet takes
-    // 55% of the height. Landscape only narrows the rect, so a country whose fit is
-    // still height-limited - France is - keeps the same zoom. Hence <= for the general
-    // invariant and < for the case that must move.
-    expect(focused('FRA', PORTRAIT).zoom).toBeLessThan(centred('FRA', PORTRAIT).zoom);
+    // `<=`, not `<`. The card takes its own height rather than a flat 55%, so the band
+    // it leaves is generous enough that France's fit is limited by WIDTH either way and
+    // the two zooms agree. Framing must never be LARGER than the whole window allows;
+    // being equal is fine and is the common case on a tall screen.
+    expect(focused('FRA', PORTRAIT).zoom).toBeLessThanOrEqual(centred('FRA', PORTRAIT).zoom);
 
     for (const iso3 of ALL_ISO3) {
       if (!getCountryBounds(iso3)) continue;
@@ -152,12 +152,17 @@ describe('the offset', () => {
   it('puts France where the worked example says', () => {
     // Pinned rather than derived: this is the one case anyone can check by hand against
     // the arithmetic in CLAUDE.md, and a silent drift here is a silent drift everywhere.
-    // No safe-area inset, so the band is y 60..380 of an 844 dp screen.
+    // No safe-area inset, and the card takes ~380 dp of this 844 dp screen, so the band
+    // is y 60..464. It was 60..380 while the card was assumed to be a flat 55% of the
+    // screen, which framed every country too high on anything taller than a small phone
+    // - see `searchFraming.test.ts`, which exists to catch exactly that.
     const stop = focused('FRA', PORTRAIT);
 
     expect(stop.center[0]).toBeCloseTo(2.3965, 3);
-    expect(stop.center[1]).toBeCloseTo(37.795, 2);
-    expect(stop.zoom).toBeCloseTo(3.6, 1);
+    expect(stop.center[1]).toBeCloseTo(40.872, 2);
+    // Higher than the 3.6 this used to be: a band that is no longer needlessly short
+    // lets the country fill more of it.
+    expect(stop.zoom).toBeCloseTo(3.9, 1);
   });
 
   it('drops the country further down the screen on a notched phone', () => {
@@ -172,7 +177,27 @@ describe('the offset', () => {
       maxZoom: 10,
     });
 
-    expect(notched.center[1]).toBeLessThan(plain.center[1]);
+    /**
+     * Asserted on where the country is DRAWN, not on the camera's latitude.
+     *
+     * This test used to compare `center[1]` directly and expect the notched camera to sit
+     * further south - which happened to hold only because the old, too-short band forced
+     * a lower zoom, and a lower zoom inflates the same pixel offset into more degrees. It
+     * was reading a side effect of the bug as if it were the property. Projecting removes
+     * the zoom from the question entirely.
+     */
+    const screenY = (stop: { center: [number, number]; zoom: number }) => {
+      const { bbox } = boundsOf('FRA');
+      const mercatorY = (lat: number) => {
+        const sin = Math.sin((lat * Math.PI) / 180);
+        return 0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI);
+      };
+      const worldPx = 512 * Math.pow(2, stop.zoom);
+      const midLat = (bbox[1] + bbox[3]) / 2;
+      return PORTRAIT.height / 2 + (mercatorY(midLat) - mercatorY(stop.center[1])) * worldPx;
+    };
+
+    expect(screenY(notched)).toBeGreaterThan(screenY(plain));
   });
 });
 

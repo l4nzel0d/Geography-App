@@ -105,5 +105,26 @@ if (${process.env.NODE_ENV === 'production'} && 'serviceWorker' in navigator) {
       console.error('[sw] registration failed', error);
     });
   });
+
+  /*
+   * Reload once when a NEW worker takes over.
+   *
+   * Without this a redeploy needs TWO visits to appear: the open page keeps the assets
+   * the old worker gave it, the new worker installs quietly in the background, and only
+   * the visit after that sees the new build. That is a genuinely nasty trap - the app
+   * looks like it ignored your change, and every conclusion you draw from that first
+   * load is about the previous version.
+   *
+   * \`controllerchange\` fires only when a new worker actually assumes control, which
+   * \`skipWaiting\`+\`clientsClaim\` make immediate. The guard is what keeps it from
+   * looping: the very first registration on a page that had no controller also fires
+   * this, and reloading then would be pointless.
+   */
+  var reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function () {
+    if (reloading || !navigator.serviceWorker.controller) return;
+    reloading = true;
+    window.location.reload();
+  });
 }
 `;

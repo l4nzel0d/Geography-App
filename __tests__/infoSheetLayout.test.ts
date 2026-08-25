@@ -10,6 +10,7 @@ import {
   getMapFocusRect,
   MAP_CHROME_HEIGHT,
   PANEL_MAX_WIDTH,
+  PORTRAIT_SHEET_HEIGHT_ESTIMATE,
   PANEL_MIN_WIDTH,
   PORTRAIT_MAX_HEIGHT_FRACTION,
 } from '@/components/infoSheetLayout';
@@ -115,20 +116,73 @@ describe('the desktop tier', () => {
  */
 describe('getMapFocusRect', () => {
   it('leaves the band between the chrome and the sheet in portrait', () => {
-    // Top of the sheet is at 45% of 1000 = 450; the chrome reserves the first 60.
-    const rect = getMapFocusRect({ width: 390, height: 1000 });
+    // Derived, not pinned: the card's assumed height is a tunable estimate, and a literal
+    // here would just have to be chased every time it moves. The 55% cap does not bind on
+    // a screen this tall - see the tall-screen case below.
+    const height = 1000;
+    const cardTop = height - PORTRAIT_SHEET_HEIGHT_ESTIMATE;
+    const rect = getMapFocusRect({ width: 390, height });
 
-    expect(rect).toEqual({ x: 0, y: 60, width: 390, height: 390 });
-    expect(PORTRAIT_MAX_HEIGHT_FRACTION).toBe(0.55);
+    expect(rect).toEqual({
+      x: 0,
+      y: MAP_CHROME_HEIGHT,
+      width: 390,
+      height: cardTop - MAP_CHROME_HEIGHT,
+    });
   });
 
   it('moves the band down by the safe-area inset', () => {
     // The chrome row is positioned below the status bar, so the rect has to be too - the
     // notch is 47 dp on the phone the tests model.
-    const rect = getMapFocusRect({ width: 390, height: 1000 }, 47);
+    const height = 1000;
+    const cardTop = height - PORTRAIT_SHEET_HEIGHT_ESTIMATE;
+    const rect = getMapFocusRect({ width: 390, height }, 47);
 
     expect(rect.y).toBe(47 + MAP_CHROME_HEIGHT);
-    expect(rect.height).toBe(450 - 47 - MAP_CHROME_HEIGHT);
+    expect(rect.height).toBe(cardTop - 47 - MAP_CHROME_HEIGHT);
+  });
+
+  /**
+   * The card is CONTENT height, so reserving a FRACTION of the screen only describes it
+   * on a screen short enough for the cap to bind. Getting this wrong framed every
+   * searched country far too high on a tall phone, and it was invisible on a short test
+   * window because there the two happen to agree.
+   */
+  describe('how much of the bottom the card is assumed to take', () => {
+    it('uses the measured height when the card has reported one', () => {
+      const rect = getMapFocusRect({ width: 440, height: 956 }, 0, 376);
+
+      // 956 - 376 = 580, less the 60 dp chrome row.
+      expect(rect.height).toBe(580 - MAP_CHROME_HEIGHT);
+    });
+
+    it('does not reserve 55% of a tall screen for a card that does not need it', () => {
+      const tall = { width: 440, height: 956 };
+      const measured = getMapFocusRect(tall, 0, 376);
+      const byFraction = Math.round(tall.height * (1 - PORTRAIT_MAX_HEIGHT_FRACTION));
+
+      // The old behaviour put the band's bottom at 430 and the country ~75 dp too high.
+      expect(byFraction).toBe(430);
+      expect(measured.y + measured.height).toBeGreaterThan(byFraction);
+    });
+
+    it('still lets the cap win on a short screen, where the card really is 55%', () => {
+      // 55% of 640 is 352, less than the card would like, so the cap binds and the card
+      // scrolls internally.
+      const rect = getMapFocusRect({ width: 360, height: 640 });
+
+      expect(rect.height).toBe(Math.round(640 * (1 - PORTRAIT_MAX_HEIGHT_FRACTION)) - MAP_CHROME_HEIGHT);
+    });
+
+    it('never lets the band run past the top of the card', () => {
+      for (const height of [640, 740, 844, 956, 1000, 1180]) {
+        const measuredCardHeight = 380;
+        const rect = getMapFocusRect({ width: 400, height }, 0, measuredCardHeight);
+        const cardTop = height - Math.min(height * PORTRAIT_MAX_HEIGHT_FRACTION, measuredCardHeight);
+
+        expect(rect.y + rect.height).toBeLessThanOrEqual(Math.round(cardTop));
+      }
+    });
   });
 
   it('leaves the left of the screen in landscape', () => {

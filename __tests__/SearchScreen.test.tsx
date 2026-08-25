@@ -46,6 +46,16 @@ beforeEach(() => {
   mockReplace.mockClear();
 });
 
+/**
+ * Drain any pick left buffered by the previous test.
+ *
+ * `pendingCountry` holds a pick announced while nothing was listening, so the deep-link
+ * case can deliver it to a map that mounts afterwards. Across tests that is leakage: a
+ * test that presses a result without subscribing leaves the slot loaded, and the next
+ * test to subscribe receives it. Subscribing and immediately unsubscribing consumes it.
+ */
+afterEach(() => subscribeToCountrySelection(() => {})());
+
 const render = () =>
   rtlRender(
     <SafeAreaProvider initialMetrics={METRICS}>

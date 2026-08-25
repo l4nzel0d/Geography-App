@@ -32,6 +32,15 @@ import { dismissDrag, dragProgress, shouldCaptureDrag, shouldDismiss } from './s
 type CountryInfoSheetProps = {
   iso3: string | null;
   onClose: () => void;
+  /**
+   * The card's measured height, reported on every layout.
+   *
+   * Only the portrait camera needs it: `getMapFocusRect` has to know how much of the
+   * bottom this card actually covers, and the card is content-height, so a fraction of
+   * the screen is only right when the cap happens to bind. Optional because nothing else
+   * that renders this cares.
+   */
+  onMeasured?: (height: number) => void;
 };
 
 const OPEN_DURATION = 220;
@@ -49,7 +58,7 @@ const FALLBACK_SIZE = { width: 360, height: 400 };
  * dependency: the interaction is a simple show/hide, and this keeps the native
  * dependency surface (and therefore the rebuild surface) unchanged.
  */
-export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
+export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheetProps) {
   const insets = useSafeAreaInsets();
   const { landscape, panelWidth, tier } = getInfoSheetLayout(useWindowDimensions());
 
@@ -157,7 +166,12 @@ export function CountryInfoSheet({ iso3, onClose }: CountryInfoSheetProps) {
 
   const onLayout = ({ nativeEvent }: LayoutChangeEvent) => {
     const { width, height } = nativeEvent.layout;
-    if (width > 0 && height > 0) setSize({ width, height });
+    if (width > 0 && height > 0) {
+      setSize({ width, height });
+      // The camera reserves space for this card when framing a searched country, and a
+      // fraction of the screen is a poor guess for something that is content-height.
+      onMeasured?.(height);
+    }
   };
 
   // Off-screen is down in portrait and out to the right in landscape.
