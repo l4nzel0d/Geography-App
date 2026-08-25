@@ -10,3 +10,9 @@
  * input and having to reach for the mouse between every answer is the friction.
  */
 export const KEYBOARD_PLAY = false;
+
+/**
+ * Whether the first answer field should take focus as a question arrives. Native: no,
+ * for the reason above - the on-screen keyboard is the only keyboard there.
+ */
+export const autoFocusFirstField = () => false;

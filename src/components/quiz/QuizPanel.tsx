@@ -7,7 +7,7 @@ import type { QuizQuestion } from '@/quiz/quizBuilder';
 import type { FieldId } from '@/quiz/quizConfig';
 
 import { AnswerField } from './AnswerField';
-import { KEYBOARD_PLAY } from './keyboardPlay';
+import { autoFocusFirstField, KEYBOARD_PLAY } from './keyboardPlay';
 import { quizColors, quizRadii } from '../palette';
 
 export type PanelAnswers = {
@@ -92,10 +92,11 @@ export function QuizPanel({
    * A new country arrives: put the cursor in the first thing it can be asked.
    *
    * Keyed on the country rather than on the field list, which is rebuilt every render.
-   * Web only - see `keyboardPlay.ts` for why focusing a field is unwelcome on a phone.
+   * Desktop web only - a phone browser is a web build too, and there this would summon
+   * the on-screen keyboard for every question. See `keyboardPlay.ts`.
    */
   useEffect(() => {
-    if (!KEYBOARD_PLAY) return;
+    if (!autoFocusFirstField()) return;
     inputs.current[visibleFields[0]]?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [question.iso3]);
