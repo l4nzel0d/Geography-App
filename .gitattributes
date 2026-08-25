@@ -4,3 +4,8 @@
 # endings on checkout - CRLF conversion would fail that test on every fresh clone on
 # Windows, for a difference that is not real.
 public/maplibre/** -text
+
+# Flag artwork copied verbatim from the flag-icons devDependency. Marked binary so git
+# does not rewrite line endings on checkout - the files are generated, not edited, and
+# the CRLF warning on all 249 of them at every `git add` is pure noise.
+public/flags/** -text
