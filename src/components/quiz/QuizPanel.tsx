@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { QuestionResult } from '@/quiz/gradeAnswer';
-import { CURRENCIES_REQUIRED, LANGUAGES_REQUIRED } from '@/quiz/gradeAnswer';
+import { CURRENCIES_REQUIRED } from '@/quiz/gradeAnswer';
 import type { QuizQuestion } from '@/quiz/quizBuilder';
 import type { FieldId } from '@/quiz/quizConfig';
 
@@ -38,7 +38,7 @@ type QuizPanelProps = {
  *
  * A flex sibling of the map rather than an overlay on it. That is the structural fix for
  * the paint bug in CLAUDE.md: this panel grows a chip every time the player names a
- * language, and a view inserted over a live MapLibre surface after mount is laid out
+ * currency, and a view inserted over a live MapLibre surface after mount is laid out
  * perfectly and never drawn. Nothing here is over the map, so it cannot happen.
  *
  * The belt to that braces: one row per CONFIGURED field for the whole round, hidden with
@@ -74,12 +74,6 @@ export function QuizPanel({
   const graded = result != null;
 
   const requirementFor = (field: FieldId) => {
-    if (field === 'languages') {
-      return {
-        required: Math.min(LANGUAGES_REQUIRED, question.facts.languages.length),
-        available: question.facts.languages.length,
-      };
-    }
     if (field === 'currency') {
       return {
         required: Math.min(CURRENCIES_REQUIRED, question.facts.currencies.length),

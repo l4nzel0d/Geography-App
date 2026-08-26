@@ -75,10 +75,10 @@ describe('label text', () => {
     expect(String(propertiesOf('FRA')?.tPopulation)).not.toContain(',');
   });
 
-  it('shows at most three languages', () => {
-    // Zimbabwe records 15. Joining all of them is a paragraph, not a label.
-    const languages = String(propertiesOf('ZWE')?.tLanguages);
-    expect(languages.split(', ')).toHaveLength(3);
+  it('shows at most three currencies', () => {
+    // Zimbabwe records nine. Joining all of them is a paragraph, not a label.
+    const currencies = String(propertiesOf('ZWE')?.tCurrencies);
+    expect(currencies.split(', ')).toHaveLength(3);
   });
 
   it('shows currency names without the code or symbol', () => {
@@ -133,15 +133,12 @@ describe('label text', () => {
         area: null,
         flag: null,
         currencies: [],
-        languages: [],
-        languageCodes: [],
-        translations: {
+            translations: {
           ru: {
             name: '',
             official: null,
             capital: [],
-            languages: [],
-            currencies: [],
+                currencies: [],
             region: '',
             subregion: '',
             altSpellings: [],
@@ -190,7 +187,7 @@ describe('labelFilter', () => {
 
 describe('labelTextField', () => {
   it('reads the matching text property', () => {
-    expect(labelTextField('languages')).toEqual(['get', 'tLanguages']);
+    expect(labelTextField('currencies')).toEqual(['get', 'tCurrencies']);
   });
 
   it('is still well-formed with no field selected', () => {
@@ -307,7 +304,6 @@ describe('the field catalogue', () => {
       'name',
       'flag',
       'capital',
-      'languages',
       'currencies',
       'population',
     ]);

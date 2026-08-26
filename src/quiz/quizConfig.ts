@@ -72,7 +72,7 @@ export const MODE_ASKS_FIELDS: Record<QuizMode, boolean> = {
 };
 
 /** The facts a player can be asked to type. Area is deliberately not among them. */
-export type FieldId = 'name' | 'capital' | 'currency' | 'languages' | 'population';
+export type FieldId = 'name' | 'capital' | 'currency' | 'population';
 
 /**
  * The one thing you answer by tapping rather than typing.
@@ -91,21 +91,17 @@ export const LOCATION_FIELD = 'location';
 /** Anything a result line can be about: a typed fact, or the tapped location. */
 export type GradedField = FieldId | typeof LOCATION_FIELD;
 
-export const ANSWERABLE_FIELDS: readonly FieldId[] = [
-  'name',
-  'capital',
-  'currency',
-  'languages',
-  'population',
-];
+export const ANSWERABLE_FIELDS: readonly FieldId[] = ['name', 'capital', 'currency', 'population'];
 
 /**
  * Fields answered as a set of chips rather than a single value.
  *
  * Exported rather than kept in the component, because the grader has to agree with the
- * input about which fields these are - see `toAnswerInput`.
+ * input about which fields these are - see `toAnswerInput`. A one-entry list today, and
+ * deliberately still a list: currency is a set for the same reason languages was, and
+ * `isSetField` is what the panel and the grader both ask.
  */
-export const SET_FIELDS: readonly FieldId[] = ['currency', 'languages'];
+export const SET_FIELDS: readonly FieldId[] = ['currency'];
 
 export function isSetField(field: FieldId): boolean {
   return SET_FIELDS.includes(field);
@@ -115,7 +111,6 @@ export const FIELD_LABEL_KEYS: Record<GradedField, MessageKey> = {
   name: 'quiz.field.name.label',
   capital: 'quiz.field.capital.label',
   currency: 'quiz.field.currency.label',
-  languages: 'quiz.field.languages.label',
   population: 'quiz.field.population.label',
   location: 'quiz.field.location.label',
 };

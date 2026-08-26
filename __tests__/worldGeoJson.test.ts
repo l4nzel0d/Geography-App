@@ -138,14 +138,11 @@ describe('densityOf', () => {
     area: 10,
     flag: null,
     currencies: [],
-    languages: [],
-    languageCodes: [],
     translations: {
       ru: {
         name: '',
         official: null,
         capital: [],
-        languages: [],
         currencies: [],
         region: '',
         subregion: '',
@@ -229,15 +226,12 @@ describe('withChoroplethValues', () => {
         area: -1,
         flag: null,
         currencies: [],
-        languages: [],
-        languageCodes: [],
-        translations: {
+            translations: {
           ru: {
             name: '',
             official: null,
             capital: [],
-            languages: [],
-            currencies: [],
+                currencies: [],
             region: '',
             subregion: '',
             altSpellings: [],

@@ -5,7 +5,7 @@
  *
  * Produces two bundled assets that the app imports directly:
  *   src/data/countries.geo.json  - country outlines, properties trimmed to { iso3, name }
- *   src/data/countryFacts.json   - population / currency / language facts, keyed by ISO-3
+ *   src/data/countryFacts.json   - population / currency / capital facts, keyed by ISO-3
  *
  * The app itself NEVER makes these requests. See CLAUDE.md - offline is a hard requirement.
  *

@@ -100,7 +100,7 @@ const MIN_STEM = 3;
  * Deliberately NOT applied to country names. There the confusable guard is doing safety
  * work - it is what stops "австрия" scoring for Австралия - and loosening the comparison
  * on the one field where a near miss means a different country is the wrong trade. It is
- * used only for currencies and languages, where inflection actually bites.
+ * used only for currencies, where inflection actually bites.
  */
 export function russianStem(text: string): string {
   return text

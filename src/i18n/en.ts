@@ -13,7 +13,7 @@
  * fragments, feature property names, and the quiz's URL param keys and values. Those are
  * machine-facing, and translating any of them would break a deep link or a Maestro flow.
  *
- * Country names, capitals, languages and currencies are data rather than UI - they live in
+ * Country names, capitals and currencies are data rather than UI - they live in
  * `src/data/ru/` and reach the screen through `countryFacts.ts`.
  */
 export const en = {
@@ -21,7 +21,7 @@ export const en = {
   'app.name': 'Countries of the World',
   'app.shortName': 'Countries',
   'app.description':
-    'A world map you can explore offline: tap any country for its population, currency, languages, capital and area, colour the land by population or density, label every country, search 237 countries, or take a quiz.',
+    'A world map you can explore offline: tap any country for its population, currency, capital and area, colour the land by population or density, label every country, search 237 countries, or take a quiz.',
 
   // ------------------------------------------------------------- generic bits
   'flag.a11y': 'Flag of {code}',
@@ -50,8 +50,6 @@ export const en = {
   'map.label.flag.description': 'Show each country flag on the map',
   'map.label.capital.label': 'Capital',
   'map.label.capital.description': 'Show each capital city on the map',
-  'map.label.languages.label': 'Languages',
-  'map.label.languages.description': 'Show up to three official languages on each country',
   'map.label.currencies.label': 'Currencies',
   'map.label.currencies.description': 'Show up to three currencies on each country',
   'map.label.population.label': 'Population',
@@ -139,13 +137,11 @@ export const en = {
   'quiz.field.name.label': 'Country',
   'quiz.field.capital.label': 'Capital',
   'quiz.field.currency.label': 'Currency',
-  'quiz.field.languages.label': 'Languages',
   'quiz.field.population.label': 'Population',
   'quiz.field.location.label': 'Location',
   'quiz.field.name.hint': 'Name the highlighted country',
   'quiz.field.capital.hint': 'Name its capital city',
   'quiz.field.currency.hint': 'Name its currencies, up to three',
-  'quiz.field.languages.hint': 'Name three of its official languages',
   'quiz.field.population.hint': 'Guess its population, within 20%',
 
   'quiz.field.nameNOfM': '{label} — name {required} of {available}',

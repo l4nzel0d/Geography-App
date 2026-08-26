@@ -153,8 +153,6 @@ export function answerableFields(
         return facts.capital.length > 0;
       case 'currency':
         return facts.currencies.length > 0;
-      case 'languages':
-        return facts.languages.length > 0;
       case 'population':
         return facts.population != null && facts.population > 0;
     }

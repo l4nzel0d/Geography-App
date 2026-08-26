@@ -48,7 +48,6 @@ function localize(base: CountryFacts, locale: Exclude<Locale, typeof DEFAULT_LOC
     name: translated.name,
     official: translated.official,
     capital: translated.capital,
-    languages: translated.languages,
     currencies: base.currencies.map((currency, index) => ({
       ...currency,
       name: translated.currencies[index] ?? currency.name,

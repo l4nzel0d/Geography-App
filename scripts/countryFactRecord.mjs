@@ -15,12 +15,12 @@ const require = createRequire(import.meta.url);
  * ## The Russian block
  *
  * Each record carries `translations.ru`. Country names come free from mledoze's
- * `translations.rus`, which is complete for all 250 records; capitals, language names and
- * currency names are NOT translated upstream and come from the committed dictionaries in
- * `src/data/ru/`, keyed by the stable codes the data already carries - ISO-639-3 for
- * languages, ISO-4217 for currencies, and the English string for capitals and places.
+ * `translations.rus`, which is complete for all 250 records; capitals and currency names
+ * are NOT translated upstream and come from the committed dictionaries in
+ * `src/data/ru/`, keyed by the stable identifiers the data already carries - ISO-4217 for
+ * currencies, and the English string for capitals and places.
  *
- * Keying on codes rather than on position is what makes a mis-join impossible: a language
+ * Keying on codes rather than on position is what makes a mis-join impossible: a currency
  * list that changed order upstream would silently relabel every entry if these were
  * zipped by index.
  *
@@ -32,7 +32,6 @@ const require = createRequire(import.meta.url);
 import { overriddenCapital } from './countryOverrides.mjs';
 
 const ruCapitals = require('../src/data/ru/capitals.json');
-const ruLanguages = require('../src/data/ru/languages.json');
 const ruCurrencies = require('../src/data/ru/currencies.json');
 const ruPlaces = require('../src/data/ru/places.json');
 const ruCountries = require('../src/data/ru/countries.json');
@@ -63,7 +62,6 @@ function buildRussian(country) {
     name: override.name ?? rus.common ?? null,
     official: override.official ?? tidyRussian(rus.official) ?? null,
     capital: overriddenCapital(country).map((city) => ruCapitals[city] ?? null),
-    languages: Object.keys(country.languages ?? {}).map((code) => ruLanguages[code] ?? null),
     // Parallel to `currencies`, in the same order, so the two are zipped by INDEX at
     // runtime only after both were built from the same `Object.entries` walk.
     currencies: Object.keys(country.currencies ?? {}).map((code) => ruCurrencies[code] ?? null),
@@ -109,16 +107,6 @@ export function buildFactRecord(country, { population = null, populationYear = n
       name: v?.name ?? code,
       symbol: v?.symbol ?? null,
     })),
-    languages: Object.values(country.languages ?? {}),
-    /**
-     * ISO-639-3 codes, in the same order as `languages`.
-     *
-     * mledoze keys its language map by code and the record above keeps only the English
-     * NAMES, throwing the codes away. The Russian dictionary is keyed by code - the only
-     * stable identifier a language has here - so the codes have to survive into the file
-     * for anything else to be able to join against them.
-     */
-    languageCodes: Object.keys(country.languages ?? {}),
 
     // --- added for quiz mode -------------------------------------------------
     // Six values: Africa, Americas, Asia, Europe, Oceania, Antarctic.
@@ -172,7 +160,6 @@ export function quizIntegrityProblems(facts, geometryCodes) {
   check('region', (f) => Boolean(f.region));
   check('population', (f) => f.population != null);
   check('capital', (f) => f.capital.length > 0);
-  check('languages', (f) => f.languages.length > 0);
   check('currency', (f) => f.currencies.length > 0, CURRENCYLESS_UN_MEMBERS);
 
   return problems;
@@ -204,18 +191,16 @@ export function russianIntegrityProblems(facts) {
   bad('block', (f) => Boolean(f.translations?.ru));
   bad('name', (f) => Boolean(f.translations?.ru?.name));
   bad('capital', (f) => f.capital.length === 0 || complete(f.translations?.ru?.capital));
-  bad('languages', (f) => f.languages.length === 0 || complete(f.translations?.ru?.languages));
   bad('currencies', (f) => f.currencies.length === 0 || complete(f.translations?.ru?.currencies));
   bad('region', (f) => !f.region || Boolean(f.translations?.ru?.region));
   bad('subregion', (f) => !f.subregion || Boolean(f.translations?.ru?.subregion));
 
   // The lists are zipped by index at runtime, so a length mismatch would silently pair a
-  // language with another language's Russian name.
+  // currency with another currency's Russian name.
   bad(
     'list of the same length as the English one',
     (f) =>
       f.translations?.ru?.capital?.length === f.capital.length &&
-      f.translations?.ru?.languages?.length === f.languages.length &&
       f.translations?.ru?.currencies?.length === f.currencies.length,
   );
 

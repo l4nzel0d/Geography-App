@@ -44,9 +44,9 @@ const points = labelPoints as unknown as Record<string, LabelPoint>;
 /**
  * The text for one field, or null when the country has nothing to say for it.
  *
- * Capital, languages and currencies all go through `formatLabelList` so they truncate the
- * same way - three entries. Only South Africa has three capitals; the cap matters for
- * Zimbabwe's fifteen languages.
+ * Capital and currencies both go through `formatLabelList` so they truncate the same way -
+ * three entries. Only South Africa has three capitals; the cap matters for Zimbabwe's
+ * nine currencies.
  *
  * Currencies use the bare `name`, deliberately not `formatCurrency`: "Brazilian real
  * (BRL, R$)" is an info-sheet string and three of those would be wider than Brazil.
@@ -61,8 +61,6 @@ export function labelTextFor(
       return facts.name || null;
     case 'capital':
       return formatLabelList(facts.capital);
-    case 'languages':
-      return formatLabelList(facts.languages);
     case 'currencies':
       return formatLabelList(facts.currencies.map((currency) => currency.name));
     case 'population':

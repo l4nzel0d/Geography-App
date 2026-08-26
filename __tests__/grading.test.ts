@@ -8,12 +8,7 @@
  * The confusable block below is the whole reason `matchesText` takes a `reserved` map.
  */
 import { getCountryFacts } from '@/data/countryFacts';
-import {
-  currencyAliases,
-  languageAliases,
-  NAME_INDEX,
-  nameAliases,
-} from '@/quiz/answerAliases';
+import { currencyAliases, NAME_INDEX, nameAliases } from '@/quiz/answerAliases';
 import { allowedEdits, editDistance } from '@/quiz/editDistance';
 import { formatCurrency } from '@/components/formatters';
 import {
@@ -230,8 +225,8 @@ describe('currencies - up to three', () => {
   });
 
   it('asks for only three of the nine Zimbabwe lists', () => {
-    // The one country the cap exists for, and the same reasoning as its 15 languages:
-    // naming all nine is a wall rather than a question.
+    // The one country the cap exists for: naming all nine is a wall rather than a
+    // question.
     const zimbabwe = facts('ZWE').currencies.map((c) => c.name);
     expect(zimbabwe.length).toBe(9);
     expect(CURRENCIES_REQUIRED).toBe(3);
@@ -255,65 +250,19 @@ describe('currencies - up to three', () => {
   });
 });
 
-describe('languages - any three', () => {
-  const gradeLanguages = (iso3: string, chips: string[]) =>
-    gradeSet('languages', chips, facts(iso3).languages, 3, languageAliases(facts(iso3)));
-
-  it('accepts the single language of a monolingual country', () => {
-    expect(facts('FRA').languages).toEqual(['French']);
-    expect(gradeLanguages('FRA', ['French']).correct).toBe(true);
-  });
-
-  it('accepts any three of Zimbabwe\'s fifteen', () => {
-    // Requiring all fifteen would make this country a guaranteed miss.
-    expect(facts('ZWE').languages.length).toBeGreaterThan(10);
-    expect(gradeLanguages('ZWE', ['English', 'Shona', 'Ndau']).correct).toBe(true);
-  });
-
-  it('rejects fewer than three when more are available', () => {
-    expect(gradeLanguages('ZWE', ['English', 'Shona']).correct).toBe(false);
-  });
-
-  it('does not count the same language twice', () => {
-    expect(gradeLanguages('ZWE', ['English', 'English', 'English']).correct).toBe(false);
-  });
-
-  it('ignores a wrong chip among right ones', () => {
-    expect(gradeLanguages('CHE', ['French', 'Italian', 'Romansh', 'Klingon']).correct).toBe(true);
-  });
-
-  it('accepts the head noun, so "German" counts for Swiss German', () => {
-    // The dataset qualifies some languages with a country adjective. Nobody answering
-    // "what does Switzerland speak" is going to type "Swiss German".
-    expect(facts('CHE').languages).toContain('Swiss German');
-    expect(gradeLanguages('CHE', ['French', 'German', 'Italian']).correct).toBe(true);
-  });
-
-  it('does not let an ambiguous head noun satisfy two languages at once', () => {
-    // South Africa lists Northern Sotho and Southern Sotho. A bare "Sotho" must not
-    // clear both of them.
-    const aliases = languageAliases(facts('ZAF'));
-    for (const list of aliases.values()) {
-      expect(list).not.toContain('sotho');
-    }
-  });
-
+describe('gradeSet - exact before fuzzy', () => {
   it('matches exactly before fuzzily, so a loose chip cannot steal a slot', () => {
-    // "Sotho" is one edit from South Africa's "Sotho"-family entries. A single greedy
-    // pass can consume the entry that a later chip matches exactly.
+    // Two expected entries one edit apart. A single greedy pass lets the first chip
+    // consume the entry that a later chip matches exactly, marking a right answer wrong.
+    // Nothing in today's data is this cruel; the property is what matters.
     const grade = gradeSet(
-      'languages',
-      ['Southern Sotho', 'Northern Sotho', 'Zulu'],
-      ['Northern Sotho', 'Southern Sotho', 'Zulu', 'Xhosa'],
+      'currency',
+      ['Southern peso', 'Northern peso', 'krone'],
+      ['Northern peso', 'Southern peso', 'krone', 'lira'],
       3,
     );
     expect(grade.correct).toBe(true);
-    expect(grade.missed).toEqual(['Xhosa']);
-  });
-
-  it('reports blank distinctly from wrong', () => {
-    expect(gradeLanguages('FRA', []).how).toBe('blank');
-    expect(gradeLanguages('FRA', ['Klingon']).how).toBe('wrong');
+    expect(grade.missed).toEqual(['lira']);
   });
 });
 
@@ -500,32 +449,32 @@ describe('no country is ever accepted as another - full sweep', () => {
 
 describe('toAnswerInput - the uncommitted draft', () => {
   // The regression this exists for: a chip is committed by pressing return, and nobody
-  // does that for the LAST word - they type "French" and hit Check. That text lived in
+  // does that for the LAST word - they type "euro" and hit Check. That text lived in
   // ChipInput's local state, never reached the grader, and the round reported the whole
-  // languages field as "left blank" however much had been typed into it.
+  // currency field as "left blank" however much had been typed into it.
   it('counts text left in a set field as one more chip', () => {
-    expect(toAnswerInput({ text: { languages: 'French' }, chips: {} })).toEqual({
-      languages: ['French'],
+    expect(toAnswerInput({ text: { currency: 'euro' }, chips: {} })).toEqual({
+      currency: ['euro'],
     });
   });
 
   it('appends the draft after the chips already committed', () => {
     expect(
-      toAnswerInput({ text: { languages: 'Italian' }, chips: { languages: ['French', 'German'] } }),
-    ).toEqual({ languages: ['French', 'German', 'Italian'] });
+      toAnswerInput({ text: { currency: 'euro' }, chips: { currency: ['US dollar', 'yen'] } }),
+    ).toEqual({ currency: ['US dollar', 'yen', 'euro'] });
   });
 
   it('does not double-count a draft that is already a chip', () => {
-    expect(
-      toAnswerInput({ text: { languages: 'french' }, chips: { languages: ['French'] } }),
-    ).toEqual({ languages: ['French'] });
+    expect(toAnswerInput({ text: { currency: 'euro' }, chips: { currency: ['Euro'] } })).toEqual({
+      currency: ['Euro'],
+    });
   });
 
   it('ignores whitespace-only text', () => {
-    expect(toAnswerInput({ text: { languages: '   ' }, chips: { languages: ['French'] } })).toEqual({
-      languages: ['French'],
+    expect(toAnswerInput({ text: { currency: '   ' }, chips: { currency: ['euro'] } })).toEqual({
+      currency: ['euro'],
     });
-    expect(toAnswerInput({ text: { languages: '   ' }, chips: {} })).toEqual({});
+    expect(toAnswerInput({ text: { currency: '   ' }, chips: {} })).toEqual({});
   });
 
   it('leaves the single-value fields as strings', () => {
@@ -539,23 +488,19 @@ describe('toAnswerInput - the uncommitted draft', () => {
     expect(toAnswerInput({ text: {}, chips: {} })).toEqual({});
   });
 
-  it('grades a typed-but-uncommitted language as correct end to end', () => {
-    const input = toAnswerInput({ text: { languages: 'French' }, chips: {} });
+  it('grades a typed-but-uncommitted currency as correct end to end', () => {
+    const input = toAnswerInput({ text: { currency: 'Japanese yen' }, chips: {} });
+    expect(input.currency).toEqual(['Japanese yen']);
     const grade = gradeSet(
-      'languages',
-      input.languages as string[],
-      facts('FRA').languages,
+      'currency',
+      input.currency as string[],
+      facts('JPN').currencies.map((c) => c.name),
       3,
-      languageAliases(facts('FRA')),
+      currencyAliases(facts('JPN')),
     );
     expect(grade.correct).toBe(true);
     expect(grade.how).not.toBe('blank');
-    expect(grade.given).toBe('French');
-  });
-
-  it('does the same for currencies', () => {
-    const input = toAnswerInput({ text: { currency: 'Japanese yen' }, chips: {} });
-    expect(input.currency).toEqual(['Japanese yen']);
+    expect(grade.given).toBe('Japanese yen');
   });
 });
 
@@ -593,8 +538,8 @@ describe('currency reveal - name, code and symbol', () => {
     expect(gradeCurrencyFor('CHN', ['CNY']).correct).toBe(false);
   });
 
-  it('leaves languages as plain names', () => {
-    // The label treatment is a currency thing; languages have no code or symbol.
-    expect(gradeField('FRA', facts('FRA'), 'languages', { languages: [] }).expected).toBe('French');
+  it('leaves a single-value field as a plain string', () => {
+    // The code-and-symbol label treatment is a currency thing and must not leak.
+    expect(gradeField('FRA', facts('FRA'), 'capital', { capital: '' }).expected).toBe('Paris');
   });
 });

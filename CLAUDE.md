@@ -1,7 +1,7 @@
 # geography-app
 
 An offline world map. Tap a country → it highlights and an info sheet shows population, currency,
-languages, capital, area. Plus a choropleth, map labels, country search, a three-mode quiz, and
+capital, area. Plus a choropleth, map labels, country search, a three-mode quiz, and
 per-country mastery tracking. Runs on Android and as a PWA. English and Russian.
 
 ## Hard constraint: the app must work fully offline
@@ -156,7 +156,21 @@ which proves it never touched the World Bank join.
 
 Both scripts assert the quiz's invariants — 193 UN members with geometry, each with a subregion,
 population, capital and language, and a currency for all but FSM — and `data-integrity.test.ts`
-mirrors them. Genuine upstream gaps go in an explicit allowlist (`FACTLESS_ALLOWLIST` = Northern
+mirrors them.
+
+**`languages` is gone, from the surface and from the data.** It was dropped as a displayed fact, a
+map-label field and a quiz field, and then out of the record entirely — `CountryFacts.languages`,
+`languageCodes`, `LocalizedFacts.languages` and `src/data/ru/languages.json` (153 entries) are all
+deleted, along with `formatLanguages`, `languageAliases`, the `info.fact.languages` plural, both
+`map.label.languages.*` and `quiz.field.languages.*` message keys, and the `label-field-languages`
+stanza in `.maestro/map-labels.yaml`. `countryFacts.json` went 188 KB → 161 KB.
+
+Two things worth keeping from how that landed. The invariant list above lost its `languages` check
+and the Russian one lost two, so **`world-countries`' own `languages` map is no longer read by
+anything in this repo** — re-adding the field means re-adding both checks, not just the builder line.
+And a stored mastery table that already carries `languages` grades is dropped per field by
+`decodeMastery`'s `isMasteryField` check, which is exactly what that check was for: the history for a
+removed field stops counting rather than corrupting a score. Genuine upstream gaps go in an explicit allowlist (`FACTLESS_ALLOWLIST` = Northern
 Cyprus, Somaliland, Siachen Glacier; `POPULATIONLESS_ALLOWLIST` = Taiwan, Western Sahara, Falklands,
 French Southern Territories, Antarctica + 17 small territories) — **never a silent skip**. The script
 fails the build on any unresolved code, duplicate, or missing record.
@@ -365,7 +379,7 @@ with a stub — so it passes every unit test and blanks the layer on a device.
 
 ## Map labels
 
-A pill in the top-left row writes one fact over every country: **name, capital, languages, currencies,
+A pill in the top-left row writes one fact over every country: **name, capital, currencies,
 population, or flag**. Independent of the fill mode, so it has its own state, pill and panel.
 
 ### Real text, and still no network
@@ -797,15 +811,16 @@ characters, 1 under 9, 2 above.
 *fuzzy* match (never an exact or alias one) is rejected outright when the thing typed is itself the name
 of another country, via `NAME_INDEX`. `grading.test.ts` sweeps all 193 × 193 combinations.
 
-Set fields (languages, currencies) match **exact before fuzzy** — with one greedy pass a loosely spelled
-chip can consume the entry a later chip matches exactly. Head nouns count when unambiguous *within that
-country*: "rand" for the South African rand, "German" for Switzerland's "Swiss German" — but not "peso"
-for Cuba, which has two. Currency **codes are rejected**: "USD" is different knowledge from "United
-States dollar".
+Currency is the one **set field** — several chips rather than one value — and it matches **exact before
+fuzzy**: with one greedy pass a loosely spelled chip can consume the entry a later chip matches exactly.
+`SET_FIELDS` stays a list of one rather than collapsing into `field === 'currency'`, because the
+distinction is real and the grader and the panel both have to agree on it. Head nouns count when
+unambiguous *within that country*: "rand" for the South African rand — but not "peso" for Cuba, which has
+two. Currency **codes are rejected**: "USD" is different knowledge from "United States dollar".
 
 The rules: name and capital are single answers (any one of South Africa's three capitals counts),
-currencies need **all**, languages need **any 3** (Zimbabwe lists 15), population is within **±20%**,
-parsed from `68,000,000`, `68m`, `68 million` or `1.4bn`.
+currencies need **all** of them except Zimbabwe's nine, where **three** is the cap (`CURRENCIES_REQUIRED`),
+population is within **±20%**, parsed from `68,000,000`, `68m`, `68 million` or `1.4bn`.
 
 `gradeLocation.ts` is its own module rather than a sixth case in `gradeAnswer.ts`: everything there is
 about being forgiving with a *string*, and none of it has anything to say about an ISO-3 code out of
@@ -1233,14 +1248,13 @@ back out of it.
 
 ### The data
 
-`countryFacts.json` gained `translations.ru` per record, plus `languageCodes` — mledoze keys languages by
-ISO-639-3 and the record kept only English names, and the Russian dictionary joins on the code.
+`countryFacts.json` gained `translations.ru` per record. Each dictionary joins on a stable identifier
+rather than a position, so a list reordered upstream cannot silently relabel every entry.
 
 | Source | What it gives |
 |---|---|
 | `world-countries` `translations.rus` | country name + official name, **all 250, no gaps** |
 | `src/data/ru/capitals.json` | 247 capitals, keyed by the English string |
-| `src/data/ru/languages.json` | 153 languages, keyed by ISO-639-3 |
 | `src/data/ru/currencies.json` | 162 currencies, keyed by ISO-4217 |
 | `src/data/ru/places.json` | 6 regions + 24 subregions |
 | `src/data/ru/countries.json` | per-country overrides and extra aliases (Голландия, Бирма, США) |

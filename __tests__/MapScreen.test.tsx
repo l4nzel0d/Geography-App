@@ -107,7 +107,6 @@ describe('MapScreen', () => {
     expect(screen.getByTestId('fact-currencies')).toHaveTextContent(
       /Brazilian real \(BRL, R\$\)/,
     );
-    expect(screen.getByTestId('fact-languages')).toHaveTextContent(/Portuguese/);
   });
 
   it('swaps content when a different country is pressed', async () => {
@@ -657,7 +656,7 @@ describe('map labels', () => {
     ]);
   });
 
-  it.each(['name', 'capital', 'languages', 'currencies', 'population'] as const)(
+  it.each(['name', 'capital', 'currencies', 'population'] as const)(
     'wires up the %s field',
     async (field) => {
       await render();

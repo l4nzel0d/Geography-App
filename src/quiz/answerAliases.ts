@@ -166,14 +166,6 @@ export function currencyAliases(
   );
 }
 
-/** Same rule for languages: "German" should count for Switzerland's "Swiss German". */
-export function languageAliases(
-  facts: CountryFacts,
-  locale: Locale = DEFAULT_LOCALE,
-): Map<string, string[]> {
-  return headNounAliases(facts.languages, locale);
-}
-
 /**
  * Every country name in the pool, normalized, mapped to its ISO-3.
  *

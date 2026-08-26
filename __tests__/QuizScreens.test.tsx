@@ -114,7 +114,7 @@ describe('the setup screen', () => {
   it('offers every askable field and every subregion', async () => {
     await render(<QuizSetupScreen />);
 
-    for (const field of ['name', 'capital', 'currency', 'languages', 'population']) {
+    for (const field of ['name', 'capital', 'currency', 'population']) {
       expect(screen.getByTestId(`field-${field}`)).toBeTruthy();
     }
     expect(screen.getByTestId('subregion-Western Europe')).toBeTruthy();
@@ -751,43 +751,45 @@ describe('the play screen', () => {
     expect(screen.getByTestId('layer-country-selected').props.filter[2]).toBe(questions[1].iso3);
   });
 
-  it('counts a language typed but never committed as a chip', async () => {
+  // Zimbabwe pinned by `only` rather than drawn from a subregion: currency is the last
+  // set field left, and it needs a country with more than three of them for the partial
+  // and whole-set cases below to mean anything. Zimbabwe records nine.
+  const zimbabweCurrencies = () =>
+    countriesWithCodes(['ZWE'])[0].facts.currencies.map((currency) => currency.name);
+
+  it('counts a currency typed but never committed as a chip', async () => {
     // The bug this pins: a chip is only committed on return, and nobody presses return
     // for the last word. That text used to live inside ChipInput and never reach the
     // grader, so the round reported "left blank" no matter what had been typed.
-    mockSearchParams = { subregions: 'Western Europe', fields: 'languages', seed: '5' };
-    const questions = buildQuiz(parseQuizParams(mockSearchParams));
-    const firstLanguage = questions[0].facts.languages[0];
+    mockSearchParams = { only: 'ZWE:currency', fields: 'currency', seed: '5' };
+    const first = zimbabweCurrencies()[0];
 
     await render(<QuizPlayScreen />);
-    await fireEvent.changeText(screen.getByTestId('quiz-input-languages-input'), firstLanguage);
+    await fireEvent.changeText(screen.getByTestId('quiz-input-currency-input'), first);
     await fireEvent.press(screen.getByTestId('quiz-submit'));
 
-    // The country may well need three languages, so one is not necessarily a pass. What
-    // matters is that the one typed was COUNTED: it must no longer be listed as missed.
-    expect(screen.getByTestId('quiz-detail-languages')).toHaveTextContent(/Missed:/);
-    expect(screen.getByTestId('quiz-detail-languages')).not.toHaveTextContent(
-      new RegExp(firstLanguage),
-    );
+    // Zimbabwe needs three, so one is not a pass. What matters is that the one typed was
+    // COUNTED: it must no longer be listed as missed.
+    expect(screen.getByTestId('quiz-detail-currency')).toHaveTextContent(/Missed:/);
+    expect(screen.getByTestId('quiz-detail-currency')).not.toHaveTextContent(new RegExp(first));
   });
 
   it('combines committed chips with the trailing draft', async () => {
-    mockSearchParams = { subregions: 'Western Europe', fields: 'languages', seed: '5' };
-    const questions = buildQuiz(parseQuizParams(mockSearchParams));
-    const languages = questions[0].facts.languages;
+    mockSearchParams = { only: 'ZWE:currency', fields: 'currency', seed: '5' };
+    const currencies = zimbabweCurrencies();
 
     await render(<QuizPlayScreen />);
-    const input = screen.getByTestId('quiz-input-languages-input');
+    const input = screen.getByTestId('quiz-input-currency-input');
 
     // Commit all but the last by pressing return, then leave the last one sitting there.
-    for (const language of languages.slice(0, Math.min(2, languages.length - 1))) {
-      await fireEvent.changeText(input, language);
+    for (const currency of currencies.slice(0, CURRENCIES_REQUIRED - 1)) {
+      await fireEvent.changeText(input, currency);
       await fireEvent(input, 'submitEditing');
     }
-    await fireEvent.changeText(input, languages[Math.min(2, languages.length - 1)]);
+    await fireEvent.changeText(input, currencies[CURRENCIES_REQUIRED - 1]);
     await fireEvent.press(screen.getByTestId('quiz-submit'));
 
-    expect(screen.getByTestId('quiz-reveal-languages')).toHaveTextContent(/Correct/);
+    expect(screen.getByTestId('quiz-reveal-currency')).toHaveTextContent(/Correct/);
   });
 
   it('names the currencies back when a correct answer covered the whole set', async () => {

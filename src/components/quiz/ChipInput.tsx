@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { quizColors, quizRadii } from '../palette';
 import { useTranslator } from '@/i18n/useTranslator';
 
-/** Nobody is naming more official languages than this; the pool is fixed, see below. */
+/** Nobody is naming more currencies than this; the pool is fixed, see below. */
 export const MAX_CHIPS = 12;
 
 type ChipInputProps = {
@@ -27,7 +27,7 @@ type ChipInputProps = {
 };
 
 /**
- * Multi-value entry for the set fields - languages and currencies.
+ * Multi-value entry for the set fields - currencies.
  *
  * Type a word, press return, it becomes a chip. The chip SLOTS are all mounted from the
  * first frame and merely hidden when unused, which is the same discipline as

@@ -70,14 +70,6 @@ appId: com.boris.geographyapp
 - tapOn:
     id: 'toggle-label-field'
 - tapOn:
-    id: 'label-field-languages'
-- assertVisible: 'Languages'
-- assertVisible:
-    id: 'world-map'
-
-- tapOn:
-    id: 'toggle-label-field'
-- tapOn:
     id: 'label-field-currencies'
 - assertVisible: 'Currencies'
 - assertVisible:

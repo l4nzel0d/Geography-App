@@ -23,7 +23,7 @@ import { MAP_FLAG_INTRINSIC_DP } from './labelFit';
  * Written out as the literal union and `LabelField` derived from it, rather than the other
  * way round, because `flag` is a label field that is not one of these - see below.
  */
-export type LabelFieldId = 'name' | 'capital' | 'languages' | 'currencies' | 'population';
+export type LabelFieldId = 'name' | 'capital' | 'currencies' | 'population';
 
 /**
  * What the map is labelled with. `none` is a real state - the default - not the absence of one.
@@ -40,7 +40,6 @@ export type LabelField = 'none' | LabelFieldId | 'flag';
 export const LABEL_FIELD_IDS: readonly LabelFieldId[] = [
   'name',
   'capital',
-  'languages',
   'currencies',
   'population',
 ];
@@ -70,11 +69,6 @@ export const LABEL_FIELDS: readonly {
     field: 'capital',
     labelKey: 'map.label.capital.label',
     descriptionKey: 'map.label.capital.description',
-  },
-  {
-    field: 'languages',
-    labelKey: 'map.label.languages.label',
-    descriptionKey: 'map.label.languages.description',
   },
   {
     field: 'currencies',

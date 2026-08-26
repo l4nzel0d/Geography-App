@@ -22,13 +22,7 @@ describe('ANSWERABLE_FIELDS', () => {
     // Deliberately unaskable: "how many square kilometres is Chad" is a memory test
     // with no intuition behind it.
     expect(ANSWERABLE_FIELDS).not.toContain('area');
-    expect(ANSWERABLE_FIELDS).toEqual([
-      'name',
-      'capital',
-      'currency',
-      'languages',
-      'population',
-    ]);
+    expect(ANSWERABLE_FIELDS).toEqual(['name', 'capital', 'currency', 'population']);
   });
 });
 

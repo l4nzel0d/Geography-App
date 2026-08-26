@@ -175,14 +175,6 @@ describe('Russian inflection', () => {
     expect(gradeCurrency('GBR', ['фунт']).correct).toBe(true);
   });
 
-  const gradeLanguages = (iso3: string, chips: string[]) =>
-    gradeField(iso3, ru(iso3), 'languages', { languages: chips }, 'ru');
-
-  it('accepts a language named in the wrong case', () => {
-    expect(gradeLanguages('FRA', ['французского']).correct).toBe(true);
-    expect(gradeLanguages('RUS', ['русского']).correct).toBe(true);
-  });
-
   it('does not stem country names, where a near miss is a different country', () => {
     // Without a stemmer this is a plain fuzzy hit - two edits on a nine-letter target...
     expect(matchesText('австрия', ['австралия'])).toBe('fuzzy');

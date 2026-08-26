@@ -14,9 +14,9 @@ import type { PluralForms } from './plural';
  * `Review — all {count} correct` read the same at every count in both languages and stayed
  * ordinary messages; putting them here would mean three identical strings to keep in sync.
  *
- * Two of these are *labels* rather than sentences - `info.fact.currencies` and
- * `info.fact.languages` - pluralised on how many entries the country has. They are the
- * reason `CountryInfoSheet` had hand-rolled ternaries in the first place.
+ * One of these is a *label* rather than a sentence - `info.fact.currencies` - pluralised
+ * on how many entries the country has. It is the reason `CountryInfoSheet` had hand-rolled
+ * ternaries in the first place.
  */
 export const enPlurals = {
   'quiz.setup.start': {
@@ -48,10 +48,6 @@ export const enPlurals = {
   'info.fact.currencies': {
     one: 'Currency',
     other: 'Currencies',
-  },
-  'info.fact.languages': {
-    one: 'Official language',
-    other: 'Official languages',
   },
   'results.countriesFullyCorrect': {
     one: 'country fully correct',

@@ -15,9 +15,9 @@ import type { PluralKey } from './t';
  * `other` is required by `PluralForms` as the always-available fallback; in Russian it is
  * the `many` form, which is what a count with no matching rule should read as.
  *
- * `info.fact.currencies` and `info.fact.languages` are section *headings*, not counted
- * phrases, so their `many` deliberately keeps the nominative plural (`Валюты`, not
- * `Валют`) - a bare genitive reads as a fragment above a list.
+ * `info.fact.currencies` is a section *heading*, not a counted phrase, so its `many`
+ * deliberately keeps the nominative plural (`Валюты`, not `Валют`) - a bare genitive reads
+ * as a fragment above a list.
  */
 export const ruPlurals: Record<PluralKey, Required<PluralForms>> = {
   'quiz.setup.start': {
@@ -62,12 +62,6 @@ export const ruPlurals: Record<PluralKey, Required<PluralForms>> = {
     few: 'Валюты',
     many: 'Валюты',
     other: 'Валюты',
-  },
-  'info.fact.languages': {
-    one: 'Официальный язык',
-    few: 'Официальные языки',
-    many: 'Официальные языки',
-    other: 'Официальные языки',
   },
   'results.countriesFullyCorrect': {
     one: 'страна полностью верно',

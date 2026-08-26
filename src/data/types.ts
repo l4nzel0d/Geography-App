@@ -11,14 +11,13 @@ export type Currency = {
  * the same fact in every language and stay on the record itself, which is what keeps a
  * localized view ~250 small objects rather than a second copy of everything.
  *
- * `capital`, `languages` and `currencies` are **parallel to their English siblings, by
- * index**. The build asserts the lengths match; see `russianIntegrityProblems`.
+ * `capital` and `currencies` are **parallel to their English siblings, by index**. The
+ * build asserts the lengths match; see `russianIntegrityProblems`.
  */
 export type LocalizedFacts = {
   name: string;
   official: string | null;
   capital: string[];
-  languages: string[];
   /** Currency NAMES only - the code and symbol are not language-dependent. */
   currencies: string[];
   region: string;
@@ -39,14 +38,6 @@ export type CountryFacts = {
   area: number | null;
   flag: string | null;
   currencies: Currency[];
-  languages: string[];
-  /**
-   * ISO-639-3 codes, in the same order as `languages`.
-   *
-   * The record keeps only the English names, so this is the one stable identifier a
-   * language has here - and the key the Russian dictionary joins on.
-   */
-  languageCodes: string[];
   /** One of six: Africa, Americas, Asia, Europe, Oceania, Antarctic. */
   region: string;
   /** One of 24, e.g. "Western Europe". Empty only for the four Antarctic entries. */

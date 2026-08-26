@@ -49,11 +49,6 @@ export function formatCurrencies(currencies: Currency[] | null | undefined): str
   return currencies.map(formatCurrency).join('  ·  ');
 }
 
-export function formatLanguages(languages: string[] | null | undefined): string {
-  if (!languages?.length) return NOT_AVAILABLE;
-  return languages.join(', ');
-}
-
 /** Countries such as Nauru have no capital in the dataset. */
 export function formatCapital(capital: string[] | null | undefined): string {
   if (!capital?.length) return NOT_AVAILABLE;
@@ -122,9 +117,9 @@ export function formatCompactNumber(
 /**
  * The first few entries of a list, joined for a map label.
  *
- * Languages and currencies are lists and some of them are long - Zimbabwe records 15
- * languages - so a label has to truncate somewhere. Three is the agreed cut: enough to
- * say something real about a multilingual country, short enough to still fit inside one.
+ * Capitals and currencies are lists and some of them are long - Zimbabwe records nine
+ * currencies - so a label has to truncate somewhere. Three is the agreed cut: enough to
+ * say something real about a country, short enough to still fit inside one.
  *
  * No "+12 more" suffix: the count is not the interesting part on a map, and the info
  * sheet already shows the full list for anything you tap.

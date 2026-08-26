@@ -31,9 +31,9 @@ describe('estimateLabelWidthDp', () => {
 
   it('caps at the wrap width, because long labels wrap rather than widen', () => {
     // Must match the layer's `text-max-width`. Without the cap, Zimbabwe's three
-    // languages are estimated at ~150dp and never fit at any zoom.
+    // currency lists are estimated at ~150dp and never fit at any zoom.
     const cap = TEXT_MAX_WIDTH_EM * LABEL_FONT_SIZE;
-    expect(estimateLabelWidthDp('Shona, Ndebele, English')).toBe(cap);
+    expect(estimateLabelWidthDp('Botswana pula, British pound, Chinese yuan')).toBe(cap);
     expect(estimateLabelWidthDp('a'.repeat(200))).toBe(cap);
   });
 

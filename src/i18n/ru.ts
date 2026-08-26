@@ -28,7 +28,7 @@ export const ru: Record<MessageKey, string> = {
   'app.name': 'Страны мира',
   'app.shortName': 'Страны',
   'app.description':
-    'Карта мира, которая работает офлайн: нажмите на любую страну, чтобы увидеть её население, валюту, языки, столицу и площадь, раскрасьте сушу по населению или плотности, подпишите каждую страну, найдите любую из 237 стран или пройдите тест.',
+    'Карта мира, которая работает офлайн: нажмите на любую страну, чтобы увидеть её население, валюту, столицу и площадь, раскрасьте сушу по населению или плотности, подпишите каждую страну, найдите любую из 237 стран или пройдите тест.',
 
   // ------------------------------------------------------------- generic bits
   'flag.a11y': 'Флаг страны {code}',
@@ -57,8 +57,6 @@ export const ru: Record<MessageKey, string> = {
   'map.label.flag.description': 'Показывать флаг каждой страны',
   'map.label.capital.label': 'Столица',
   'map.label.capital.description': 'Показывать столицу каждой страны',
-  'map.label.languages.label': 'Языки',
-  'map.label.languages.description': 'Показывать до трёх официальных языков каждой страны',
   'map.label.currencies.label': 'Валюты',
   'map.label.currencies.description': 'Показывать до трёх валют каждой страны',
   'map.label.population.label': 'Население',
@@ -146,13 +144,11 @@ export const ru: Record<MessageKey, string> = {
   'quiz.field.name.label': 'Страна',
   'quiz.field.capital.label': 'Столица',
   'quiz.field.currency.label': 'Валюта',
-  'quiz.field.languages.label': 'Языки',
   'quiz.field.population.label': 'Население',
   'quiz.field.location.label': 'Расположение',
   'quiz.field.name.hint': 'Назовите выделенную страну',
   'quiz.field.capital.hint': 'Назовите её столицу',
   'quiz.field.currency.hint': 'Назовите её валюты, до трёх',
-  'quiz.field.languages.hint': 'Назовите три её официальных языка',
   'quiz.field.population.hint': 'Угадайте её население с точностью до 20%',
 
   'quiz.field.nameNOfM': '{label} — назовите {required} из {available}',

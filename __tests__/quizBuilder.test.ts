@@ -111,8 +111,8 @@ describe('answerableFields', () => {
 
   it('keeps every field for a country with complete data', () => {
     expect(
-      answerableFields(factsFor('FRA'), ['name', 'capital', 'currency', 'languages', 'population']),
-    ).toEqual(['name', 'capital', 'currency', 'languages', 'population']);
+      answerableFields(factsFor('FRA'), ['name', 'capital', 'currency', 'population']),
+    ).toEqual(['name', 'capital', 'currency', 'population']);
   });
 
   it('drops currency for Micronesia, the one country upstream has none for', () => {

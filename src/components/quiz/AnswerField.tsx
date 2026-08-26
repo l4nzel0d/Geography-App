@@ -53,7 +53,7 @@ export const AnswerField = forwardRef<TextInput, AnswerFieldProps>(function Answ
   const graded = grade != null;
   const editable = !graded;
 
-  // "Languages (3 of 15)" is not decoration: without it there is no way to know whether
+  // "Currency (3 of 9)" is not decoration: without it there is no way to know whether
   // naming three is enough, and guessing at the target is not the skill being tested.
   const fieldLabel = t(FIELD_LABEL_KEYS[field]);
   const label =
@@ -73,8 +73,8 @@ export const AnswerField = forwardRef<TextInput, AnswerFieldProps>(function Answ
    * "Correct" alone is a wasted teaching moment here: the grader accepts a head noun, so
    * someone who typed "yen" never sees "Japanese yen", and someone who named 2 of 2
    * currencies never sees them spelled out. Only when the player had to name the WHOLE
-   * set, though - Zimbabwe wants 3 of its 9 currencies and 3 of its 15 languages, and
-   * listing all of those on a correct answer is a wall of text, not a reward.
+   * set, though - Zimbabwe wants 3 of its 9 currencies, and listing all of those on a
+   * correct answer is a wall of text, not a reward.
    */
   const namesTheWholeSet =
     isSet && requirement != null && requirement.required === requirement.available;

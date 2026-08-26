@@ -4,7 +4,6 @@ import {
   formatCompactNumber,
   formatCurrencies,
   formatLabelList,
-  formatLanguages,
   formatPopulation,
   NOT_AVAILABLE,
 } from '@/components/formatters';
@@ -49,22 +48,6 @@ describe('formatCurrencies', () => {
   it('falls back for an empty list', () => {
     expect(formatCurrencies([])).toBe(NOT_AVAILABLE);
     expect(formatCurrencies(null)).toBe(NOT_AVAILABLE);
-  });
-});
-
-describe('formatLanguages', () => {
-  it('renders a single language', () => {
-    expect(formatLanguages(['Portuguese'])).toBe('Portuguese');
-  });
-
-  it('renders many languages', () => {
-    expect(formatLanguages(['French', 'Swiss German', 'Italian', 'Romansh'])).toBe(
-      'French, Swiss German, Italian, Romansh',
-    );
-  });
-
-  it('falls back when absent', () => {
-    expect(formatLanguages([])).toBe(NOT_AVAILABLE);
   });
 });
 

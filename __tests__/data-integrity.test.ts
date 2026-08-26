@@ -148,7 +148,7 @@ describe('facts content', () => {
     expect(brazil!.currencies).toEqual([
       expect.objectContaining({ code: 'BRL', symbol: 'R$' }),
     ]);
-    expect(brazil!.languages).toContain('Portuguese');
+    expect(brazil!.capital).toContain('Brasília');
   });
 
   it('records every population as a positive, finite number', () => {
@@ -179,10 +179,11 @@ describe('facts content', () => {
     expect(allCountryFacts.SJM.area).toBe(-1);
   });
 
-  it('handles multi-currency and multi-language countries', () => {
-    const swiss = getCountryFacts('CHE');
-    expect(swiss!.languages.length).toBeGreaterThan(1);
-    expect(swiss!.currencies[0].code).toBe('CHF');
+  it('handles multi-currency and multi-capital countries', () => {
+    expect(getCountryFacts('CHE')!.currencies[0].code).toBe('CHF');
+    // Zimbabwe is the one country with more currencies than the quiz asks for.
+    expect(getCountryFacts('ZWE')!.currencies.length).toBe(9);
+    expect(getCountryFacts('ZAF')!.capital.length).toBe(3);
   });
 
   it('returns null for an unknown code rather than throwing', () => {
@@ -280,9 +281,8 @@ describe('quiz data', () => {
     expect(allCountryFacts[OBSERVER_STATE].population).toBeNull();
   });
 
-  it('has a capital and at least one language for every quiz country', () => {
+  it('has a capital for every quiz country', () => {
     expect(pool.filter(([, f]) => f.capital.length === 0).map(([c]) => c)).toEqual([]);
-    expect(pool.filter(([, f]) => f.languages.length === 0).map(([c]) => c)).toEqual([]);
   });
 
   it('has a currency for every quiz country except Micronesia', () => {
@@ -403,13 +403,12 @@ describe('the Russian translations', () => {
     expect(missing).toEqual([]);
   });
 
-  it('translates every capital, language and currency it has an English one for', () => {
+  it('translates every capital and currency it has an English one for', () => {
     const gaps: string[] = [];
 
     for (const [iso3, facts] of records) {
       const ru = facts.translations.ru;
       if (facts.capital.some((_, i) => !ru.capital[i])) gaps.push(`${iso3} capital`);
-      if (facts.languages.some((_, i) => !ru.languages[i])) gaps.push(`${iso3} languages`);
       if (facts.currencies.some((_, i) => !ru.currencies[i])) gaps.push(`${iso3} currencies`);
     }
 
@@ -418,16 +417,14 @@ describe('the Russian translations', () => {
 
   /**
    * The lists are zipped BY INDEX at runtime (`localize` in `countryFacts.ts`), so a
-   * length mismatch would pair one language with another language's Russian name rather
+   * length mismatch would pair one currency with another currency's Russian name rather
    * than failing.
    */
   it('keeps every parallel list the same length as its English sibling', () => {
     for (const [iso3, facts] of records) {
       const ru = facts.translations.ru;
       expect(`${iso3} ${ru.capital.length}`).toBe(`${iso3} ${facts.capital.length}`);
-      expect(`${iso3} ${ru.languages.length}`).toBe(`${iso3} ${facts.languages.length}`);
       expect(`${iso3} ${ru.currencies.length}`).toBe(`${iso3} ${facts.currencies.length}`);
-      expect(`${iso3} ${facts.languageCodes.length}`).toBe(`${iso3} ${facts.languages.length}`);
     }
   });
 
@@ -454,7 +451,7 @@ describe('the Russian translations', () => {
 
     for (const [iso3, facts] of records) {
       const ru = facts.translations.ru;
-      const strings = [ru.name, ...ru.capital, ...ru.languages, ru.region, ru.subregion];
+      const strings = [ru.name, ...ru.capital, ru.region, ru.subregion];
 
       for (const value of strings) {
         if (value && LATIN.test(value)) leaked.push(`${iso3}: ${value}`);

@@ -4,12 +4,7 @@ import type { CountryFacts } from '@/data/types';
 import { getLocale } from '@/i18n/locale';
 import type { Locale } from '@/i18n/localeTypes';
 
-import {
-  currencyAliases,
-  languageAliases,
-  nameAliases,
-  NAME_INDEX_BY_LOCALE,
-} from './answerAliases';
+import { currencyAliases, nameAliases, NAME_INDEX_BY_LOCALE } from './answerAliases';
 import { allowedEdits, editDistance } from './editDistance';
 import { normalizeText, russianStem } from './normalizeText';
 import { ANSWERABLE_FIELDS, type FieldId, type GradedField, isSetField } from './quizConfig';
@@ -26,12 +21,10 @@ export const POPULATION_TOLERANCE = 0.2;
 /**
  * How many entries a set field needs, when the country has more than that.
  *
- * Three for both, and for the same reason: Zimbabwe lists 15 official languages and 9
- * currencies, and "name all 9" is a wall rather than a question. It only bites there -
- * every other country has one or two currencies, so `min(3, n)` is simply `n` for 192 of
- * the 193 and the whole set is still required of them.
+ * Zimbabwe lists 9 currencies, and "name all 9" is a wall rather than a question. It only
+ * bites there - every other country has one or two, so `min(3, n)` is simply `n` for 192
+ * of the 193 and the whole set is still required of them.
  */
-export const LANGUAGES_REQUIRED = 3;
 export const CURRENCIES_REQUIRED = 3;
 
 export type MatchKind = 'exact' | 'alias' | 'fuzzy' | 'partial' | 'wrong' | 'blank';
@@ -77,8 +70,8 @@ export type RawAnswers = {
  * Fold the panel's state into something gradeable.
  *
  * **The trailing draft counts.** A chip is committed by pressing return, and nobody does
- * that for the last one - they type "French" and hit Check. Dropping that text marked a
- * fully correct answer as blank, which read as the languages field being ignored
+ * that for the last one - they type "euro" and hit Check. Dropping that text marked a
+ * fully correct answer as blank, which read as the currency field being ignored
  * entirely. So an uncommitted input is treated as one more chip.
  */
 export function toAnswerInput({ text, chips }: RawAnswers): AnswerInput {
@@ -184,11 +177,11 @@ export function gradeSingle(
 }
 
 /**
- * Grade a set answer - languages and currencies, entered as chips.
+ * Grade a set answer - currencies, entered as chips.
  *
- * `required` is how many distinct correct entries are needed: all of them for
- * currencies, the first three for languages (Zimbabwe lists fifteen, and demanding all
- * fifteen is not a quiz question, it is a wall).
+ * `required` is how many distinct correct entries are needed: all of them for all but
+ * Zimbabwe, which lists nine currencies, where naming all nine is not a quiz question but
+ * a wall. See `CURRENCIES_REQUIRED`.
  *
  * Two passes, exact before fuzzy, and it matters: with one greedy pass a loosely spelled
  * chip can consume the expected item that some later chip matches exactly, and a fully
@@ -434,17 +427,6 @@ export function gradeField(
         stemFor(locale),
       );
     }
-
-    case 'languages':
-      return gradeSet(
-        field,
-        Array.isArray(raw) ? raw : raw ? [raw] : [],
-        facts.languages,
-        LANGUAGES_REQUIRED,
-        languageAliases(facts, locale),
-        undefined,
-        stemFor(locale),
-      );
 
     case 'population':
       return gradeNumeric(field, asString, facts.population ?? 0, POPULATION_TOLERANCE, locale);

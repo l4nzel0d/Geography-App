@@ -22,7 +22,6 @@ import {
   formatArea,
   formatCapital,
   formatCurrencies,
-  formatLanguages,
   formatPopulation,
 } from './formatters';
 import { CountryFlag } from './CountryFlag';
@@ -278,11 +277,6 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
           testID="fact-currencies"
           label={t.plural('info.fact.currencies', visibleFacts.currencies.length)}
           value={formatCurrencies(visibleFacts.currencies)}
-        />
-        <Fact
-          testID="fact-languages"
-          label={t.plural('info.fact.languages', visibleFacts.languages.length)}
-          value={formatLanguages(visibleFacts.languages)}
         />
         <Fact
           testID="fact-capital"

@@ -26,7 +26,6 @@ const METRICS: Metrics = {
 const FACT_IDS = [
   'fact-population',
   'fact-currencies',
-  'fact-languages',
   'fact-capital',
   'fact-area',
 ] as const;

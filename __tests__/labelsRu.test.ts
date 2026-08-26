@@ -73,7 +73,7 @@ describe('the label source', () => {
     for (const feature of labelGeoJson.features) {
       const properties = feature.properties as Record<string, string | number>;
       for (const locale of LOCALES) {
-        for (const field of ['name', 'capital', 'languages', 'currencies', 'population'] as const) {
+        for (const field of ['name', 'capital', 'currencies', 'population'] as const) {
           if (!(textPropertyFor(field, locale) in properties)) continue;
           expect(typeof properties[zoomPropertyFor(field, locale)]).toBe('number');
         }

@@ -23,7 +23,6 @@ const FIELD_HINT_KEYS: Record<FieldId, MessageKey> = {
   name: 'quiz.field.name.hint',
   capital: 'quiz.field.capital.hint',
   currency: 'quiz.field.currency.hint',
-  languages: 'quiz.field.languages.hint',
   population: 'quiz.field.population.hint',
 };
 

@@ -19,13 +19,13 @@ const TEXT = {
     name: 'Countries of the World',
     short_name: 'Countries',
     description:
-      'A world map you can explore offline: tap any country for its population, currency, languages, capital and area, colour the land by population or density, label every country, search 237 countries, or take a quiz.',
+      'A world map you can explore offline: tap any country for its population, currency, capital and area, colour the land by population or density, label every country, search 237 countries, or take a quiz.',
   },
   ru: {
     name: 'Страны мира',
     short_name: 'Страны',
     description:
-      'Карта мира, которая работает офлайн: нажмите на любую страну, чтобы увидеть её население, валюту, языки, столицу и площадь, раскрасьте сушу по населению или плотности, подпишите каждую страну, найдите любую из 237 стран или пройдите тест.',
+      'Карта мира, которая работает офлайн: нажмите на любую страну, чтобы увидеть её население, валюту, столицу и площадь, раскрасьте сушу по населению или плотности, подпишите каждую страну, найдите любую из 237 стран или пройдите тест.',
   },
 };
 
