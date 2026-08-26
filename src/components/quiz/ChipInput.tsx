@@ -2,6 +2,7 @@ import { forwardRef } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { quizColors, quizRadii } from '../palette';
+import { useTranslator } from '@/i18n/useTranslator';
 
 /** Nobody is naming more official languages than this; the pool is fixed, see below. */
 export const MAX_CHIPS = 12;
@@ -39,6 +40,8 @@ export const ChipInput = forwardRef<TextInput, ChipInputProps>(function ChipInpu
   { testID, chips, onChange, draft, onChangeDraft, placeholder, editable, onSubmitLast },
   ref,
 ) {
+  const t = useTranslator();
+
   const commit = (text: string): boolean => {
     const value = text.trim();
     onChangeDraft('');
@@ -89,7 +92,7 @@ export const ChipInput = forwardRef<TextInput, ChipInputProps>(function ChipInpu
               style={[styles.chip, chip == null && styles.slotEmpty]}
               onPress={chip != null && editable ? () => remove(index) : undefined}
               accessibilityRole="button"
-              accessibilityLabel={chip ? `Remove ${chip}` : undefined}
+              accessibilityLabel={chip ? t('quiz.chip.remove', { chip }) : undefined}
               accessibilityElementsHidden={chip == null}
               importantForAccessibility={chip == null ? 'no-hide-descendants' : 'yes'}
             >

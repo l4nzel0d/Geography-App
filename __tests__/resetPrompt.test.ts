@@ -1,4 +1,8 @@
+import { translatorFor } from '@/i18n/t';
 import { buildResetPrompt } from '@/quiz/resetPrompt';
+
+/** Every existing assertion is about the English wording, so they all pass this. */
+const t = translatorFor('en');
 
 /**
  * The reset confirmation's shape.
@@ -10,27 +14,27 @@ import { buildResetPrompt } from '@/quiz/resetPrompt';
  */
 describe('the reset-mastery prompt', () => {
   it('always asks the same question', () => {
-    expect(buildResetPrompt({ tracked: 12 }).title).toBe('Reset mastery?');
+    expect(buildResetPrompt({ tracked: 12, t }).title).toBe('Reset mastery?');
   });
 
   it('names how many countries would be cleared', () => {
-    expect(buildResetPrompt({ tracked: 37 }).message).toContain('37 countries');
+    expect(buildResetPrompt({ tracked: 37, t }).message).toContain('37 countries');
   });
 
   it('counts one country in the singular', () => {
-    const message = buildResetPrompt({ tracked: 1 }).message;
+    const message = buildResetPrompt({ tracked: 1, t }).message;
     expect(message).toContain('1 country');
     expect(message).not.toContain('1 countries');
   });
 
   it('stays sensible at zero, which the disabled button means nothing reaches', () => {
-    const message = buildResetPrompt({ tracked: 0 }).message;
+    const message = buildResetPrompt({ tracked: 0, t }).message;
     expect(message).toContain('Your quiz history');
     expect(message).not.toContain('0 countries');
   });
 
   it('says the deletion is permanent, and what happens to the map', () => {
-    const message = buildResetPrompt({ tracked: 5 }).message;
+    const message = buildResetPrompt({ tracked: 5, t }).message;
     expect(message).toContain('cannot be undone');
     expect(message).toContain('not asked yet');
   });
@@ -38,7 +42,7 @@ describe('the reset-mastery prompt', () => {
   it('offers the destructive action first and cancel last', () => {
     // Cancel at the bottom is the action-sheet convention exitPrompt.ts documents, and it
     // is the furthest a stack can put the dismissive button from the destructive one.
-    expect(buildResetPrompt({ tracked: 5 }).buttons.map((b) => b.id)).toEqual([
+    expect(buildResetPrompt({ tracked: 5, t }).buttons.map((b) => b.id)).toEqual([
       'reset',
       'cancel',
     ]);
@@ -46,7 +50,7 @@ describe('the reset-mastery prompt', () => {
 
   it('marks the destructive and dismissive buttons as such', () => {
     const byId = Object.fromEntries(
-      buildResetPrompt({ tracked: 5 }).buttons.map((b) => [b.id, b]),
+      buildResetPrompt({ tracked: 5, t }).buttons.map((b) => [b.id, b]),
     );
     expect(byId.reset.style).toBe('destructive');
     expect(byId.cancel.style).toBe('quiet');

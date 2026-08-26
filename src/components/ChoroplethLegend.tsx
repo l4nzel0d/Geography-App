@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { type ChoroplethRamp, NO_DATA_COLOR, NO_DATA_LABEL } from '@/map/choropleth';
+import { useTranslator } from '@/i18n/useTranslator';
+import { type ChoroplethRamp, NO_DATA_COLOR, NO_DATA_LABEL_KEY } from '@/map/choropleth';
 
 /** Labels sit under the strip, spread across it: first stop, middle stop, last stop. */
 const axisLabelsOf = (ramp: ChoroplethRamp) => [
@@ -27,6 +28,8 @@ const axisLabelsOf = (ramp: ChoroplethRamp) => [
  * which is the one thing that reliably never paints.
  */
 export function ChoroplethLegend({ ramp, visible }: { ramp: ChoroplethRamp; visible: boolean }) {
+  const t = useTranslator();
+
   return (
     <View
       testID="choropleth-legend"
@@ -37,7 +40,7 @@ export function ChoroplethLegend({ ramp, visible }: { ramp: ChoroplethRamp; visi
       accessibilityElementsHidden={!visible}
       importantForAccessibility={visible ? 'yes' : 'no-hide-descendants'}
     >
-      <Text style={styles.title}>{ramp.title}</Text>
+      <Text style={styles.title}>{t(ramp.titleKey)}</Text>
 
       <View style={styles.strip}>
         {ramp.stops.map((stop) => (
@@ -45,6 +48,9 @@ export function ChoroplethLegend({ ramp, visible }: { ramp: ChoroplethRamp; visi
         ))}
       </View>
 
+      {/* Stop labels stay untranslated on purpose: "10k", "1M" and "50%" are numbers
+          written compactly, not prose, and they are also React keys here - swapping them
+          per locale would remount the axis rather than update it. */}
       <View style={[styles.axis, { width: SWATCH_WIDTH * ramp.stops.length }]}>
         {axisLabelsOf(ramp).map((stop) => (
           <Text key={stop.label} style={styles.axisLabel}>
@@ -59,7 +65,7 @@ export function ChoroplethLegend({ ramp, visible }: { ramp: ChoroplethRamp; visi
             and pointing at the countries worth practising is most of that mode's value.
             This swaps the text of a row that is already always mounted, so it inserts
             nothing over the map surface. */}
-        <Text style={styles.axisLabel}>{ramp.noDataLabel ?? NO_DATA_LABEL}</Text>
+        <Text style={styles.axisLabel}>{t(ramp.noDataLabelKey ?? NO_DATA_LABEL_KEY)}</Text>
       </View>
     </View>
   );

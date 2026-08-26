@@ -56,6 +56,17 @@ import { MAP_FLAG_RASTER_SCALE } from './labelFit';
   anywhere but web.
 */
 import { MAP_FLAG_IMAGES } from './mapFlagImages.web';
+/*
+ * Read, never subscribed. `/` and `/ru` are two separate static exports, so on the web the
+ * locale is fixed for the life of the document and `subscribeToLocale` never fires - see
+ * `locale.web.ts`. The native sibling subscribes inline instead.
+ *
+ * `getLocale()` rather than a web-only constant, because both files are written against
+ * the same four exports and neither call site knows which world it is in. That is what
+ * keeps the count of `Platform.OS` checks in `src/` at zero.
+ */
+import { getLocale } from '@/i18n/locale';
+import { withBaseUrl } from '@/i18n/baseUrl';
 import {
   FLAG_ICON_IMAGE,
   FLAG_ICON_SIZE,
@@ -96,7 +107,15 @@ export {
  * `public/maplibre/`. Both are required, side by side: the worker imports
  * `./maplibre-gl-shared.mjs`, resolved against its own URL.
  */
-const WORKER_URL = '/maplibre/maplibre-gl-worker.mjs';
+/*
+  Prefixed with the deployment's base URL, which is `/ru` in the Russian build.
+  This is NOT cosmetic: the two locales are two static exports with a service worker each,
+  and a worker can only intercept requests inside its own scope. A page at `/ru/` loading
+  `/maplibre/...` from the root resolves fine online and then **fails offline**, which is
+  the one requirement this project has. Same for the flags below and the links in
+  `+html.tsx`.
+*/
+const WORKER_URL = withBaseUrl('/maplibre/maplibre-gl-worker.mjs');
 
 /** Layer ids in DRAW ORDER. Mirrors the native component's child order exactly. */
 const COUNTRY_LAYERS = {
@@ -489,9 +508,9 @@ export function WorldMap({
       id: COUNTRY_LAYERS.label,
       type: 'symbol',
       source: LABELS_SOURCE,
-      filter: asFilter(labelFilter(labelField)),
+      filter: asFilter(labelFilter(labelField, getLocale())),
       layout: {
-        'text-field': asExpression(labelTextField(labelField)),
+        'text-field': asExpression(labelTextField(labelField, getLocale())),
         'text-font': [LABEL_FONT],
         'text-size': ['interpolate', ['linear'], ['zoom'], 0, 11, 6, 14],
         // Must match TEXT_MAX_WIDTH_EM in labelFit.ts.
@@ -541,11 +560,11 @@ export function WorldMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !map.getLayer(COUNTRY_LAYERS.label)) return;
-    map.setFilter(COUNTRY_LAYERS.label, asFilter(labelFilter(labelField)));
+    map.setFilter(COUNTRY_LAYERS.label, asFilter(labelFilter(labelField, getLocale())));
     map.setLayoutProperty(
       COUNTRY_LAYERS.label,
       'text-field',
-      asExpression(labelTextField(labelField)),
+      asExpression(labelTextField(labelField, getLocale())),
     );
   }, [ready, labelField]);
 
@@ -565,7 +584,7 @@ export function WorldMap({
       flagImagesRef.current = Promise.all(
         Object.entries(MAP_FLAG_IMAGES).map(async ([name, url]) => {
           if (map.hasImage(name)) return;
-          const { data } = await map.loadImage(url);
+          const { data } = await map.loadImage(withBaseUrl(url));
           // `pixelRatio` is not optional. These are the 3x bytes - 72 device px for 24 style
           // px - and nothing in a PNG says so, so without it the shared `icon-size` draws
           // every flag three times too large. Native learns the same fact from the bitmap's

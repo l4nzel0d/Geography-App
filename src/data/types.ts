@@ -4,6 +4,29 @@ export type Currency = {
   symbol: string | null;
 };
 
+/**
+ * The half of a record that has a different value in each language.
+ *
+ * Only the fields that are actually words. `population`, `area`, `flag` and `unMember` are
+ * the same fact in every language and stay on the record itself, which is what keeps a
+ * localized view ~250 small objects rather than a second copy of everything.
+ *
+ * `capital`, `languages` and `currencies` are **parallel to their English siblings, by
+ * index**. The build asserts the lengths match; see `russianIntegrityProblems`.
+ */
+export type LocalizedFacts = {
+  name: string;
+  official: string | null;
+  capital: string[];
+  languages: string[];
+  /** Currency NAMES only - the code and symbol are not language-dependent. */
+  currencies: string[];
+  region: string;
+  subregion: string;
+  /** Alternative names in this language: "Голландия", "Бирма", "США". */
+  altSpellings: string[];
+};
+
 export type CountryFacts = {
   name: string;
   official: string | null;
@@ -17,6 +40,13 @@ export type CountryFacts = {
   flag: string | null;
   currencies: Currency[];
   languages: string[];
+  /**
+   * ISO-639-3 codes, in the same order as `languages`.
+   *
+   * The record keeps only the English names, so this is the one stable identifier a
+   * language has here - and the key the Russian dictionary joins on.
+   */
+  languageCodes: string[];
   /** One of six: Africa, Americas, Asia, Europe, Oceania, Antarctic. */
   region: string;
   /** One of 24, e.g. "Western Europe". Empty only for the four Antarctic entries. */
@@ -34,6 +64,13 @@ export type CountryFacts = {
    * The two-letter cca2 is filtered out by the build, or "fr" would pass for France.
    */
   altSpellings: string[];
+  /**
+   * The same record in every other language the app ships.
+   *
+   * English is the record itself rather than an entry here, so every existing reader is
+   * unchanged and `allCountryFacts` still means what it always did.
+   */
+  translations: { ru: LocalizedFacts };
 };
 
 /** Properties carried on each feature in `countries.geo.json`. */

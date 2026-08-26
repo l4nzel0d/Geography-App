@@ -1,6 +1,8 @@
 import rawGeoJson from '@/data/countries.geo.json';
-import { allCountryFacts } from '@/data/countryFacts';
+import { factsFor } from '@/data/countryFacts';
 import { nameAliases } from '@/quiz/answerAliases';
+import { getLocale } from '@/i18n/locale';
+import { byLocale, DEFAULT_LOCALE, type Locale } from '@/i18n/localeTypes';
 import { allowedEdits, editDistance } from '@/quiz/editDistance';
 import { normalizeText } from '@/quiz/normalizeText';
 
@@ -71,21 +73,33 @@ type Entry = {
  * That excludes exactly the three geometry-only entries in the pipeline's
  * FACTLESS_ALLOWLIST (Somaliland, Northern Cyprus, Siachen Glacier).
  */
-export const SEARCH_INDEX: readonly Entry[] = (() => {
-  const mapped = new Set(
-    (rawGeoJson as unknown as { features: { properties: { iso3: string } }[] }).features.map(
-      (feature) => feature.properties.iso3,
-    ),
-  );
+const mappedIso3 = new Set(
+  (rawGeoJson as unknown as { features: { properties: { iso3: string } }[] }).features.map(
+    (feature) => feature.properties.iso3,
+  ),
+);
 
-  return Object.entries(allCountryFacts)
-    .filter(([iso3]) => mapped.has(iso3))
+/**
+ * The index in every language.
+ *
+ * **Unlike the quiz pool, this one IS re-sorted per language**, and the difference is the
+ * point: `QUIZ_COUNTRIES` feeds a seeded shuffle, so its order decides which countries a
+ * seed picks and must not move. This is a browsable list a person reads, so it has to be
+ * alphabetical in the alphabet they are reading.
+ *
+ * `localeCompare(name, locale)` rather than the bare call it used to make: the host's
+ * default collation is not the app's language, and on this project's own Windows box those
+ * two disagree.
+ */
+export const SEARCH_INDEX_BY_LOCALE: Record<Locale, readonly Entry[]> = byLocale((locale) =>
+  Object.entries(factsFor(locale))
+    .filter(([iso3]) => mappedIso3.has(iso3))
     .map(([iso3, facts]) => {
       const normalizedName = normalizeText(facts.name);
       const seen = new Set([normalizedName]);
       const aliases: Alias[] = [];
 
-      for (const raw of nameAliases(iso3, facts)) {
+      for (const raw of nameAliases(iso3, facts, locale)) {
         const normalized = normalizeText(raw);
         if (!normalized || seen.has(normalized)) continue;
         seen.add(normalized);
@@ -102,8 +116,10 @@ export const SEARCH_INDEX: readonly Entry[] = (() => {
         aliases,
       };
     })
-    .sort((a, b) => a.name.localeCompare(b.name));
-})();
+    .sort((a, b) => a.name.localeCompare(b.name, locale)),
+);
+
+export const SEARCH_INDEX: readonly Entry[] = SEARCH_INDEX_BY_LOCALE[DEFAULT_LOCALE];
 
 /**
  * How good a match is, best first. Ranked rather than scored because the tiers are
@@ -215,19 +231,24 @@ const toResult = (entry: Entry, matchedAs: string | null): CountrySearchResult =
  * An empty query lists everything alphabetically rather than nothing, so the screen opens
  * as a browsable index of the world and is useful before a single key is pressed.
  */
-export function searchCountries(query: string, limit?: number): CountrySearchResult[] {
+export function searchCountries(
+  query: string,
+  limit?: number,
+  locale: Locale = getLocale(),
+): CountrySearchResult[] {
+  const index = SEARCH_INDEX_BY_LOCALE[locale] ?? SEARCH_INDEX;
   const normalized = normalizeText(query);
 
   // Uncapped by default when nothing has been typed: the cap exists to hide a noisy tail,
   // and an alphabetical index of the world has no tail to hide.
   if (!normalized) {
-    return SEARCH_INDEX.slice(0, limit ?? SEARCH_INDEX.length).map((entry) => toResult(entry, null));
+    return index.slice(0, limit ?? index.length).map((entry) => toResult(entry, null));
   }
 
   const parsed: Query = { normalized, squashed: squash(normalized) };
   const matches: { entry: Entry; scored: Scored }[] = [];
 
-  for (const entry of SEARCH_INDEX) {
+  for (const entry of index) {
     const scored = score(entry, parsed);
     if (scored) matches.push({ entry, scored });
   }

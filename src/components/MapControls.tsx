@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, type LayoutChangeEvent, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useTranslator } from '@/i18n/useTranslator';
 import { CHOROPLETH_RAMPS, FILL_MODES, POPULATION_RAMP } from '@/map/choropleth';
 import { LABEL_FIELDS, type LabelField } from '@/map/mapLabels';
 import type { FillMode } from '@/map/WorldMap';
 
 import { ChoroplethLegend } from './ChoroplethLegend';
+import { LocaleToggleButton } from './LocaleToggleButton';
 import { MapOptionPanel } from './MapOptionPanel';
 import { MapOptionPill } from './MapOptionPill';
 import { QuizLaunchButton } from './quiz/QuizLaunchButton';
@@ -89,6 +91,8 @@ export function MapControls({
   labelField,
   onLabelFieldChange,
 }: MapControlsProps) {
+  const t = useTranslator();
+
   const insets = useSafeAreaInsets();
   const [pillHeight, setPillHeight] = useState(PILL_FALLBACK_HEIGHT);
 
@@ -170,18 +174,18 @@ export function MapControls({
       <View style={[styles.anchor, styles.row, { top, left }]} onLayout={onPillLayout}>
         <MapOptionPill
           testID="toggle-fill-mode"
-          label={currentFill.label}
+          label={t(currentFill.labelKey)}
           active={fillMode !== 'flat'}
           expanded={openPanel === 'fill'}
-          accessibilityLabel={`Land colouring: ${currentFill.label}. Choose how countries are coloured`}
+          accessibilityLabel={t('map.fill.a11y', { mode: t(currentFill.labelKey) })}
           onPress={() => toggle('fill')}
         />
         <MapOptionPill
           testID="toggle-label-field"
-          label={labelField === 'none' ? 'Labels' : currentLabel.label}
+          label={labelField === 'none' ? t('map.labels.pill') : t(currentLabel.labelKey)}
           active={labelField !== 'none'}
           expanded={openPanel === 'labels'}
-          accessibilityLabel={`Map labels: ${currentLabel.label}. Choose what to show on each country`}
+          accessibilityLabel={t('map.labels.a11y', { field: t(currentLabel.labelKey) })}
           onPress={() => toggle('labels')}
         />
       </View>
@@ -192,6 +196,11 @@ export function MapControls({
       <View style={[styles.anchor, styles.row, { top, right }]}>
         <SearchLaunchButton />
         <QuizLaunchButton />
+        {/* The language toggle joins this row rather than the left one, which is already
+            the tighter of the two - both its pills carry a word that changes with the
+            selection. `chromeWidth.test.ts` measures both rows in both languages against
+            the 379 dp budget, and Russian clears it by ~24 dp. */}
+        <LocaleToggleButton />
       </View>
 
       {/* Both panels share the left column with the legend and cover it while open.
@@ -215,8 +224,12 @@ export function MapControls({
         <MapOptionPanel
           testID="fill-mode-panel"
           optionTestIdPrefix="mode"
-          title="Colour the land by"
-          options={FILL_MODES.map((option) => ({ ...option, id: option.mode }))}
+          title={t('map.fill.panelTitle')}
+          options={FILL_MODES.map((option) => ({
+            id: option.mode,
+            label: t(option.labelKey),
+            description: t(option.descriptionKey),
+          }))}
           selected={fillMode}
           visible={openPanel === 'fill'}
           onChange={(mode) => {
@@ -243,8 +256,12 @@ export function MapControls({
         <MapOptionPanel
           testID="label-field-panel"
           optionTestIdPrefix="label-field"
-          title="Label each country with"
-          options={LABEL_FIELDS.map((option) => ({ ...option, id: option.field }))}
+          title={t('map.labels.panelTitle')}
+          options={LABEL_FIELDS.map((option) => ({
+            id: option.field,
+            label: t(option.labelKey),
+            description: t(option.descriptionKey),
+          }))}
           selected={labelField}
           visible={openPanel === 'labels'}
           onChange={(field) => {

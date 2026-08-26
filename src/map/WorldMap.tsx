@@ -9,6 +9,7 @@ import { worldGeoJson } from '@/data/worldGeoJson';
 import { getWorldFitZoom } from './cameraFit';
 import { CHOROPLETH_RAMPS } from './choropleth';
 import { MAP_FLAG_IMAGES } from './mapFlagImages';
+import { getLocale, subscribeToLocale } from '@/i18n/locale';
 import {
   FLAG_ICON_IMAGE,
   FLAG_ICON_SIZE,
@@ -76,6 +77,22 @@ export function WorldMap({
   useEffect(() => {
     if (labelField === 'flag') setFlagsRequested(true);
   }, [labelField]);
+
+  /**
+   * The language the labels are drawn in.
+   *
+   * Subscribed INLINE, not through a `useLocale()` hook: `app.json` sets
+   * `reactCompiler: true`, and CLAUDE.md records that moving a subscription into a hook
+   * changed what the compiler memoised and failed `.maestro/quiz.yaml` 0/3. Same shape as
+   * `MapScreen`'s mastery and pendingCountry subscriptions.
+   *
+   * This owns it rather than taking a prop, so the quiz's map gets it for free and no
+   * screen has to thread a locale down. It changes only the two layer EXPRESSIONS below -
+   * `data` is untouched, because both languages ride on the same features. See
+   * `textPropertyFor`.
+   */
+  const [locale, setActiveLocale] = useState(getLocale);
+  useEffect(() => subscribeToLocale(setActiveLocale), []);
 
   // The choropleth marks selection with an outline rather than a fill; both marker
   // layers share this filter, and it is empty - matching nothing - in flat mode.
@@ -261,9 +278,9 @@ export function WorldMap({
         <Layer
           id="country-label"
           type="symbol"
-          filter={labelFilter(labelField)}
+          filter={labelFilter(labelField, locale)}
           layout={{
-            'text-field': labelTextField(labelField),
+            'text-field': labelTextField(labelField, locale),
             // Must name a key of the style's `font-faces`; see offlineStyle.ts.
             'text-font': [LABEL_FONT],
             // Grows a little with zoom: 11 is the floor at which the halo still reads at

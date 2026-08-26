@@ -19,6 +19,7 @@ import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
 import { FLAG_ASSETS } from '@/components/flagAssets';
 import { flagLetters } from '@/components/flagEmoji';
+import { setLocale, __resetLocale } from '@/i18n/locale';
 import QuizPlayScreen from '@/app/quiz/play';
 import QuizResultsScreen from '@/app/quiz/results';
 import QuizSetupScreen from '@/app/quiz/index';
@@ -165,6 +166,64 @@ describe('the setup screen', () => {
     await fireEvent.press(screen.getByTestId('region-toggle-Oceania'));
 
     expect(screen.getByTestId('quiz-start')).toHaveTextContent(/14 countries/);
+  });
+
+  /**
+   * The setup screen in Russian, end to end.
+   *
+   * Every one of these caught a real bug found on a device rather than in a test:
+   *
+   * - the field rows had a translated TITLE and an English hint, because `FIELD_HINTS`
+   *   was a local table in `FieldPicker` that the extraction pass missed entirely;
+   * - the subregion picker showed English region names, since those are deliberately kept
+   *   as identifiers and needed a separate display lookup;
+   * - and the counted strings needed the right Russian plural form.
+   */
+  describe('in Russian', () => {
+    beforeEach(() => {
+      setLocale('ru');
+    });
+
+    afterEach(() => {
+      __resetLocale('en');
+    });
+
+    it('translates each field|s hint, not only its title', async () => {
+      await render(<QuizSetupScreen />);
+
+      const picker = screen.getByTestId('field-picker');
+      expect(picker).toHaveTextContent(/Страна/);
+      expect(picker).toHaveTextContent(/Назовите выделенную страну/);
+      expect(picker).toHaveTextContent(/Назовите её столицу/);
+      // The bug: an English hint sitting under a Russian title.
+      expect(picker).not.toHaveTextContent(/Name the highlighted country/);
+    });
+
+    it('translates the mode picker, headings and start button', async () => {
+      await render(<QuizSetupScreen />);
+
+      expect(screen.getByTestId('quiz-setup-title')).toHaveTextContent(/Тест/);
+      expect(screen.getByTestId('mode-picker')).toHaveTextContent(/Назвать факты/);
+      expect(screen.getByTestId('practice-picker')).toHaveTextContent(/Все страны/);
+    });
+
+    it('agrees the country count with the Russian plural rules', async () => {
+      await render(<QuizSetupScreen />);
+
+      // 193 ends in 3, so it takes the `few` form - страны, not страна or стран.
+      expect(screen.getByTestId('quiz-start')).toHaveTextContent(/193 страны/);
+    });
+
+    it('shows region names in Russian while keeping the English identifiers', async () => {
+      await render(<QuizSetupScreen />);
+
+      expect(screen.getByTestId('subregion-picker')).toHaveTextContent(/Европа/);
+      expect(screen.getByTestId('subregion-picker')).toHaveTextContent(/Западная Европа/);
+      // The testID is still the English identifier: it is the URL param and what Maestro
+      // types, and translating it would break every existing deep link.
+      expect(screen.getByTestId('subregion-Western Europe')).toBeTruthy();
+      expect(screen.getByTestId('region-toggle-Europe')).toBeTruthy();
+    });
   });
 
   describe('choosing a mode', () => {

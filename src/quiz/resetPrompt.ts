@@ -1,3 +1,5 @@
+import type { Translator } from '@/i18n/t';
+
 /**
  * The wording and the buttons of the "clear everything you have learned" confirmation.
  *
@@ -42,29 +44,38 @@ export type ResetPrompt = {
   buttons: ResetPromptButton[];
 };
 
-const RESET: ResetPromptButton = {
-  id: 'reset',
-  label: 'Reset progress',
-  style: 'destructive',
-};
-const CANCEL: ResetPromptButton = { id: 'cancel', label: 'Cancel', style: 'quiet' };
-
 export function buildResetPrompt({
   tracked,
+  t,
 }: {
   /** How many countries have any quiz history at all - `MasterySnapshot.scores`' size. */
   tracked: number;
+  /** Passed in rather than read from the singleton - see `exitPrompt.ts`. */
+  t: Translator;
 }): ResetPrompt {
-  const countries = tracked === 1 ? '1 country' : `${tracked} countries`;
+  const reset: ResetPromptButton = {
+    id: 'reset',
+    label: t('quiz.reset.confirm'),
+    style: 'destructive',
+  };
+  const cancel: ResetPromptButton = {
+    id: 'cancel',
+    label: t('quiz.reset.cancel'),
+    style: 'quiet',
+  };
+
   const subject =
-    tracked > 0 ? `Your quiz history for ${countries}` : 'Your quiz history';
+    tracked > 0 ? t.plural('quiz.reset.subject', tracked) : t('quiz.reset.subjectEmpty');
 
   return {
-    title: 'Reset mastery?',
+    title: t('quiz.reset.title'),
     // Names the consequence on the map as well as the deletion: the mastery fill mode is
-    // where this is visible, and "not asked yet" is the legend's own wording for the band
-    // every country lands back in.
-    message: `${subject} will be cleared, and the map's mastery colours go back to "not asked yet". This cannot be undone.`,
-    buttons: [RESET, CANCEL],
+    // where this is visible, and the grey band's own wording is pulled from the legend's
+    // key rather than respelled, so the dialog and the legend cannot drift apart.
+    message: t('quiz.reset.message', {
+      subject,
+      noData: t('map.legend.mastery.noData'),
+    }),
+    buttons: [reset, cancel],
   };
 }

@@ -15,6 +15,8 @@ import { buildLabelGeoJson, labelGeoJson, labelTextFor } from '@/data/labelGeoJs
 import labelPoints from '@/data/labelPoints.json';
 import type { CountryFacts } from '@/data/types';
 import { MAX_LABEL_ZOOM } from '@/map/labelFit';
+import { LOCALES } from '@/i18n/localeTypes';
+import { translate } from '@/i18n/t';
 import {
   FLAG_ICON_PROPERTY,
   FLAG_ZOOM_PROPERTY,
@@ -132,6 +134,19 @@ describe('label text', () => {
         flag: null,
         currencies: [],
         languages: [],
+        languageCodes: [],
+        translations: {
+          ru: {
+            name: '',
+            official: null,
+            capital: [],
+            languages: [],
+            currencies: [],
+            region: '',
+            subregion: '',
+            altSpellings: [],
+          },
+        },
         region: '',
         subregion: '',
         unMember: false,
@@ -222,8 +237,16 @@ describe('the flag layer and the text layer are mutually exclusive', () => {
 
   it('does not collide with the properties of any text field', () => {
     // A shared name would silently overwrite one field with the other in labelGeoJson.
-    expect(LABEL_FIELD_IDS.map(textPropertyFor)).not.toContain(FLAG_ICON_PROPERTY);
-    expect(LABEL_FIELD_IDS.map(zoomPropertyFor)).not.toContain(FLAG_ZOOM_PROPERTY);
+    // Bare arrows, not point-free: `map` would pass the index as the locale argument.
+    // Checked in every locale, because the suffix is what could newly collide.
+    for (const locale of LOCALES) {
+      expect(LABEL_FIELD_IDS.map((field) => textPropertyFor(field, locale))).not.toContain(
+        FLAG_ICON_PROPERTY,
+      );
+      expect(LABEL_FIELD_IDS.map((field) => zoomPropertyFor(field, locale))).not.toContain(
+        FLAG_ZOOM_PROPERTY,
+      );
+    }
   });
 });
 
@@ -299,8 +322,20 @@ describe('the field catalogue', () => {
   });
 
   it('gives every option a distinct label and a screen-reader description', () => {
-    const labels = LABEL_FIELDS.map((option) => option.label);
+    // The table carries message keys, so this checks the words they resolve to - a row
+    // pointed at another row's key would otherwise look fine.
+    const labels = LABEL_FIELDS.map((option) => translate('en', option.labelKey));
     expect(new Set(labels).size).toBe(labels.length);
-    expect(LABEL_FIELDS.every((option) => option.description.length > 10)).toBe(true);
+    expect(
+      LABEL_FIELDS.every((option) => translate('en', option.descriptionKey).length > 10),
+    ).toBe(true);
+  });
+
+  it('has a distinct Russian label and description for every option too', () => {
+    const labels = LABEL_FIELDS.map((option) => translate('ru', option.labelKey));
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(
+      LABEL_FIELDS.every((option) => translate('ru', option.descriptionKey).length > 10),
+    ).toBe(true);
   });
 });

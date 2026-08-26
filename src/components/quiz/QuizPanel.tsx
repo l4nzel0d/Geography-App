@@ -9,6 +9,7 @@ import type { FieldId } from '@/quiz/quizConfig';
 import { AnswerField } from './AnswerField';
 import { autoFocusFirstField, KEYBOARD_PLAY } from './keyboardPlay';
 import { quizColors, quizRadii } from '../palette';
+import { useTranslator } from '@/i18n/useTranslator';
 
 export type PanelAnswers = {
   text: Partial<Record<FieldId, string>>;
@@ -58,6 +59,8 @@ export function QuizPanel({
   onEnd,
   landscape,
 }: QuizPanelProps) {
+  const t = useTranslator();
+
   const inputs = useRef<Record<string, TextInput | null>>({});
 
   /**
@@ -137,9 +140,9 @@ export function QuizPanel({
           onPress={onEnd}
           hitSlop={12}
           accessibilityRole="button"
-          accessibilityLabel="End the quiz and see your score"
+          accessibilityLabel={t('quiz.endA11y')}
         >
-          <Text style={styles.end}>End quiz</Text>
+          <Text style={styles.end}>{t('quiz.end')}</Text>
         </Pressable>
       </View>
 
@@ -178,9 +181,9 @@ export function QuizPanel({
           else onCheck();
         }}
         accessibilityRole="button"
-        accessibilityLabel={graded ? 'Next country' : 'Check my answers'}
+        accessibilityLabel={t(graded ? 'quiz.nextA11y' : 'quiz.checkA11y')}
       >
-        <Text style={styles.buttonText}>{graded ? 'Next' : 'Check'}</Text>
+        <Text style={styles.buttonText}>{t(graded ? 'quiz.next' : 'quiz.check')}</Text>
       </Pressable>
     </View>
   );

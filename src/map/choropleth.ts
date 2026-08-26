@@ -1,3 +1,5 @@
+import type { MessageKey } from '@/i18n/t';
+
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 
 /**
@@ -29,15 +31,15 @@ export type ChoroplethRamp = {
    */
   property: ChoroplethMode;
   /** Legend heading, and the unit the ramp is counted in. */
-  title: string;
+  titleKey: MessageKey;
   /**
-   * What the legend calls the grey band. Defaults to `NO_DATA_LABEL`.
+   * What the legend calls the grey band. Defaults to `NO_DATA_LABEL_KEY`.
    *
    * Mastery overrides it: "not asked yet" is the single most useful thing that mode has
    * to say, because the grey countries are exactly the ones worth practising. It swaps
    * the text of a row that is already always mounted, so it adds no view.
    */
-  noDataLabel?: string;
+  noDataLabelKey?: MessageKey;
   stops: readonly ChoroplethStop[];
   fillColor: ExpressionSpecification;
 };
@@ -126,7 +128,7 @@ export const MASTERY_STOPS: readonly ChoroplethStop[] = [
  * outside both ramps so it cannot be misread as "very low".
  */
 export const NO_DATA_COLOR = '#8a8f98';
-export const NO_DATA_LABEL = 'no data';
+export const NO_DATA_LABEL_KEY: MessageKey = 'map.legend.noData';
 
 /**
  * `fill-color` for a log-scaled choropleth over `property`.
@@ -197,14 +199,14 @@ function linearRampFillColor(
 
 export const POPULATION_RAMP: ChoroplethRamp = {
   property: 'population',
-  title: 'People per country',
+  titleKey: 'map.legend.population.title',
   stops: POPULATION_STOPS,
   fillColor: logRampFillColor('population', POPULATION_STOPS),
 };
 
 export const DENSITY_RAMP: ChoroplethRamp = {
   property: 'density',
-  title: 'People per km²',
+  titleKey: 'map.legend.density.title',
   stops: DENSITY_STOPS,
   fillColor: logRampFillColor('density', DENSITY_STOPS),
 };
@@ -221,8 +223,8 @@ export const DENSITY_RAMP: ChoroplethRamp = {
  */
 export const MASTERY_RAMP: ChoroplethRamp = {
   property: 'mastery',
-  title: 'Mastery from quizzes',
-  noDataLabel: 'not asked yet',
+  titleKey: 'map.legend.mastery.title',
+  noDataLabelKey: 'map.legend.mastery.noData',
   stops: MASTERY_STOPS,
   fillColor: linearRampFillColor('mastery', MASTERY_STOPS),
 };
@@ -251,20 +253,24 @@ export const CHOROPLETH_RAMPS: Record<ChoroplethMode, ChoroplethRamp> = {
  */
 export const FILL_MODES: readonly {
   mode: 'flat' | ChoroplethMode;
-  label: string;
-  description: string;
+  labelKey: MessageKey;
+  descriptionKey: MessageKey;
 }[] = [
-  { mode: 'flat', label: 'Flat', description: 'Plain basemap, no colouring' },
-  { mode: 'population', label: 'People', description: 'Colour countries by population' },
+  { mode: 'flat', labelKey: 'map.fill.flat.label', descriptionKey: 'map.fill.flat.description' },
+  {
+    mode: 'population',
+    labelKey: 'map.fill.population.label',
+    descriptionKey: 'map.fill.population.description',
+  },
   {
     mode: 'density',
-    label: 'Density',
-    description: 'Colour countries by people per square kilometre',
+    labelKey: 'map.fill.density.label',
+    descriptionKey: 'map.fill.density.description',
   },
   {
     mode: 'mastery',
-    label: 'Mastery',
-    description: 'Colour countries by how well you answer them in quizzes',
+    labelKey: 'map.fill.mastery.label',
+    descriptionKey: 'map.fill.mastery.description',
   },
 ];
 

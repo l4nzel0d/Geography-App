@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { quizColors, quizRadii } from '../palette';
+import { useTranslator } from '@/i18n/useTranslator';
 
 /**
  * The way into quiz mode, parked in the map's top-right corner.
@@ -16,15 +17,17 @@ import { quizColors, quizRadii } from '../palette';
  * screen bare.
  */
 export function QuizLaunchButton() {
+  const t = useTranslator();
+
   return (
     <Pressable
       testID="open-quiz"
       onPress={() => router.push('/quiz')}
       style={styles.pill}
       accessibilityRole="button"
-      accessibilityLabel="Start a country quiz"
+      accessibilityLabel={t('quiz.open.a11y')}
     >
-      <Text style={styles.label}>Quiz</Text>
+      <Text style={styles.label}>{t('quiz.open.label')}</Text>
     </Pressable>
   );
 }

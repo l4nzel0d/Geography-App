@@ -41,12 +41,16 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { flagLetters } from './flagEmoji';
 import { FLAG_SIZES, type FlagSize } from './flagSizes';
+import { useTranslator } from '@/i18n/useTranslator';
+import { withBaseUrl } from '@/i18n/baseUrl';
 
 /** No flag in the dataset - a real white-flag glyph, which every platform draws. */
 export const NO_FLAG = '🏳️';
 
 /** Where `scripts/copy-web-assets.mjs` puts them. Same origin, no CDN. */
-const flagSource = (iso2: string) => `/flags/${iso2.toLowerCase()}.svg`;
+// Base-URL aware: the Russian build is served from `/ru`, and a flag fetched from the
+// root would sit outside that build's service-worker scope and vanish offline.
+const flagSource = (iso2: string) => withBaseUrl(`/flags/${iso2.toLowerCase()}.svg`);
 
 export function CountryFlag({
   flag,
@@ -71,6 +75,8 @@ export function CountryFlag({
    */
   fill?: boolean;
 }) {
+  const t = useTranslator();
+
   const letters = flagLetters(flag);
   const { fontSize, width, height } = FLAG_SIZES[size];
 
@@ -101,7 +107,7 @@ export function CountryFlag({
       <View testID="country-flag-badge" style={[styles.badge, { minWidth: width + 4 }]}>
         <Text
           style={[styles.badgeText, { fontSize: Math.round(fontSize * 0.44) }]}
-          accessibilityLabel={label ?? `Country code ${letters}`}
+          accessibilityLabel={label ?? t('flag.codeA11y', { code: letters })}
         >
           {letters}
         </Text>
@@ -115,7 +121,7 @@ export function CountryFlag({
     <img
       data-testid="country-flag-image"
       src={flagSource(letters)}
-      alt={label ?? `Flag of ${letters}`}
+      alt={label ?? t('flag.a11y', { code: letters })}
       {...(fill ? null : { width, height })}
       onError={() => setFailed(true)}
       style={

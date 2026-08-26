@@ -1,9 +1,10 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useTranslator } from '@/i18n/useTranslator';
 import {
   type QuizMode,
-  QUIZ_MODE_HINTS,
-  QUIZ_MODE_LABELS,
+  QUIZ_MODE_HINT_KEYS,
+  QUIZ_MODE_LABEL_KEYS,
   QUIZ_MODES,
 } from '@/quiz/quizConfig';
 
@@ -26,6 +27,8 @@ type ModePickerProps = {
  * subtitle says the same thing; two copies drifted apart the moment a third mode existed.
  */
 export function ModePicker({ selected, onChange }: ModePickerProps) {
+  const t = useTranslator();
+
   return (
     <View testID="mode-picker" style={styles.container}>
       {QUIZ_MODES.map((mode) => {
@@ -38,14 +41,14 @@ export function ModePicker({ selected, onChange }: ModePickerProps) {
             style={[styles.row, active && styles.rowActive]}
             accessibilityRole="radio"
             accessibilityState={{ checked: active }}
-            accessibilityLabel={QUIZ_MODE_HINTS[mode]}
+            accessibilityLabel={t(QUIZ_MODE_HINT_KEYS[mode])}
           >
             <View style={styles.rowText}>
               <Text style={[styles.label, active && styles.labelActive]}>
-                {QUIZ_MODE_LABELS[mode]}
+                {t(QUIZ_MODE_LABEL_KEYS[mode])}
               </Text>
               <Text style={[styles.hint, active && styles.hintActive]}>
-                {QUIZ_MODE_HINTS[mode]}
+                {t(QUIZ_MODE_HINT_KEYS[mode])}
               </Text>
             </View>
             <Text style={[styles.tick, active && styles.tickActive]}>{active ? '✓' : ''}</Text>

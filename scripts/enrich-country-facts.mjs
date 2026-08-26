@@ -23,7 +23,12 @@ import { fileURLToPath } from 'node:url';
 
 import worldCountries from 'world-countries';
 
-import { buildFactRecord, quizIntegrityProblems } from './countryFactRecord.mjs';
+import {
+  buildFactRecord,
+  quizIntegrityProblems,
+  russianIntegrityProblems,
+} from './countryFactRecord.mjs';
+import { overrideProblems } from './countryOverrides.mjs';
 
 const DATA_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'data');
 const FACTS_PATH = resolve(DATA_DIR, 'countryFacts.json');
@@ -64,6 +69,8 @@ async function main() {
   if (dropped.length) problems.push(`Records that would be dropped: ${dropped.join(', ')}`);
 
   problems.push(...quizIntegrityProblems(facts, geometryCodes));
+  problems.push(...russianIntegrityProblems(facts));
+  problems.push(...overrideProblems(worldCountries));
 
   if (problems.length) {
     console.error('\nIntegrity check FAILED:');

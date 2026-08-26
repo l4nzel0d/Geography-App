@@ -2,7 +2,8 @@ import { forwardRef } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { FieldGrade } from '@/quiz/gradeAnswer';
-import { type FieldId, FIELD_LABELS, isSetField } from '@/quiz/quizConfig';
+import { useTranslator } from '@/i18n/useTranslator';
+import { type FieldId, FIELD_LABEL_KEYS, isSetField } from '@/quiz/quizConfig';
 
 import { ChipInput } from './ChipInput';
 import { quizColors, quizRadii } from '../palette';
@@ -46,18 +47,25 @@ export const AnswerField = forwardRef<TextInput, AnswerFieldProps>(function Answ
   },
   ref,
 ) {
+  const t = useTranslator();
+
   const isSet = isSetField(field);
   const graded = grade != null;
   const editable = !graded;
 
   // "Languages (3 of 15)" is not decoration: without it there is no way to know whether
   // naming three is enough, and guessing at the target is not the skill being tested.
+  const fieldLabel = t(FIELD_LABEL_KEYS[field]);
   const label =
     requirement && requirement.available > requirement.required
-      ? `${FIELD_LABELS[field]} — name ${requirement.required} of ${requirement.available}`
+      ? t('quiz.field.nameNOfM', {
+          label: fieldLabel,
+          required: requirement.required,
+          available: requirement.available,
+        })
       : requirement && requirement.available > 1
-        ? `${FIELD_LABELS[field]} — all ${requirement.available}`
-        : FIELD_LABELS[field];
+        ? t('quiz.field.allOf', { label: fieldLabel, available: requirement.available })
+        : fieldLabel;
 
   /**
    * On a correct SET answer, name what the answers actually were.
@@ -84,19 +92,21 @@ export const AnswerField = forwardRef<TextInput, AnswerFieldProps>(function Answ
     ? ''
     : grade.correct
       ? revealsExpected
-        ? `Correct — ${grade.expected}`
-        : 'Correct'
-      : `Answer: ${grade.expected}`;
+        ? t('quiz.reveal.correctWith', { expected: grade.expected })
+        : t('quiz.reveal.correct')
+      : t('quiz.reveal.answer', { expected: grade.expected });
 
   const detailText =
     graded && !grade.correct && grade.percentOff != null
-      ? `You said ${grade.given} — ${Math.abs(Math.round(grade.percentOff * 100))}% ${
-          grade.percentOff < 0 ? 'under' : 'over'
-        }`
+      ? t('quiz.detail.percent', {
+          given: grade.given,
+          percent: Math.abs(Math.round(grade.percentOff * 100)),
+          direction: t(grade.percentOff < 0 ? 'quiz.detail.under' : 'quiz.detail.over'),
+        })
       : graded && !grade.correct && grade.missed?.length
-        ? `Missed: ${grade.missed.join(', ')}`
+        ? t('quiz.detail.missed', { missed: grade.missed.join(', ') })
         : graded && !grade.correct && grade.given
-          ? `You said ${grade.given}`
+          ? t('quiz.detail.youSaid', { given: grade.given })
           : '';
 
   return (
@@ -119,7 +129,7 @@ export const AnswerField = forwardRef<TextInput, AnswerFieldProps>(function Answ
           // what lets `toAnswerInput` count a word the player never pressed return on.
           draft={value}
           onChangeDraft={onChangeText}
-          placeholder="Type an answer, press return to add another"
+          placeholder={t('quiz.chip.placeholder')}
           editable={editable}
           onSubmitLast={onSubmitEditing}
         />

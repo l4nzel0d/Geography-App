@@ -1,3 +1,7 @@
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+
 /**
  * The single definition of a `countryFacts.json` record.
  *
@@ -7,7 +11,67 @@
  *
  * Everything here comes from the `world-countries` devDependency except population,
  * which is the World Bank's and is passed in.
+ *
+ * ## The Russian block
+ *
+ * Each record carries `translations.ru`. Country names come free from mledoze's
+ * `translations.rus`, which is complete for all 250 records; capitals, language names and
+ * currency names are NOT translated upstream and come from the committed dictionaries in
+ * `src/data/ru/`, keyed by the stable codes the data already carries - ISO-639-3 for
+ * languages, ISO-4217 for currencies, and the English string for capitals and places.
+ *
+ * Keying on codes rather than on position is what makes a mis-join impossible: a language
+ * list that changed order upstream would silently relabel every entry if these were
+ * zipped by index.
+ *
+ * A missing dictionary entry FAILS the build (see `russianIntegrityProblems`). The rule
+ * throughout this pipeline is an explicit allowlist, never a silent skip, and a half-empty
+ * Russian block is exactly the kind of thing that ships and is noticed by a user.
  */
+
+import { overriddenCapital } from './countryOverrides.mjs';
+
+const ruCapitals = require('../src/data/ru/capitals.json');
+const ruLanguages = require('../src/data/ru/languages.json');
+const ruCurrencies = require('../src/data/ru/currencies.json');
+const ruPlaces = require('../src/data/ru/places.json');
+const ruCountries = require('../src/data/ru/countries.json');
+
+/**
+ * Upstream ships five Russian official names with a stray space before a hyphen -
+ * "Республика Кабо -Верде". Mechanical rather than an override table, so it self-heals if
+ * mledoze fixes them, and it is a no-op on the other 245.
+ */
+function tidyRussian(name) {
+  return typeof name === 'string' ? name.replace(/\s+-\s*/g, '-') : name;
+}
+
+/**
+ * The Russian half of one record.
+ *
+ * Anything with no dictionary entry is left as `null`/absent rather than falling back to
+ * the English word: a silent English capital inside a Russian info sheet is the failure
+ * this whole block exists to prevent, and the integrity check below turns it into a build
+ * error instead.
+ */
+function buildRussian(country) {
+  const iso3 = country.cca3;
+  const override = ruCountries[iso3] ?? {};
+  const rus = country.translations?.rus ?? {};
+
+  return {
+    name: override.name ?? rus.common ?? null,
+    official: override.official ?? tidyRussian(rus.official) ?? null,
+    capital: overriddenCapital(country).map((city) => ruCapitals[city] ?? null),
+    languages: Object.keys(country.languages ?? {}).map((code) => ruLanguages[code] ?? null),
+    // Parallel to `currencies`, in the same order, so the two are zipped by INDEX at
+    // runtime only after both were built from the same `Object.entries` walk.
+    currencies: Object.keys(country.currencies ?? {}).map((code) => ruCurrencies[code] ?? null),
+    region: ruPlaces.regions[country.region ?? ''] ?? null,
+    subregion: ruPlaces.subregions[country.subregion ?? ''] ?? null,
+    altSpellings: override.aliases ?? [],
+  };
+}
 
 /**
  * Alternative names a player might type, from mledoze's `altSpellings`.
@@ -35,7 +99,9 @@ export function buildFactRecord(country, { population = null, populationYear = n
     official: country.name?.official ?? null,
     population,
     populationYear,
-    capital: country.capital ?? [],
+    // Not `country.capital` directly: three capitals are deliberately corrected, and
+    // this script is what would otherwise revert them. See countryOverrides.mjs.
+    capital: overriddenCapital(country),
     area: country.area ?? null,
     flag: country.flag ?? null,
     currencies: Object.entries(country.currencies ?? {}).map(([code, v]) => ({
@@ -44,6 +110,15 @@ export function buildFactRecord(country, { population = null, populationYear = n
       symbol: v?.symbol ?? null,
     })),
     languages: Object.values(country.languages ?? {}),
+    /**
+     * ISO-639-3 codes, in the same order as `languages`.
+     *
+     * mledoze keys its language map by code and the record above keeps only the English
+     * NAMES, throwing the codes away. The Russian dictionary is keyed by code - the only
+     * stable identifier a language has here - so the codes have to survive into the file
+     * for anything else to be able to join against them.
+     */
+    languageCodes: Object.keys(country.languages ?? {}),
 
     // --- added for quiz mode -------------------------------------------------
     // Six values: Africa, Americas, Asia, Europe, Oceania, Antarctic.
@@ -55,6 +130,12 @@ export function buildFactRecord(country, { population = null, populationYear = n
     // exclusion is explicit in src/quiz/quizCountries.ts, never a silent skip.
     unMember: Boolean(country.unMember),
     altSpellings: usableAltSpellings(country),
+
+    /**
+     * Everything above, in Russian. A sibling block rather than a parallel file so one
+     * lookup returns a whole country and the two can never be joined wrongly.
+     */
+    translations: { ru: buildRussian(country) },
   };
 }
 
@@ -93,6 +174,50 @@ export function quizIntegrityProblems(facts, geometryCodes) {
   check('capital', (f) => f.capital.length > 0);
   check('languages', (f) => f.languages.length > 0);
   check('currency', (f) => f.currencies.length > 0, CURRENCYLESS_UN_MEMBERS);
+
+  return problems;
+}
+
+/**
+ * The Russian block is complete for every record that has an English one.
+ *
+ * Deliberately checked over ALL 250 records, not just the 193 quiz countries: the info
+ * sheet and the map labels can reach any country with geometry, so a Russian session
+ * would otherwise show a blank capital for Greenland or Puerto Rico while every test
+ * passed. `quizIntegrityProblems` only ever inspected the English fields and would happily
+ * let a half-empty translation through.
+ *
+ * A `null` inside a list is what a missing dictionary entry becomes, which is why the
+ * checks look inside the arrays rather than only at their length.
+ */
+export function russianIntegrityProblems(facts) {
+  const problems = [];
+  const bad = (label, predicate) => {
+    const codes = Object.entries(facts)
+      .filter(([, f]) => !predicate(f))
+      .map(([iso3]) => iso3);
+    if (codes.length) problems.push(`No Russian ${label}: ${codes.join(', ')}`);
+  };
+
+  const complete = (list) => Array.isArray(list) && list.every((item) => Boolean(item));
+
+  bad('block', (f) => Boolean(f.translations?.ru));
+  bad('name', (f) => Boolean(f.translations?.ru?.name));
+  bad('capital', (f) => f.capital.length === 0 || complete(f.translations?.ru?.capital));
+  bad('languages', (f) => f.languages.length === 0 || complete(f.translations?.ru?.languages));
+  bad('currencies', (f) => f.currencies.length === 0 || complete(f.translations?.ru?.currencies));
+  bad('region', (f) => !f.region || Boolean(f.translations?.ru?.region));
+  bad('subregion', (f) => !f.subregion || Boolean(f.translations?.ru?.subregion));
+
+  // The lists are zipped by index at runtime, so a length mismatch would silently pair a
+  // language with another language's Russian name.
+  bad(
+    'list of the same length as the English one',
+    (f) =>
+      f.translations?.ru?.capital?.length === f.capital.length &&
+      f.translations?.ru?.languages?.length === f.languages.length &&
+      f.translations?.ru?.currencies?.length === f.currencies.length,
+  );
 
   return problems;
 }

@@ -1,6 +1,7 @@
 import { flagLetters } from '@/components/flagEmoji';
+import { DEFAULT_LOCALE, LOCALES, type Locale } from '@/i18n/localeTypes';
 import { formatCompactNumber, formatLabelList } from '@/components/formatters';
-import { getFlagMinZoom, getLabelMinZoom } from '@/map/labelFit';
+import { getFlagMinZoom, getLabelMinZoom, glyphRatioFor, LABEL_FONT_SIZE } from '@/map/labelFit';
 import {
   FLAG_ICON_PROPERTY,
   FLAG_IMAGE_PREFIX,
@@ -12,7 +13,7 @@ import {
   zoomPropertyFor,
 } from '@/map/mapLabels';
 
-import { allCountryFacts } from './countryFacts';
+import { allCountryFacts, factsFor } from './countryFacts';
 import labelPoints from './labelPoints.json';
 import type { CountryFacts } from './types';
 
@@ -50,7 +51,11 @@ const points = labelPoints as unknown as Record<string, LabelPoint>;
  * Currencies use the bare `name`, deliberately not `formatCurrency`: "Brazilian real
  * (BRL, R$)" is an info-sheet string and three of those would be wider than Brazil.
  */
-export function labelTextFor(field: LabelFieldId, facts: CountryFacts): string | null {
+export function labelTextFor(
+  field: LabelFieldId,
+  facts: CountryFacts,
+  locale: Locale = DEFAULT_LOCALE,
+): string | null {
   switch (field) {
     case 'name':
       return facts.name || null;
@@ -61,13 +66,25 @@ export function labelTextFor(field: LabelFieldId, facts: CountryFacts): string |
     case 'currencies':
       return formatLabelList(facts.currencies.map((currency) => currency.name));
     case 'population':
-      return facts.population == null ? null : formatCompactNumber(facts.population);
+      return facts.population == null ? null : formatCompactNumber(facts.population, locale);
   }
 }
 
+/**
+ * Build the label points.
+ *
+ * `facts` is the DEFAULT locale's table; every other locale is reached through
+ * `factsFor`, so one pass writes `tName` **and** `tNameRu` onto the same feature. See the
+ * long note on `textPropertyFor` for why both languages share one source rather than
+ * getting a collection each.
+ *
+ * The `locales` parameter exists so a test can build a single-language collection and
+ * assert what is absent; the app always passes all of them.
+ */
 export function buildLabelGeoJson(
   facts: Record<string, CountryFacts>,
   anchors: Record<string, LabelPoint>,
+  locales: readonly Locale[] = [DEFAULT_LOCALE],
 ): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
 
@@ -86,13 +103,27 @@ export function buildLabelGeoJson(
     };
 
     let hasAny = false;
-    for (const field of LABEL_FIELD_IDS) {
-      const text = labelTextFor(field, countryFacts);
-      if (text == null) continue;
+    for (const locale of locales) {
+      // Each locale reads its OWN facts table, so the Russian text comes from the Russian
+      // record rather than from a translation applied here.
+      const localeFacts = locale === DEFAULT_LOCALE ? countryFacts : factsFor(locale)[iso3];
+      if (!localeFacts) continue;
 
-      properties[textPropertyFor(field)] = text;
-      properties[zoomPropertyFor(field)] = getLabelMinZoom(text, anchor.w);
-      hasAny = true;
+      for (const field of LABEL_FIELD_IDS) {
+        const text = labelTextFor(field, localeFacts, locale);
+        if (text == null) continue;
+
+        properties[textPropertyFor(field, locale)] = text;
+        // Per locale, not shared: a Russian name is materially longer, so it needs a
+        // higher zoom before it fits over the same country.
+        properties[zoomPropertyFor(field, locale)] = getLabelMinZoom(
+          text,
+          anchor.w,
+          LABEL_FONT_SIZE,
+          glyphRatioFor(locale),
+        );
+        hasAny = true;
+      }
     }
 
     /*
@@ -127,4 +158,13 @@ export function buildLabelGeoJson(
   return { type: 'FeatureCollection', features };
 }
 
-export const labelGeoJson = buildLabelGeoJson(allCountryFacts, points);
+/**
+ * Built with an EXPLICIT locale, never the ambient one.
+ *
+ * This is a module constant, so it is computed at import - before any test's `beforeEach`
+ * and before storage has answered. Reading `getLocale()` here would bake whatever language
+ * the machine happened to be in at import time into the map's labels, which is how a
+ * Russian-locale developer's machine silently produced Russian map labels in an English
+ * test run.
+ */
+export const labelGeoJson = buildLabelGeoJson(allCountryFacts, points, LOCALES);

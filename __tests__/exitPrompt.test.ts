@@ -1,4 +1,8 @@
+import { translatorFor } from '@/i18n/t';
 import { buildExitPrompt } from '@/quiz/exitPrompt';
+
+/** Every existing assertion is about the English wording, so they all pass this. */
+const t = translatorFor('en');
 
 /**
  * The confirmation's shape.
@@ -8,13 +12,13 @@ import { buildExitPrompt } from '@/quiz/exitPrompt';
  */
 describe('the mid-round exit prompt', () => {
   const ids = (graded: number) =>
-    buildExitPrompt({ index: 0, total: 8, graded }).buttons.map((b) => b.id);
+    buildExitPrompt({ index: 0, total: 8, graded, t }).buttons.map((b) => b.id);
 
   it('counts the question from one', () => {
-    expect(buildExitPrompt({ index: 2, total: 8, graded: 1 }).message).toBe(
+    expect(buildExitPrompt({ index: 2, total: 8, graded: 1, t }).message).toBe(
       'You are on question 3 of 8.'
     );
-    expect(buildExitPrompt({ index: 0, total: 8, graded: 0 }).message).toBe(
+    expect(buildExitPrompt({ index: 0, total: 8, graded: 0, t }).message).toBe(
       'You are on question 1 of 8.'
     );
   });
@@ -39,7 +43,7 @@ describe('the mid-round exit prompt', () => {
 
   it('marks the destructive and dismissive buttons as such', () => {
     const byId = Object.fromEntries(
-      buildExitPrompt({ index: 0, total: 2, graded: 1 }).buttons.map((b) => [b.id, b])
+      buildExitPrompt({ index: 0, total: 2, graded: 1, t }).buttons.map((b) => [b.id, b])
     );
     expect(byId.discard.style).toBe('destructive');
     expect(byId.cancel.style).toBe('quiet');
@@ -47,6 +51,6 @@ describe('the mid-round exit prompt', () => {
   });
 
   it('always asks the same question', () => {
-    expect(buildExitPrompt({ index: 0, total: 1, graded: 0 }).title).toBe('Leave quiz?');
+    expect(buildExitPrompt({ index: 0, total: 1, graded: 0, t }).title).toBe('Leave quiz?');
   });
 });

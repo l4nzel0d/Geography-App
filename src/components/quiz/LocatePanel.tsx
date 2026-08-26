@@ -7,6 +7,7 @@ import type { QuizQuestion } from '@/quiz/quizBuilder';
 
 import { KEYBOARD_PLAY } from './keyboardPlay';
 import { quizColors, quizRadii } from '../palette';
+import { useTranslator } from '@/i18n/useTranslator';
 
 type LocatePanelProps = {
   question: QuizQuestion;
@@ -55,6 +56,8 @@ export function LocatePanel({
   onEnd,
   landscape,
 }: LocatePanelProps) {
+  const t = useTranslator();
+
   /** Typed loosely for the same reason as `QuizPanel`'s: only the web ref has `focus`. */
   const submitRef = useRef<{ focus?: () => void } | null>(null);
   const graded = result != null;
@@ -86,14 +89,14 @@ export function LocatePanel({
           onPress={onEnd}
           hitSlop={12}
           accessibilityRole="button"
-          accessibilityLabel="End the quiz and see your score"
+          accessibilityLabel={t('quiz.endA11y')}
         >
-          <Text style={styles.end}>End quiz</Text>
+          <Text style={styles.end}>{t('quiz.end')}</Text>
         </Pressable>
       </View>
 
       <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-        <Text style={styles.eyebrow}>Find</Text>
+        <Text style={styles.eyebrow}>{t('locate.find')}</Text>
         <Text testID="locate-prompt" style={styles.target} accessibilityRole="header">
           {question.facts.name}
         </Text>
@@ -111,7 +114,11 @@ export function LocatePanel({
         {graded ? (
           <View testID="locate-verdict" style={styles.verdict}>
             <Text style={[styles.verdictText, correct ? styles.ok : styles.bad]}>
-              {correct ? 'Correct' : pickedName ? `Not ${pickedName}` : 'Nothing picked'}
+              {correct
+                ? t('locate.correct')
+                : pickedName
+                  ? t('locate.not', { name: pickedName })
+                  : t('locate.nothing')}
             </Text>
             {!correct && answerShown ? (
               <Text style={styles.verdictNote}>
@@ -121,7 +128,7 @@ export function LocatePanel({
           </View>
         ) : (
           <Text testID="locate-pick" style={picked ? styles.pick : styles.pickEmpty}>
-            {picked ? 'Ready — press Check' : 'Tap it on the map'}
+            {t(picked ? 'locate.ready' : 'locate.tap')}
           </Text>
         )}
       </ScrollView>
@@ -132,9 +139,9 @@ export function LocatePanel({
         style={styles.button}
         onPress={graded ? onNext : onCheck}
         accessibilityRole="button"
-        accessibilityLabel={graded ? 'Next country' : 'Check my answer'}
+        accessibilityLabel={t(graded ? 'quiz.nextA11y' : 'quiz.checkOneA11y')}
       >
-        <Text style={styles.buttonText}>{graded ? 'Next' : 'Check'}</Text>
+        <Text style={styles.buttonText}>{t(graded ? 'quiz.next' : 'quiz.check')}</Text>
       </Pressable>
     </View>
   );

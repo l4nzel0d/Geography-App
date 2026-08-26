@@ -38,6 +38,7 @@ import { Text, View } from 'react-native';
 import { FLAG_ASSETS } from './flagAssets';
 import { flagLetters } from './flagEmoji';
 import { FLAG_SIZES, type FlagSize } from './flagSizes';
+import { useTranslator } from '@/i18n/useTranslator';
 
 /** No flag in the dataset - a real white-flag glyph, which every platform draws. */
 export const NO_FLAG = '🏳️';
@@ -68,6 +69,8 @@ export function CountryFlag({
    */
   fill?: boolean;
 }) {
+  const t = useTranslator();
+
   const { fontSize, width, height } = FLAG_SIZES[size];
   const box = fill ? ({ width: '100%', height: '100%' } as const) : { width, height };
   const letters = flagLetters(flag);
@@ -95,7 +98,7 @@ export function CountryFlag({
       // choice never shows - it is insurance against a parent that is not.
       contentFit="contain"
       style={[box, fill ? null : { borderRadius: 3 }]}
-      accessibilityLabel={label ?? `Flag of ${letters}`}
+      accessibilityLabel={label ?? t('flag.a11y', { code: letters ?? '' })}
     />
   );
 }

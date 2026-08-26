@@ -1,3 +1,5 @@
+import type { Locale } from '@/i18n/localeTypes';
+
 import { WORLD_WIDTH_AT_ZOOM_0 } from './cameraFit';
 
 /**
@@ -35,6 +37,25 @@ export const LABEL_FONT_SIZE = 12;
  * the tolerance below absorbs the error.
  */
 export const AVG_GLYPH_RATIO = 0.55;
+
+/**
+ * The same measure for Cyrillic, which runs a little wider.
+ *
+ * Russian lowercase has more full-width, flat-sided letters than Latin does - ш, щ, ж, ы,
+ * м, and no narrow i/l/t/f to average them down - so the same character count occupies
+ * more room. 0.60 rather than 0.55 is a ~9% allowance, which at this granularity moves a
+ * label by at most a fraction of a zoom level.
+ *
+ * **English stays at exactly 0.55**, so no English label moves by a pixel. If Russian
+ * labels turn out to overhang more or less than you want, this is the number to turn -
+ * the same role `FIT_TOLERANCE` plays for both.
+ */
+export const CYRILLIC_GLYPH_RATIO = 0.6;
+
+/** Which ratio a locale's text is measured with. */
+export function glyphRatioFor(locale: Locale): number {
+  return locale === 'ru' ? CYRILLIC_GLYPH_RATIO : AVG_GLYPH_RATIO;
+}
 
 /**
  * Must match the layer's `text-max-width`, in ems.
@@ -101,8 +122,12 @@ export const MAP_FLAG_RASTER_SCALE = 3;
 /**
  * Estimated rendered width of a label in dp, capped at the wrap width.
  */
-export function estimateLabelWidthDp(text: string, fontSize = LABEL_FONT_SIZE): number {
-  const unwrapped = text.length * AVG_GLYPH_RATIO * fontSize;
+export function estimateLabelWidthDp(
+  text: string,
+  fontSize = LABEL_FONT_SIZE,
+  glyphRatio = AVG_GLYPH_RATIO,
+): number {
+  const unwrapped = text.length * glyphRatio * fontSize;
   return Math.min(unwrapped, TEXT_MAX_WIDTH_EM * fontSize);
 }
 
@@ -139,10 +164,14 @@ export function getLabelMinZoom(
   text: string,
   widthDeg: number,
   fontSize = LABEL_FONT_SIZE,
+  glyphRatio = AVG_GLYPH_RATIO,
 ): number {
   if (!text) return MAX_LABEL_ZOOM;
 
-  return getFitMinZoom(estimateLabelWidthDp(text, fontSize) * FIT_TOLERANCE, widthDeg);
+  return getFitMinZoom(
+    estimateLabelWidthDp(text, fontSize, glyphRatio) * FIT_TOLERANCE,
+    widthDeg,
+  );
 }
 
 /**

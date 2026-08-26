@@ -1,6 +1,9 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import type { PropsWithChildren } from 'react';
 
+import { withBaseUrl } from '@/i18n/baseUrl';
+import { getLocale } from '@/i18n/locale';
+import { translate } from '@/i18n/t';
 import { mapColors } from '@/map/offlineStyle';
 
 /**
@@ -12,10 +15,17 @@ import { mapColors } from '@/map/offlineStyle';
  * the service worker registration.
  *
  * Web-only. Android and iOS never resolve it.
+ *
+ * **It is rendered once per locale**, because the web ships as two static exports. The
+ * locale is a build constant here (`locale.web.ts` derives it from `EXPO_BASE_URL`), so
+ * `lang`, the title and every root-relative link below are baked correctly into each
+ * tree's HTML rather than patched by a script after hydration.
  */
 export default function Root({ children }: PropsWithChildren) {
+  const locale = getLocale();
+
   return (
-    <html lang="en">
+    <html lang={locale}>
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
@@ -53,14 +63,17 @@ export default function Root({ children }: PropsWithChildren) {
         */}
         <meta name="theme-color" content={mapColors.ocean} />
 
-        <link rel="manifest" href="/manifest.webmanifest" />
-        <link rel="icon" href="/favicon.ico" sizes="any" />
-        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+        {/* Base-URL aware, all of them. The Russian build is served from `/ru` and has
+            its own service worker scoped there; a manifest or icon fetched from the root
+            would be outside that scope and would not be cached for offline use. */}
+        <link rel="manifest" href={withBaseUrl('/manifest.webmanifest')} />
+        <link rel="icon" href={withBaseUrl('/favicon.ico')} sizes="any" />
+        <link rel="apple-touch-icon" href={withBaseUrl('/icons/apple-touch-icon.png')} />
 
         {/* iOS ignores the manifest's `display` and reads these instead. */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="Countries" />
+        <meta name="apple-mobile-web-app-title" content={translate(locale, 'app.shortName')} />
 
         {/*
           Disable body scrolling so ScrollView behaves as it does on native. Provided by
@@ -69,7 +82,7 @@ export default function Root({ children }: PropsWithChildren) {
         <ScrollViewStyleReset />
 
         <style dangerouslySetInnerHTML={{ __html: pageStyle }} />
-        <script dangerouslySetInnerHTML={{ __html: registerServiceWorker }} />
+        <script dangerouslySetInnerHTML={{ __html: registerServiceWorker() }} />
       </head>
       <body>{children}</body>
     </html>
@@ -104,10 +117,18 @@ html, body {
  * like Metro. Registered on `load` so it never competes with the first paint for
  * bandwidth.
  */
-const registerServiceWorker = `
+const registerServiceWorker = () => `
 if (${process.env.NODE_ENV === 'production'} && 'serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('/sw.js').catch(function (error) {
+    /*
+     * Each locale registers ITS OWN worker, scoped to its own tree. The scope is explicit
+     * rather than left to default from the script's directory: it is the same value, but
+     * saying it makes the intent legible next to the \`Service-Worker-Allowed\` header in
+     * vercel.json, and it is what keeps the two builds from fighting over one scope.
+     */
+    navigator.serviceWorker.register('${withBaseUrl('/sw.js')}', {
+      scope: '${withBaseUrl('/')}',
+    }).catch(function (error) {
       console.error('[sw] registration failed', error);
     });
   });

@@ -13,7 +13,7 @@ import { flagLetters } from '@/components/flagEmoji';
 import geo from '@/data/countries.geo.json';
 import { allCountryFacts, getCountryFacts } from '@/data/countryFacts';
 import labelPoints from '@/data/labelPoints.json';
-import type { CountryFeatureProperties } from '@/data/types';
+import type { CountryFacts, CountryFeatureProperties } from '@/data/types';
 
 /** Territories we knowingly ship without facts - mirrors the build script. */
 const FACTLESS_ALLOWLIST = new Set(['CYN', 'SOL', 'KAS']);
@@ -381,5 +381,97 @@ describe('map label anchors', () => {
       expect(at[1]).toBeGreaterThanOrEqual(-90);
       expect(at[1]).toBeLessThanOrEqual(90);
     }
+  });
+});
+
+/**
+ * The Russian half of every record.
+ *
+ * Mirrors `russianIntegrityProblems` in `scripts/countryFactRecord.mjs`, exactly as the
+ * quiz invariants above mirror `quizIntegrityProblems` - the build fails first, and this
+ * is what stops the two drifting apart.
+ *
+ * Checked over ALL 250 records rather than the 193 quiz countries: the info sheet and the
+ * map labels can reach any country with geometry, so a gap would show as a blank capital
+ * for Greenland while every quiz test passed.
+ */
+describe('the Russian translations', () => {
+  const records = Object.entries(allCountryFacts) as [string, CountryFacts][];
+
+  it('gives every country a Russian name', () => {
+    const missing = records.filter(([, f]) => !f.translations?.ru?.name).map(([iso3]) => iso3);
+    expect(missing).toEqual([]);
+  });
+
+  it('translates every capital, language and currency it has an English one for', () => {
+    const gaps: string[] = [];
+
+    for (const [iso3, facts] of records) {
+      const ru = facts.translations.ru;
+      if (facts.capital.some((_, i) => !ru.capital[i])) gaps.push(`${iso3} capital`);
+      if (facts.languages.some((_, i) => !ru.languages[i])) gaps.push(`${iso3} languages`);
+      if (facts.currencies.some((_, i) => !ru.currencies[i])) gaps.push(`${iso3} currencies`);
+    }
+
+    expect(gaps).toEqual([]);
+  });
+
+  /**
+   * The lists are zipped BY INDEX at runtime (`localize` in `countryFacts.ts`), so a
+   * length mismatch would pair one language with another language's Russian name rather
+   * than failing.
+   */
+  it('keeps every parallel list the same length as its English sibling', () => {
+    for (const [iso3, facts] of records) {
+      const ru = facts.translations.ru;
+      expect(`${iso3} ${ru.capital.length}`).toBe(`${iso3} ${facts.capital.length}`);
+      expect(`${iso3} ${ru.languages.length}`).toBe(`${iso3} ${facts.languages.length}`);
+      expect(`${iso3} ${ru.currencies.length}`).toBe(`${iso3} ${facts.currencies.length}`);
+      expect(`${iso3} ${facts.languageCodes.length}`).toBe(`${iso3} ${facts.languages.length}`);
+    }
+  });
+
+  it('translates every region and subregion', () => {
+    for (const [iso3, facts] of records) {
+      if (facts.region) expect(`${iso3} ${!!facts.translations.ru.region}`).toBe(`${iso3} true`);
+      if (facts.subregion) {
+        expect(`${iso3} ${!!facts.translations.ru.subregion}`).toBe(`${iso3} true`);
+      }
+    }
+  });
+
+  /**
+   * No Latin left in the Russian block - the commonest shape of a half-done translation,
+   * and one that a completeness check alone cannot see because the value is present.
+   *
+   * Two deliberate exceptions, both genuine: a currency name may carry an ISO code or a
+   * Latin-script qualifier ("франк КФА"), and an official name may not exist at all.
+   */
+  it('leaves no untranslated English in the Russian block', () => {
+    const LATIN = /[A-Za-z]/;
+    const ALLOWED = new Set(['франк КФА']);
+    const leaked: string[] = [];
+
+    for (const [iso3, facts] of records) {
+      const ru = facts.translations.ru;
+      const strings = [ru.name, ...ru.capital, ...ru.languages, ru.region, ru.subregion];
+
+      for (const value of strings) {
+        if (value && LATIN.test(value)) leaked.push(`${iso3}: ${value}`);
+      }
+      for (const value of ru.currencies) {
+        if (value && LATIN.test(value) && !ALLOWED.has(value)) leaked.push(`${iso3}: ${value}`);
+      }
+    }
+
+    expect(leaked).toEqual([]);
+  });
+
+  /** The three capitals corrected against mledoze must survive every regeneration. */
+  it('keeps the deliberately corrected capitals', () => {
+    expect(allCountryFacts.GNQ.capital).toEqual(['Ciudad de la Paz']);
+    expect(allCountryFacts.LKA.capital).toEqual(['Sri Jayawardenepura Kotte']);
+    expect(allCountryFacts.SWZ.capital).toEqual(['Mbabane']);
+    expect(allCountryFacts.GNQ.translations.ru.capital).toEqual(['Сьюдад-де-ла-Пас']);
   });
 });

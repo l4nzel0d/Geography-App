@@ -1,0 +1,36 @@
+{
+  "regions": {
+    "Africa": "Африка",
+    "Americas": "Америка",
+    "Antarctic": "Антарктика",
+    "Asia": "Азия",
+    "Europe": "Европа",
+    "Oceania": "Океания"
+  },
+  "subregions": {
+    "Australia and New Zealand": "Австралия и Новая Зеландия",
+    "Caribbean": "Карибы",
+    "Central America": "Центральная Америка",
+    "Central Asia": "Центральная Азия",
+    "Central Europe": "Центральная Европа",
+    "Eastern Africa": "Восточная Африка",
+    "Eastern Asia": "Восточная Азия",
+    "Eastern Europe": "Восточная Европа",
+    "Melanesia": "Меланезия",
+    "Micronesia": "Микронезия",
+    "Middle Africa": "Центральная Африка",
+    "North America": "Северная Америка",
+    "Northern Africa": "Северная Африка",
+    "Northern Europe": "Северная Европа",
+    "Polynesia": "Полинезия",
+    "South America": "Южная Америка",
+    "South-Eastern Asia": "Юго-Восточная Азия",
+    "Southeast Europe": "Юго-Восточная Европа",
+    "Southern Africa": "Южная Африка",
+    "Southern Asia": "Южная Азия",
+    "Southern Europe": "Южная Европа",
+    "Western Africa": "Западная Африка",
+    "Western Asia": "Западная Азия",
+    "Western Europe": "Западная Европа"
+  }
+}

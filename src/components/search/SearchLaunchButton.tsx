@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { quizColors, quizRadii } from '../palette';
+import { useTranslator } from '@/i18n/useTranslator';
 
 /**
  * The way into country search, sitting immediately left of the quiz pill.
@@ -17,13 +18,15 @@ import { quizColors, quizRadii } from '../palette';
  * rendering the screen bare.
  */
 export function SearchLaunchButton() {
+  const t = useTranslator();
+
   return (
     <Pressable
       testID="open-search"
       onPress={() => router.push('/search')}
       style={styles.pill}
       accessibilityRole="button"
-      accessibilityLabel="Search for a country"
+      accessibilityLabel={t('search.open')}
     >
       {/* A glyph rather than an icon font: nothing else in the app ships one, and a
           dependency for one character is not worth the bundle or the offline risk. */}

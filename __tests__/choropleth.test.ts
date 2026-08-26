@@ -11,6 +11,7 @@
  * ascending finite domain, the stop pairs - is asserted over every ramp; decade spacing
  * and the `log10` wrapper are asserted only over the two that have them.
  */
+import { translate } from '@/i18n/t';
 import {
   bucketFor,
   CHOROPLETH_RAMPS,
@@ -22,6 +23,7 @@ import {
   MASTERY_RAMP,
   MASTERY_STOPS,
   NO_DATA_COLOR,
+  NO_DATA_LABEL_KEY,
   POPULATION_RAMP,
   POPULATION_STOPS,
 } from '@/map/choropleth';
@@ -145,8 +147,10 @@ describe('the mastery ramp, being linear', () => {
   it('names its grey band for what it means here', () => {
     // "no data" would be wrong: those countries have not been asked, which is an
     // invitation to practise rather than a gap in the dataset.
-    expect(MASTERY_RAMP.noDataLabel).toBe('not asked yet');
-    expect(POPULATION_RAMP.noDataLabel).toBeUndefined();
+    expect(MASTERY_RAMP.noDataLabelKey).toBe('map.legend.mastery.noData');
+    expect(translate('en', 'map.legend.mastery.noData')).toBe('not asked yet');
+    // The other ramps say nothing and fall back to the shared key.
+    expect(POPULATION_RAMP.noDataLabelKey).toBeUndefined();
   });
 });
 
@@ -192,10 +196,25 @@ describe('the ramps together', () => {
     expect(new Set(all).size).toBe(all.length);
   });
 
+  /**
+   * The ramps carry message KEYS, not words, so this asserts both halves: that each ramp
+   * points at its own key, and that the key still resolves to the unit the legend means.
+   * A ramp pointed at the wrong key would otherwise pass a spelling check.
+   */
   it('titles each legend with the unit it is counted in', () => {
-    expect(POPULATION_RAMP.title).toBe('People per country');
-    expect(DENSITY_RAMP.title).toBe('People per km²');
-    expect(MASTERY_RAMP.title).toBe('Mastery from quizzes');
+    expect(translate('en', POPULATION_RAMP.titleKey)).toBe('People per country');
+    expect(translate('en', DENSITY_RAMP.titleKey)).toBe('People per km²');
+    expect(translate('en', MASTERY_RAMP.titleKey)).toBe('Mastery from quizzes');
+
+    const keys = [POPULATION_RAMP.titleKey, DENSITY_RAMP.titleKey, MASTERY_RAMP.titleKey];
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('translates every ramp title and both no-data labels', () => {
+    expect(translate('ru', POPULATION_RAMP.titleKey)).toBe('Людей в стране');
+    expect(translate('ru', MASTERY_RAMP.titleKey)).toBe('Знание по тестам');
+    expect(translate('ru', NO_DATA_LABEL_KEY)).toBe('нет данных');
+    expect(translate('ru', 'map.legend.mastery.noData')).toBe('ещё не спрашивали');
   });
 });
 

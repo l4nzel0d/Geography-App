@@ -19,6 +19,8 @@ import { useKeyboardHeight } from '@/components/quiz/useKeyboardHeight';
 import { CountryResultRow } from '@/components/search/CountryResultRow';
 import { searchCountries } from '@/search/countrySearch';
 import { selectCountry } from '@/search/pendingCountry';
+import { getLocale } from '@/i18n/locale';
+import { useTranslator } from '@/i18n/useTranslator';
 
 /**
  * Find a country by name.
@@ -37,6 +39,16 @@ import { selectCountry } from '@/search/pendingCountry';
  */
 export default function SearchScreen() {
   const [query, setQuery] = useState('');
+
+  /**
+   * The translator for the active language.
+   *
+   * A hook rather than the module-level `t`, because `reactCompiler: true` will
+   * memoise a call with no reactive inputs and never recompute it - which is how a
+   * language switch left half the chrome in English until something else forced a
+   * render. See `useTranslator`.
+   */
+  const t = useTranslator();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
   const input = useRef<TextInput>(null);
@@ -94,7 +106,7 @@ export default function SearchScreen() {
           style={styles.cancel}
           hitSlop={10}
           accessibilityRole="button"
-          accessibilityLabel="Back to the map"
+          accessibilityLabel={t('search.back')}
         >
           <Text style={styles.cancelLabel}>←</Text>
         </Pressable>
@@ -107,7 +119,7 @@ export default function SearchScreen() {
             value={query}
             onChangeText={setQuery}
             autoFocus
-            placeholder="Country name"
+            placeholder={t('search.placeholder')}
             placeholderTextColor={quizColors.textFaint}
             /**
              * Without this, LANDSCAPE is unusable.
@@ -124,7 +136,7 @@ export default function SearchScreen() {
             autoCapitalize="none"
             spellCheck={false}
             returnKeyType="search"
-            accessibilityLabel="Country name"
+            accessibilityLabel={t('search.placeholder')}
           />
 
           {/* `clearButtonMode` is iOS-only, so the button is ours. */}
@@ -134,7 +146,7 @@ export default function SearchScreen() {
               onPress={() => setQuery('')}
               hitSlop={10}
               accessibilityRole="button"
-              accessibilityLabel="Clear the search"
+              accessibilityLabel={t('search.clear')}
             >
               <Text style={styles.clear}>✕</Text>
             </Pressable>
@@ -154,10 +166,12 @@ export default function SearchScreen() {
         initialNumToRender={12}
         ListEmptyComponent={
           <View testID="country-search-empty" style={styles.empty}>
-            <Text style={styles.emptyTitle}>No country matches “{query.trim()}”.</Text>
-            <Text style={styles.emptyHint}>
-              Try a shorter spelling — Holland, UK and Ivory Coast all work.
+            <Text style={styles.emptyTitle}>
+              {t('search.empty.title', { query: query.trim() })}
             </Text>
+            {/* The hint names real aliases, so it is translated rather than transliterated:
+                a Russian round accepts Голландия and Бирма, not Holland and Burma. */}
+            <Text style={styles.emptyHint}>{t('search.empty.hint')}</Text>
           </View>
         }
       />

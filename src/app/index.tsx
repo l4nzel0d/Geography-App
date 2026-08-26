@@ -17,6 +17,8 @@ import { mapColors } from '@/map/offlineStyle';
 import { getFocusedCameraStop, type MapCameraStop } from '@/map/quizCamera';
 import { type FillMode, WorldMap } from '@/map/WorldMap';
 import { subscribeToCountrySelection } from '@/search/pendingCountry';
+import { getLocale } from '@/i18n/locale';
+import { useTranslator } from '@/i18n/useTranslator';
 
 /** Matches `WorldMap`'s own ceiling, so the stop is never clamped by the native camera. */
 const EXPLORE_MAX_ZOOM = 10;
@@ -83,6 +85,16 @@ export default function MapScreen() {
    * hook changed what the compiler memoised and left the quiz holding a stale layout
    * through a rotation. This is a byte-for-byte sibling of the search subscription below.
    */
+  /**
+   * The translator for the active language.
+   *
+   * A hook rather than the module-level `t`, because `reactCompiler: true` will
+   * memoise a call with no reactive inputs and never recompute it - which is how a
+   * language switch left half the chrome in English until something else forced a
+   * render. See `useTranslator`.
+   */
+  const t = useTranslator();
+
   const [mastery, setMastery] = useState(getMasterySnapshot);
   useEffect(() => subscribeToMastery(setMastery), []);
 

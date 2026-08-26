@@ -1,11 +1,33 @@
+import { getLocale } from '@/i18n/locale';
+import type { Locale } from '@/i18n/localeTypes';
+import { translate } from '@/i18n/t';
+
 import type { Currency } from '@/data/types';
+
+/**
+ * Every function here takes the locale as a trailing argument that **defaults to the
+ * active one**, rather than requiring it at each of the ~20 call sites.
+ *
+ * The default is what makes the app correct without threading a locale through the info
+ * sheet, the quiz panel and the label builder; the explicit parameter is what keeps these
+ * testable as pure functions, and is what `labelGeoJson.ts` uses to build both languages'
+ * label text in one pass regardless of which one is on screen.
+ */
 
 /** Shown wherever a fact is genuinely unavailable upstream. */
 export const NOT_AVAILABLE = '—';
 
-export function formatPopulation(population: number | null | undefined): string {
+/** BCP-47 tags for `Intl`, which wants a region: `ru` alone groups digits differently. */
+const NUMBER_LOCALE: Record<Locale, string> = { en: 'en-US', ru: 'ru-RU' };
+
+export function formatPopulation(
+  population: number | null | undefined,
+  locale: Locale = getLocale(),
+): string {
   if (population == null) return NOT_AVAILABLE;
-  return new Intl.NumberFormat('en-US').format(population);
+  // Russian groups with a thin space rather than a comma - `Intl` knows, so this is one
+  // of the few places the platform can be trusted to be right about a language.
+  return new Intl.NumberFormat(NUMBER_LOCALE[locale]).format(population);
 }
 
 /**
@@ -22,6 +44,8 @@ export function formatCurrency({ code, name, symbol }: Currency): string {
 /** e.g. "Brazilian real (BRL, R$)", or several joined with "  ·  ". */
 export function formatCurrencies(currencies: Currency[] | null | undefined): string {
   if (!currencies?.length) return NOT_AVAILABLE;
+  // The joiners stay `, ` and `  ·  ` in both languages: they are punctuation, not words,
+  // and Russian uses the same ones.
   return currencies.map(formatCurrency).join('  ·  ');
 }
 
@@ -36,9 +60,13 @@ export function formatCapital(capital: string[] | null | undefined): string {
   return capital.join(', ');
 }
 
-export function formatArea(areaKm2: number | null | undefined): string {
+export function formatArea(
+  areaKm2: number | null | undefined,
+  locale: Locale = getLocale(),
+): string {
   if (areaKm2 == null) return NOT_AVAILABLE;
-  return `${new Intl.NumberFormat('en-US').format(Math.round(areaKm2))} km²`;
+  const number = new Intl.NumberFormat(NUMBER_LOCALE[locale]).format(Math.round(areaKm2));
+  return `${number} ${translate(locale, 'units.km2')}`;
 }
 
 /**
@@ -53,7 +81,10 @@ export function formatArea(areaKm2: number | null | undefined): string {
  * all 2sf, and none is longer than four characters. Rounding happens before the suffix is
  * chosen so 999,999,999 becomes "1.0b" rather than "1000m".
  */
-export function formatCompactNumber(value: number | null | undefined): string {
+export function formatCompactNumber(
+  value: number | null | undefined,
+  locale: Locale = getLocale(),
+): string {
   if (value == null || !Number.isFinite(value)) return NOT_AVAILABLE;
 
   const negative = value < 0;
@@ -64,10 +95,16 @@ export function formatCompactNumber(value: number | null | undefined): string {
   // "1000m", because the unit is chosen while the value is still under a billion.
   const rounded = Number(magnitude.toPrecision(2));
 
+  /*
+    Russian writes "47 млн" - a word, with a space - where English writes "47m". The space
+    is a NO-BREAK one so a map label can never wrap between the number and its unit, and
+    the suffixes are three to four characters wider than the Latin ones, which is why the
+    label fit thresholds are computed per locale rather than shared. See `labelFit.ts`.
+  */
   const units: readonly [number, string][] = [
-    [1e9, 'b'],
-    [1e6, 'm'],
-    [1e3, 'k'],
+    [1e9, translate(locale, 'format.compact.billion')],
+    [1e6, translate(locale, 'format.compact.million')],
+    [1e3, translate(locale, 'format.compact.thousand')],
   ];
 
   for (const [scale, suffix] of units) {

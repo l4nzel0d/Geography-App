@@ -201,6 +201,33 @@ and in a desktop browser:
   because a required PNG reaches MapLibre through a `drawable-*` resource lookup there and a
   Metro URL in dev, and those are two different code paths.
 
+Added 2026-08-26, verified on the web (both trees, in a browser) and by 1002 unit tests;
+**not yet verified on Android or the S25**:
+
+- **the app is fully bilingual, English and Russian** - UI *and* data. Country names,
+  capitals, languages, currencies and regions all have Russian values; the map labels, the
+  info sheet, search, all three quiz modes and the grader work in either language. See
+  *Localization*.
+- **the web ships twice**: English at `/`, Russian at `/ru`, as two static exports. Each is
+  pre-rendered in its own language, so `<html lang>` is real and there is no hydration
+  flash, and **every `router.push('/search')` is unchanged** because expo-router prefixes
+  `experiments.baseUrl` itself.
+- **nothing re-uploads to MapLibre on a language switch.** Both languages' label text rides
+  on the same features (`tName` + `tNameRu`), so switching changes only the layer's
+  `text-field` and `filter` - the same code path the label picker already uses.
+  `MapScreen.test.tsx` asserts both sources are `toBe`-identical across a switch.
+- 1002 tests across 44 suites pass, typecheck clean, and the two-locale `npm run build:web`
+  succeeds with its own per-tree assertions.
+- **three bugs were found on a device, not by the tests**, and all three are now covered:
+  a leftover English hints table in `FieldPicker`, and two symptoms of the same
+  React Compiler staleness described under *`useTranslator`, and why `t` alone is a trap*.
+- **found and fixed a pre-existing bug**: `npm run enrich:data` would have silently
+  reverted the three hand-corrected capitals (Eswatini, Equatorial Guinea, Sri Lanka) the
+  next time anyone ran it. See *Corrections to world-countries*.
+- **not done**: no Maestro flow for Russian, nothing run on Android, and the offline
+  acceptance test has not been re-run. The web offline path is the riskiest untested part -
+  each locale's service worker is scoped to its own subtree and that is only proven online.
+
 ## Stack
 
 | Concern | Choice | Notes |
@@ -212,6 +239,7 @@ and in a desktop browser:
 | Geometry | Natural Earth *Admin 0 Countries, 1:50m* | public domain, 242 features → 240 countries |
 | Facts | `world-countries` npm (= mledoze/countries) | ODbL; the dataset REST Countries itself serves |
 | Population | World Bank `SP.POP.TOTL` | free, no key, most-recent-year values |
+| Languages | English + Russian, hand-authored data, no i18n library | see *Localization* |
 
 Chosen over Android Studio + Kotlin because polygon rendering happens inside MapLibre's native renderer
 either way — so RN costs nothing in performance while giving a far faster iteration loop.
@@ -280,15 +308,29 @@ src/
     mapFlagImages.ts        # GENERATED: 249 PNG requires, keyed flag-<iso2>
     mapFlagImages.web.ts    # GENERATED: the same keys, as /map-flags/ URLs
     labelFit.ts             # pure: one fit core; text width or flag width -> that zoom
+  i18n/
+    localeTypes.ts          # pure: Locale, LOCALES, coerceLocale, byLocale
+    locale.ts / .web.ts     # the active language: singleton+storage / a build constant
+    localeStorage.ts / .web.ts
+    localePath.ts           # pure: '/quiz/play?seed=7' <-> '/ru/quiz/play?seed=7'
+    baseUrl.ts              # EXPO_BASE_URL + withBaseUrl, for hand-written asset URLs
+    en.ts / ru.ts           # the catalogue; en is the schema, ru is Record<MessageKey,...>
+    en.plurals.ts / ru.plurals.ts
+    plural.ts               # pure: one/few/many, hand-rolled
+    t.ts                    # translate / translatorFor - Translator is callable + .plural
+    useTranslator.ts        # what COMPONENTS use; see the note in Localization
   data/
     countries.geo.json      # 240 outlines, properties trimmed to { iso3, name }   (1.6 MB)
-    countryFacts.json       # 250 fact records keyed by ISO-3                       (65 KB)
-    countryFacts.ts         # synchronous lookup
+    countryFacts.json       # 250 records keyed by ISO-3, each with translations.ru (184 KB)
+    countryFacts.ts         # per-locale tables, built eagerly; getCountryFacts(iso3, locale)
+    placeNames.ts           # display names for the 6 regions and 24 subregions
+    ru/                     # the hand-authored dictionaries; build-time inputs
     labelPoints.json        # 240 label anchors + landmass widths                    (9 KB)
     labelGeoJson.ts         # one label point per country, every field's text folded on
     worldGeoJson.ts         # outlines + population folded on, for the choropleth
     types.ts
   components/
+    LocaleToggleButton.tsx  # the two-letter language pill, top-right
     CountryFlag.tsx         # the flag, as a bundled SVG through expo-image
     flagAssets.ts           # GENERATED: 249 static requires, one per flag
     CountryInfoSheet.tsx
@@ -328,6 +370,8 @@ src/
   search/
     countrySearch.ts        # pure: the 237-country index and the ranked matcher
     pendingCountry.ts       # subscription handover from /search back to the map
+scripts/countryOverrides.mjs        # deliberate corrections to world-countries, asserted
+scripts/manifest.mjs                # the web manifest, per locale, with its invariants
 scripts/build-flag-assets.mjs       # offline; the SVG set, the PNG map rasters, 3 require maps
 scripts/build-label-points.mjs      # offline; polylabel anchors from the committed geometry
 scripts/build-country-data.mjs      # full online rebuild
@@ -1283,6 +1327,252 @@ three to write — no coordinate taps, no camera — but it cannot judge the one
 actually been wrong here, which is whether the flag looks right. That is a screenshot.
 
 
+## Localization
+
+The app ships in English and Russian, and "fully" means the data too: every country name,
+capital, language, currency and region has a Russian value, and the quiz grades Russian
+answers with Russian rules.
+
+### `useTranslator`, and why `t` alone is a trap
+
+**This is the part to read before touching anything here.**
+
+A component gets its strings from `const t = useTranslator()`, never from a module-level
+`t(key)` import. The module-level `t` still exists and is still correct - it is what
+`labelGeoJson` and `formatters` use - but calling it *inside a component* does not work,
+and the way it fails is invisible in every test.
+
+`app.json` sets `reactCompiler: true`. A call like `t('quiz.open.label')` takes a constant
+and reads a module singleton the compiler cannot see, so it has **no reactive inputs at
+all** and the compiler is entitled to compute it once and reuse the result forever. It
+does.
+
+The symptom, found on a device and not by 997 passing tests: switching language updated the
+language toggle and the map's labels, and left the three pills beside them saying "Flat",
+"Labels" and "Quiz" - until the next tap on a pill changed `fillMode`, invalidated that
+memo, and the words snapped into Russian a moment too late. A subscription in the parent
+screen does not help: the child's props are unchanged, so the compiler skips it entirely.
+
+`useTranslator()` returns the translator for the active locale, and `translatorFor` is
+memoised per locale - so its **identity** changes exactly when the language does, and every
+`t(...)` in the component now depends on something the compiler tracks.
+
+- This is not the hook CLAUDE.md warns about elsewhere. That warning was about extracting
+  `useWindowDimensions()` and getting a *stale* value; the lesson was that a subscription
+  has to stay somewhere the compiler can see it invalidate a render, which is exactly what
+  this does. Reading the singleton directly is the shape that goes stale.
+- Pure modules take a `Translator` as an argument instead - `buildExitPrompt`,
+  `buildResetPrompt`. That keeps the decision they encode legible to Jest, which is the
+  whole reason those modules exist.
+- Non-component code passes an explicit locale: `formatCompactNumber(n, locale)`,
+  `getCountryFacts(iso3, locale)`, `labelTextFor(field, facts, locale)`.
+
+### The locale itself
+
+`src/i18n/locale.ts` is a module singleton with subscribe/notify, modelled on
+`masteryStore.ts` - no context, no provider, so the screens stay renderable bare in Jest.
+Two deliberate differences: no write debounce (this fires once per tap, not 193 times a
+round), and **the startup storage read notifies only when it disagrees** with the device
+default, because the common case is agreement and a spurious notify one frame after mount
+re-renders the map's layers for nothing.
+
+The initial value is the device's own language via
+`Intl.DateTimeFormat().resolvedOptions().locale` - **not `expo-localization`**, which would
+be a native dependency and therefore an `app.json` edit, an `expo prebuild` and a full
+rebuild for one string Hermes already has.
+
+`locale.web.ts` is the sibling. On the web the language is a property of the deployment
+rather than state: `setLocale` is a document navigation to the other tree and
+`subscribeToLocale` never fires. Every call site is written against the native signature
+and none of them knows the difference, so there are **still zero `Platform.OS` checks in
+`src/`**.
+
+### The catalogues
+
+`en.ts` is the schema: `MessageKey` is `keyof typeof en`, and `ru.ts` is typed
+`Record<MessageKey, string>`, so a missing or extra key is a **compile error**.
+`catalogue.test.ts` covers only what a type cannot see - an empty value, a placeholder
+dropped in translation, a string left in English.
+
+Counted messages are separate (`en.plurals.ts` / `ru.plurals.ts`) because English needs two
+forms and **Russian needs three**. `pluralCategory` is hand-rolled rather than
+`Intl.PluralRules`, the same call `normalizeText.ts` makes about its combining-mark range:
+Hermes delegates `Intl` to Android's ICU, a different implementation from the Node the tests
+run on. The 11-14 exception is checked first, or you get "11 страна".
+
+**Every leftover English table is a bug of the same shape**, and one shipped: `FieldPicker`
+kept a local `FIELD_HINTS` map, so a Russian round showed "Страна" over "Name the
+highlighted country". If you add a picker, its words go in the catalogue.
+
+### The data
+
+`countryFacts.json` gained `translations.ru` per record, plus `languageCodes` - mledoze
+keys languages by ISO-639-3 and the record kept only the English names, and the Russian
+dictionary joins on the code.
+
+| Source | What it gives |
+|---|---|
+| `world-countries` `translations.rus` | country name + official name, **all 250, no gaps** |
+| `src/data/ru/capitals.json` | 247 capitals, keyed by the English string |
+| `src/data/ru/languages.json` | 153 languages, keyed by ISO-639-3 |
+| `src/data/ru/currencies.json` | 162 currencies, keyed by ISO-4217 |
+| `src/data/ru/places.json` | 6 regions + 24 subregions |
+| `src/data/ru/countries.json` | per-country overrides and extra aliases (Голландия, Бирма, США) |
+
+Hand-authored, keyed on **codes rather than positions** so a mis-join is impossible, and
+**regenerated with `npm run enrich:data`** - offline, geometry untouched. A missing entry
+fails the build (`russianIntegrityProblems`), checked over all 250 records rather than the
+193 quiz countries, because the info sheet can reach any country with geometry.
+
+`COUNTRY_FACTS` builds both locales' tables **eagerly at module load**, so each one's object
+identity is permanently stable - the property every derived structure downstream depends on.
+The cost is ~250 small objects; `worldGeoJson` is not involved at all, because it reads only
+`population` and `area`, neither of which is a word. That is why the 1.6 MB outline source
+is locale-invariant and stays a true module constant.
+
+**Subregion and region identifiers stay English.** They are the `?subregions=` URL param,
+the key `countriesIn` filters on, and what Maestro types; only the display label is
+translated, through `placeNames.ts`. Same trade `FieldId` and `QuizMode` already make.
+`QUIZ_COUNTRIES_BY_LOCALE` keeps **both arrays in the English sort order** for a related
+reason: `buildQuiz` shuffles that array with a seed, so re-sorting the Russian pool would
+make one seed give two different rounds. A pool order is not a display order - the search
+index, which a person actually reads, *is* re-sorted per language.
+
+### Corrections to world-countries
+
+`scripts/countryOverrides.mjs` exists because of a bug this work uncovered rather than
+caused: **`enrich-country-facts.mjs` rebuilds every record from the pinned dataset**, so any
+hand-edit to `countryFacts.json` is silently reverted the next time it runs - with no error,
+into a minified single-line file nobody diffs. Three capitals corrected in August were one
+`npm run enrich:data` away from disappearing.
+
+They are now stated in code, where the build asserts them, exactly as `NE_TO_ISO3` and
+`ISO3_TO_WORLD_BANK` are. An override that has *stopped* differing from upstream also fails
+the build, so a fix upstream tells you to delete a line instead of rotting.
+
+### Grading in Russian
+
+Four things needed real work; everything else was already language-neutral.
+
+- **`NAME_INDEX` is per locale**, and this is the load-bearing one. `австрия` is two edits
+  from `австралия` on a nine-letter target - inside the typo budget - so without a Russian
+  index the confusable guard is blind and the round awards Austria's point for Australia.
+  `gradingRu.test.ts` sweeps all 193x193 pairs, mirroring the English suite.
+- **The head-noun rule is not the same rule.** English puts the head last ("South African
+  rand"); Russian puts it either side - `российский рубль` but `фунт стерлингов` and
+  `доллар США`. So Russian offers both ends, minus anything that looks adjectival
+  (`российский`) or is an abbreviation (`США`), and the existing ambiguity check discards
+  the rest. Offering both ends in English would accept "south" for the rand.
+- **Inflection.** `рублей` is two edits from `рубль` on a five-letter target, so the typo
+  budget cannot reach it. `russianStem` crudely trims one ending, applied **to both sides**
+  and **only to the set fields** - never to country names, where a near miss means a
+  different country and the guard is doing safety work. It runs on already-normalized text,
+  where `й` has become `и`, so the ending list carries both spellings.
+- **`parsePopulation` accepts `млн`, `млрд`, `тыс`** as well as the English words. The comma
+  is still stripped rather than read as a decimal point: `1,400` is ambiguous between the
+  two conventions, and the tie is broken the way that keeps `68,000,000` working.
+
+A Russian round also accepts the **English** names, deliberately: a bilingual player typing
+"Russia" has not got the question wrong, and a superset makes the confusable guard stricter
+rather than looser, because more strings are claimed by some country.
+
+`normalizeText` needed no structural change. Its NFD pass already folds `ё` to `е`, which
+is exactly the tolerance Russian users expect - an accident worth the test that pins it.
+
+### Map labels carry both languages
+
+`textPropertyFor(field, locale)` returns `tName` for English (**unsuffixed**, so nothing
+existing moved) and `tNameRu` for Russian, and `labelGeoJson` writes both onto the same
+features in one pass.
+
+That is the whole safety argument. CLAUDE.md calls replacing `<GeoJSONSource data>` on a
+live map the riskiest unproven operation in the app; a settings toggle must not be on that
+path. Baking both languages onto one source means a switch changes only `text-field` and
+`filter` - a layout-property change, no re-upload. The cost is ~10 extra small properties on
+240 features. `MapScreen.test.tsx` asserts both sources come back `toBe`-identical across a
+language change.
+
+The **fit threshold is genuinely per-locale**, not merely suffixed: Russian names are longer
+and Cyrillic is measured a little wider (`CYRILLIC_GLYPH_RATIO` 0.60 against 0.55, and
+**English stays at exactly 0.55** so no English label moves). It is not monotone, though -
+`Чехия` is shorter than `Czechia` - so 41 of 240 thresholds go the other way and the test
+asserts the ordering rather than a rule.
+
+The bundled Noto Sans already covers the **entire** Cyrillic block plus `№`, so none of this
+needed a font change, an `app.json` edit or a rebuild. Verified by parsing its cmap.
+
+### The chrome width budget
+
+CLAUDE.md's old figure was stale: the top-right row is ~113 dp, not ~187, because
+`SearchLaunchButton` is a glyph button now. Measured with the project's own estimator
+against the 379 dp available at 411 dp:
+
+| | left row | right row | total |
+|---|---|---|---|
+| English | 186 | 147 | 333 |
+| Russian | 204 | 151 | **355** |
+
+24 dp of slack in Russian, and only because the language toggle is a **compact two-letter
+pill** (10 dp padding, not 14) and the quiz button says **`Тест`, not `Викторина`** - which
+alone would overflow the row. `chromeWidth.test.ts` sweeps every fill mode by label field by
+locale against the budget, so the overlap CLAUDE.md records actually shipping once is now a
+red test rather than a device discovery.
+
+### The web ships twice
+
+`app.config.js` layers over `app.json` and sets `experiments.baseUrl` from
+`EXPO_PUBLIC_LOCALE`. **With that variable unset it resolves to exactly the config
+`app.json` already described**, so every native build is unchanged - do not export it in
+your shell.
+
+`npm run build:web` now runs two exports and generates two service workers. Three things
+about it are load-bearing:
+
+- **English exports FIRST.** `expo export` calls `removeAsync(outputDir)` before writing, so
+  `--output-dir dist` running second would delete `dist/ru` with it.
+- **Each tree is self-contained** - its own flags, icons, MapLibre worker and manifest,
+  because **a service worker cannot intercept requests outside its own scope**. A page at
+  `/ru/` reaching for `/flags/ru.svg` at the root works online and fails offline, which is
+  the one requirement this project has. `withBaseUrl` covers the four hand-written absolute
+  URLs (the MapLibre worker, the flag SVGs, the 249 map-flag PNGs, and the links in
+  `+html.tsx`). ~3.4 MB of duplication buys that; `dist` goes from 9 MB to 20.
+- **`navigateFallbackDenylist` needs a `(/|$)` alternation, not a trailing slash.**
+  `vercel.json` sets `trailingSlash: false`, so the canonical Russian URL is `/ru` with no
+  slash - and a pattern anchored on `/ru/` does not match it. The root worker then served its
+  own `/index.html` there, the English bundle booted at a Russian URL, and expo-router
+  rendered "Unmatched Route". It looked like a routing bug and was a one-character regex bug.
+
+The build asserts per tree: bundle size under the precache limit, `<html lang>` correct, the
+right worker registered, and the pre-rendered markup in the right language. That last check
+reads the **HTML, not the JS bundle** - both bundles contain both catalogues, and Metro
+escapes non-ASCII in minified output, so `Обычная` is literal text in neither.
+
+`EXPO_PUBLIC_LOCALE` is a build input to `app.config.js` **and nothing else**: `baseUrl` is
+part of Metro's transform cache key and `EXPO_PUBLIC_*` is not, so app code reads the locale
+from `EXPO_BASE_URL` instead. Otherwise the second export could reuse the first's cached
+transform and ship the wrong language, successfully and silently.
+
+### What the tests pin, and what they cannot
+
+`jest.setup.ts` pins the locale to English **twice** - once at setup load, once per test.
+Both are needed, and this is not boilerplate: the singleton seeds from the machine's own
+locale, which on a Russian-locale Windows box is `ru-RU`, and a `describe` body that builds a
+fixture with `getCountryFacts('FRA')` reads it long before any `beforeEach` fires. Without
+the top-level pin that fixture came back as Франция and the failures looked nothing like the
+cause.
+
+Not covered, and worth knowing:
+
+- **No Maestro flow for Russian.** When one is written, note that persisting the locale
+  makes the suite order-dependent: a `locale.yaml` sorts before `map-labels.yaml`,
+  `mastery.yaml` and `quiz.yaml`, so a mid-run abort would leave Russian selected and fail
+  all three on English strings. `clearState: true` on every `launchApp` becomes mandatory.
+- **Nothing has run on Android**, and the **offline acceptance test has not been re-run**.
+  Nothing here adds a network call - the dictionaries are bundled - but the web half changed
+  how resources resolve, which is exactly the class of change that gate exists for.
+- **Whether Russian map labels are legible**, and how much sparser they are. That is a
+  screenshot; Maestro cannot see inside the GL surface.
+
 ## Country search
 
 A pill in the top-right row opens `/search`. Type a name, pick a result, and the map behind it
@@ -1542,7 +1832,8 @@ npm run flags:data                 # offline; the flag SVGs, the PNG map rasters
 
 # web
 npm run web                        # expo start --web (dev; no service worker)
-npm run build:web                  # assets + icons + export + service worker -> dist/
+npm run build:web                  # assets + icons + TWO exports + two service workers.
+                                   # English -> dist/, Russian -> dist/ru/. ~20 MB total.
 npm run serve:web                  # serve an existing dist/ on :4173
 npm run web:phone                  # build and serve for a phone on the LAN
 # A service worker needs a SECURE context, so a LAN IP shows the app but never the PWA.
@@ -1646,7 +1937,9 @@ freely now, so none can assume it:
 | `.maestro/quiz.yaml` | `PORTRAIT` + rotate | Quiz → pick a subregion and fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score |
 
 **There is no flow for the quiz's `locate` mode**, which is the current gap — see *What is not
-covered* under *Locate mode*.
+covered* under *Locate mode*. **There is no flow for Russian either**; see *What the
+tests pin, and what they cannot* under *Localization*, which also explains why adding one
+makes `clearState: true` mandatory on every other flow.
 
 Coordinate taps are only deterministic because `INITIAL_CENTER` and the derived zoom floor
 (`cameraFit.ts`) pin the camera on launch — **change either and you must re-derive every tap point in
@@ -2042,6 +2335,17 @@ permanent reduction in what E2E can prove about this path, unlike `quiz.yaml`, w
 seed precisely so it *can* assert on a real answer.
 
 ## Open risks
+
+- **The Russian build has never run on Android**, and the offline acceptance test has not
+  been re-run since it landed. The web half changed how resources resolve — two service
+  workers, each scoped to its own subtree — and that is exactly what the gate is for.
+- **`app.json` is now layered by `app.config.js`.** Anything reading the config sees the
+  merged result. With `EXPO_PUBLIC_LOCALE` unset it is identical to before, so native is
+  unaffected — but **do not export that variable in your shell**, or a native build gets a
+  `/ru` base URL and every bundled asset resolves to a path that does not exist in an APK.
+- **The Russian dictionaries are ~590 hand-authored strings.** The build proves they are
+  complete and that no English leaked in; it cannot prove they are *right*. A native-speaker
+  read is still owed.
 
 - **MapLibre vs RN 0.86** — the library is developed against RN 0.85.3 and declares `>= 0.80`. Nothing
   has broken in practice, but we are a version ahead of what upstream tests.

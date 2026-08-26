@@ -24,7 +24,12 @@ import { fileURLToPath } from 'node:url';
 
 import worldCountries from 'world-countries';
 
-import { buildFactRecord, quizIntegrityProblems } from './countryFactRecord.mjs';
+import {
+  buildFactRecord,
+  quizIntegrityProblems,
+  russianIntegrityProblems,
+} from './countryFactRecord.mjs';
+import { overrideProblems } from './countryOverrides.mjs';
 
 const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'data');
 
@@ -246,6 +251,8 @@ async function main() {
   // Quiz mode asks these fields of every UN member, so a gap here is an unanswerable
   // question rather than a blank row in the info sheet.
   problems.push(...quizIntegrityProblems(facts, geometryCodes));
+  problems.push(...russianIntegrityProblems(facts));
+  problems.push(...overrideProblems(worldCountries));
 
   if (problems.length) {
     console.error('\nIntegrity check FAILED:');

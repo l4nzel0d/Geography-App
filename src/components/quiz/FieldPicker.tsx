@@ -1,6 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ANSWERABLE_FIELDS, type FieldId, FIELD_LABELS } from '@/quiz/quizConfig';
+import type { MessageKey } from '@/i18n/t';
+import { useTranslator } from '@/i18n/useTranslator';
+import { ANSWERABLE_FIELDS, type FieldId, FIELD_LABEL_KEYS } from '@/quiz/quizConfig';
 
 import { quizColors, quizRadii } from '../palette';
 
@@ -10,15 +12,24 @@ type FieldPickerProps = {
 };
 
 /** What each field actually asks of you, for the screen reader and the subtitle. */
-const FIELD_HINTS: Record<FieldId, string> = {
-  name: 'Name the highlighted country',
-  capital: 'Name its capital city',
-  currency: 'Name its currencies, up to three',
-  languages: 'Name three of its official languages',
-  population: 'Guess its population, within 20%',
+/**
+ * The one-line explanation under each field's name.
+ *
+ * Message KEYS, not words - this table was English prose in the component until a Russian
+ * round showed "Страна / Name the highlighted country" on a device. Everything else on this
+ * screen went through the catalogue and this one local table did not.
+ */
+const FIELD_HINT_KEYS: Record<FieldId, MessageKey> = {
+  name: 'quiz.field.name.hint',
+  capital: 'quiz.field.capital.hint',
+  currency: 'quiz.field.currency.hint',
+  languages: 'quiz.field.languages.hint',
+  population: 'quiz.field.population.hint',
 };
 
 export function FieldPicker({ selected, onChange }: FieldPickerProps) {
+  const t = useTranslator();
+
   const chosen = new Set(selected);
 
   const toggle = (field: FieldId) => {
@@ -42,13 +53,13 @@ export function FieldPicker({ selected, onChange }: FieldPickerProps) {
             style={[styles.row, active && styles.rowActive]}
             accessibilityRole="checkbox"
             accessibilityState={{ checked: active }}
-            accessibilityLabel={FIELD_HINTS[field]}
+            accessibilityLabel={t(FIELD_HINT_KEYS[field])}
           >
             <View style={styles.rowText}>
               <Text style={[styles.label, active && styles.labelActive]}>
-                {FIELD_LABELS[field]}
+                {t(FIELD_LABEL_KEYS[field])}
               </Text>
-              <Text style={[styles.hint, active && styles.hintActive]}>{FIELD_HINTS[field]}</Text>
+              <Text style={[styles.hint, active && styles.hintActive]}>{t(FIELD_HINT_KEYS[field])}</Text>
             </View>
             <Text style={[styles.tick, active && styles.tickActive]}>{active ? '✓' : ''}</Text>
           </Pressable>

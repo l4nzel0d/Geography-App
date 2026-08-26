@@ -3,6 +3,7 @@ import { Keyboard, Pressable, StyleSheet, View } from 'react-native';
 import { CountryFlag } from '@/components/CountryFlag';
 
 import { quizColors, quizRadii } from '../palette';
+import { useTranslator } from '@/i18n/useTranslator';
 
 type FlagStageProps = {
   /** The flag emoji from `countryFacts.json`. Every quiz country has one. */
@@ -81,6 +82,8 @@ const FLAG_STAGE_COMPACT_MIN_HEIGHT = 84;
  * exist only where a view shares a window with a live map surface. See CLAUDE.md.
  */
 export function FlagStage({ flag, compact }: FlagStageProps) {
+  const t = useTranslator();
+
   return (
     /**
      * Tapping the stage dismisses the keyboard, which is how the player gets the room
@@ -91,7 +94,7 @@ export function FlagStage({ flag, compact }: FlagStageProps) {
       testID="quiz-flag-stage"
       onPress={Keyboard.dismiss}
       accessibilityRole="image"
-      accessibilityLabel="The country's flag"
+      accessibilityLabel={t('quiz.flag.a11y')}
       style={[styles.stage, compact && styles.stageCompact]}
     >
       {/*
@@ -104,7 +107,7 @@ export function FlagStage({ flag, compact }: FlagStageProps) {
         padding inside an `aspectRatio` box would make the picture some other shape.
       */}
       <View style={styles.frame}>
-        <CountryFlag flag={flag} fill label="The country's flag" />
+        <CountryFlag flag={flag} fill label={t('quiz.flag.a11y')} />
       </View>
     </Pressable>
   );

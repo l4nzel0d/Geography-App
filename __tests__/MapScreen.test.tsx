@@ -24,6 +24,7 @@ import { INITIAL_CENTER, INITIAL_ZOOM } from '@/map/WorldMap';
 import { selectCountry } from '@/search/pendingCountry';
 import { worldGeoJson } from '@/data/worldGeoJson';
 import { publishMastery, recordResult, __resetMasteryStore } from '@/mastery/masteryStore';
+import { setLocale, __resetLocale } from '@/i18n/locale';
 
 /**
  * `_layout.tsx` supplies the SafeAreaProvider in the real app; these tests render
@@ -192,6 +193,111 @@ describe('MapScreen', () => {
     // Regex, not a string: the legend renders its title, every axis label and the
     // no-data key, and v14's toHaveTextContent matches the concatenation exactly.
     expect(legend()).toHaveTextContent(/People per country/);
+  });
+
+  /**
+   * Switching language must not touch either map source.
+   *
+   * This is the safety argument for baking both languages onto the label features rather
+   * than building a collection per locale, and it is checkable here rather than only on a
+   * device. Replacing `<GeoJSONSource data>` on a live map is the operation CLAUDE.md calls
+   * the riskiest unproven thing in the app; a settings toggle must not be on that path.
+   */
+  describe('switching language', () => {
+    afterEach(() => {
+      __resetLocale('en');
+    });
+
+    const sourceData = () => screen.getByTestId('source-countries').props.data;
+    const labelData = () => screen.getByTestId('source-country-labels').props.data;
+
+    const switchLanguage = async () => {
+      await act(async () => {
+        setLocale('ru');
+      });
+    };
+
+    it('re-uploads neither the outlines nor the label points', async () => {
+      await render();
+      const outlines = sourceData();
+      const labels = labelData();
+
+      await switchLanguage();
+
+      expect(sourceData()).toBe(outlines);
+      expect(labelData()).toBe(labels);
+    });
+
+    it('changes only the label layer|s expressions', async () => {
+      await render();
+      await selectLabelField('name');
+      expect(labelLayer().props.layout['text-field']).toEqual(['get', 'tName']);
+
+      await switchLanguage();
+
+      // A layout-property change - the same code path the label-field picker already uses.
+      expect(labelLayer().props.layout['text-field']).toEqual(['get', 'tNameRu']);
+      expect(labelLayer().props.filter).toEqual([
+        'all',
+        ['has', 'tNameRu'],
+        ['<=', ['get', 'zNameRu'], ['zoom']],
+      ]);
+    });
+
+    /**
+     * Every piece of chrome, in one assertion, because the failure this catches is
+     * partial rather than total.
+     *
+     * Found on a device: the language toggle switched, the map's labels switched, and the
+     * three pills beside them stayed in English until the next tap. `reactCompiler: true`
+     * had memoised their `t('...')` calls - constants in, singleton read the compiler
+     * cannot see, so no reactive input and no reason ever to recompute. `useTranslator`
+     * turns the language into a value; this asserts the whole row moves together.
+     */
+    it('redraws every piece of chrome in the new language, not just some', async () => {
+      await render();
+      expect(screen.getByTestId('toggle-fill-mode')).toHaveTextContent('Flat');
+      expect(screen.getByTestId('toggle-label-field')).toHaveTextContent('Labels');
+      expect(screen.getByTestId('open-quiz')).toHaveTextContent('Quiz');
+      expect(screen.getByTestId('toggle-language')).toHaveTextContent('RU');
+
+      await switchLanguage();
+
+      expect(screen.getByTestId('toggle-fill-mode')).toHaveTextContent('Обычная');
+      expect(screen.getByTestId('toggle-label-field')).toHaveTextContent('Метки');
+      expect(screen.getByTestId('open-quiz')).toHaveTextContent('Тест');
+      expect(screen.getByTestId('toggle-language')).toHaveTextContent('EN');
+    });
+
+    /** The panels behind the pills, which are always mounted and merely parked. */
+    it('redraws the option panels too', async () => {
+      await render();
+      await switchLanguage();
+
+      // Regex, not a string: a panel renders its title AND every row, and v14's
+      // toHaveTextContent matches the concatenation exactly. Same reason the legend
+      // assertions above use one.
+      expect(screen.getByTestId('fill-mode-panel', { includeHiddenElements: true }))
+        .toHaveTextContent(/Раскрасить сушу по/);
+      expect(screen.getByTestId('fill-mode-panel', { includeHiddenElements: true }))
+        .toHaveTextContent(/Плотность/);
+      expect(screen.getByTestId('label-field-panel', { includeHiddenElements: true }))
+        .toHaveTextContent(/Подписывать страны/);
+      expect(screen.getByTestId('label-field-panel', { includeHiddenElements: true }))
+        .toHaveTextContent(/Столица/);
+    });
+
+    it('renames an open info sheet rather than leaving it in the old language', async () => {
+      // `visibleFacts` deliberately LAGS its prop so the card can animate out, so this is
+      // the one place a stale language could survive a switch.
+      await render();
+      await pressCountry('FRA');
+      expect(screen.getByTestId('country-name')).toHaveTextContent('France');
+
+      await switchLanguage();
+
+      expect(screen.getByTestId('country-name')).toHaveTextContent('Франция');
+    });
   });
 
   describe('the geometry handed to the source', () => {

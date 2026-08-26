@@ -91,3 +91,31 @@ describe('public/flags', () => {
     expect(shipped).toEqual(codes);
   });
 });
+
+/**
+ * The committed dev-server manifest.
+ *
+ * The per-locale invariants - scope, prefixed icons, the Russian strings - are asserted in
+ * `scripts/manifest.mjs` at BUILD time rather than here, because that module is ESM and
+ * Jest's transform does not reach `.mjs`. Putting them in the build is not a workaround:
+ * it is where the rest of this pipeline's invariants live, and a manifest that is wrong
+ * should fail the deploy rather than a test run.
+ *
+ * What this file can still check is that the committed copy is a real manifest with the
+ * root scope, which is the one thing the dev server depends on.
+ */
+describe('the committed web manifest', () => {
+  const manifest = JSON.parse(readFileSync(join(root, 'public/manifest.webmanifest'), 'utf8'));
+
+  it('is scoped to the root, for the dev server and the English deploy', () => {
+    expect(manifest.scope).toBe('/');
+    expect(manifest.start_url).toBe('/');
+    expect(manifest.lang).toBe('en');
+  });
+
+  it('names icons that public/ actually holds', () => {
+    for (const icon of manifest.icons) {
+      expect(existsSync(join(root, 'public', icon.src.replace(/^\//, '')))).toBe(true);
+    }
+  });
+});

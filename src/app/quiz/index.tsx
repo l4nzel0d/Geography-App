@@ -22,13 +22,15 @@ import { quizColors, quizRadii } from "@/components/palette";
 import { useWindowSize } from "@/components/useWindowSize";
 import { SubregionPicker } from "@/components/quiz/SubregionPicker";
 import { PRACTICE_ROUND_SIZE } from "@/quiz/practicePool";
-import { countriesIn } from "@/quiz/quizCountries";
+import { getLocale } from "@/i18n/locale";
+import { countriesIn, QUIZ_COUNTRIES } from "@/quiz/quizCountries";
+import { useTranslator } from "@/i18n/useTranslator";
 import {
   DEFAULT_MODE,
   type FieldId,
   MODE_ASKS_FIELDS,
   newSeed,
-  QUIZ_MODE_HINTS,
+  QUIZ_MODE_HINT_KEYS,
   type QuizMode,
   toQuizParams,
 } from "@/quiz/quizConfig";
@@ -50,6 +52,16 @@ export default function QuizSetupScreen() {
       ? styles.centred
       : null;
   const [mode, setMode] = useState<QuizMode>(DEFAULT_MODE);
+
+  /**
+   * The translator for the active language.
+   *
+   * A hook rather than the module-level `t`, because `reactCompiler: true` will
+   * memoise a call with no reactive inputs and never recompute it - which is how a
+   * language switch left half the chrome in English until something else forced a
+   * render. See `useTranslator`.
+   */
+  const t = useTranslator();
   const [subregions, setSubregions] = useState<string[]>([]);
   const [fields, setFields] = useState<FieldId[]>(["name"]);
   const [practice, setPractice] = useState(false);
@@ -102,12 +114,12 @@ export default function QuizSetupScreen() {
       <View style={[styles.header, centred]}>
         <View style={styles.headerText}>
           <Text testID="quiz-setup-title" style={styles.title}>
-            Quiz
+            {t('quiz.setup.title')}
           </Text>
           {/* One source for the wording, shared with the mode picker's own rows - two
               copies drifted apart the moment there was a third mode to describe. */}
           <Text testID="quiz-setup-subtitle" style={styles.subtitle}>
-            {QUIZ_MODE_HINTS[mode]}
+            {t(QUIZ_MODE_HINT_KEYS[mode])}
           </Text>
         </View>
         <Pressable
@@ -115,7 +127,7 @@ export default function QuizSetupScreen() {
           onPress={goBack}
           hitSlop={16}
           accessibilityRole="button"
-          accessibilityLabel="Back to the map"
+          accessibilityLabel={t('quiz.setup.close')}
           style={styles.close}
         >
           <Text style={styles.closeText}>✕</Text>
@@ -131,7 +143,7 @@ export default function QuizSetupScreen() {
           { paddingBottom: insets.bottom + 120 },
         ]}
       >
-        <Text style={styles.section}>How do you want to play?</Text>
+        <Text style={styles.section}>{t('quiz.setup.mode')}</Text>
         <ModePicker selected={mode} onChange={setMode} />
 
         {/*
@@ -142,15 +154,15 @@ export default function QuizSetupScreen() {
         */}
         {needsFields ? (
           <>
-            <Text style={styles.section}>What do you have to answer?</Text>
+            <Text style={styles.section}>{t('quiz.setup.fields')}</Text>
             <FieldPicker selected={fields} onChange={setFields} />
           </>
         ) : null}
 
-        <Text style={styles.section}>Who gets asked?</Text>
+        <Text style={styles.section}>{t('quiz.setup.who')}</Text>
         <PracticePicker practice={practice} onChange={setPractice} />
 
-        <Text style={styles.section}>Which parts of the world?</Text>
+        <Text style={styles.section}>{t('quiz.setup.where')}</Text>
         {/*
           The two sections INTERSECT - the regions choose the candidate pool and the
           weak-spot weighting then draws from that - so "practise my weak spots in Africa"
@@ -160,8 +172,11 @@ export default function QuizSetupScreen() {
         */}
         <Text testID="quiz-setup-scope-note" style={styles.sectionNote}>
           {practice
-            ? `Your ${PRACTICE_ROUND_SIZE} weakest countries will be drawn from these regions. Leave everything unselected to draw from all 193.`
-            : "Leave everything unselected to play the whole world — all 193 UN member states."}
+            ? t("quiz.setup.scope.practice", {
+                count: PRACTICE_ROUND_SIZE,
+                total: QUIZ_COUNTRIES.length,
+              })
+            : t("quiz.setup.scope.all", { total: QUIZ_COUNTRIES.length })}
         </Text>
         <SubregionPicker selected={subregions} onChange={setSubregions} />
 
@@ -172,11 +187,11 @@ export default function QuizSetupScreen() {
           destructive action from the settings it is not part of.
         */}
         <View style={styles.dangerZone}>
-          <Text style={styles.section}>Your progress</Text>
+          <Text style={styles.section}>{t('quiz.setup.progress')}</Text>
           <Text testID="quiz-reset-note" style={styles.sectionNote}>
             {tracked > 0
-              ? `Quizzes have taught the map about ${tracked} ${tracked === 1 ? "country" : "countries"}. Resetting clears that for every country.`
-              : "No quiz history yet — play a round and the map will start colouring itself in."}
+              ? t.plural("quiz.reset.note", tracked)
+              : t("quiz.reset.empty")}
           </Text>
           <Pressable
             testID="quiz-reset"
@@ -187,9 +202,9 @@ export default function QuizSetupScreen() {
             style={[styles.reset, tracked === 0 && styles.startDisabled]}
             accessibilityRole="button"
             accessibilityState={{ disabled: tracked === 0 }}
-            accessibilityLabel="Reset mastery for every country"
+            accessibilityLabel={t('quiz.reset.a11y')}
           >
-            <Text style={styles.resetText}>Reset mastery</Text>
+            <Text style={styles.resetText}>{t('quiz.reset.label')}</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -209,12 +224,12 @@ export default function QuizSetupScreen() {
             style={[styles.start, !canStart && styles.startDisabled]}
             accessibilityRole="button"
             accessibilityState={{ disabled: !canStart }}
-            accessibilityLabel={`Start a quiz of ${countryCount} countries`}
+            accessibilityLabel={t.plural("quiz.setup.startA11y", countryCount)}
           >
             <Text style={styles.startText}>
               {needsFields && fields.length === 0
-                ? "Pick at least one fact"
-                : `Start — ${countryCount} ${countryCount === 1 ? "country" : "countries"}`}
+                ? t("quiz.setup.pickField")
+                : t.plural("quiz.setup.start", countryCount)}
             </Text>
           </Pressable>
         </View>
@@ -228,7 +243,7 @@ export default function QuizSetupScreen() {
       <ConfirmDialog
         testID="quiz-reset-confirm"
         visible={confirmingReset}
-        {...buildResetPrompt({ tracked })}
+        {...buildResetPrompt({ tracked, t, })}
         onDismiss={() => setConfirmingReset(false)}
         onPress={resolveReset}
       />

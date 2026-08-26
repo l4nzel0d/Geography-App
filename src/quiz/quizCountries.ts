@@ -1,6 +1,9 @@
-import { allCountryFacts } from '@/data/countryFacts';
+import { allCountryFacts, factsFor } from '@/data/countryFacts';
 import rawGeoJson from '@/data/countries.geo.json';
 import type { CountryFacts } from '@/data/types';
+
+import { getLocale } from '@/i18n/locale';
+import { byLocale, type Locale } from '@/i18n/localeTypes';
 
 import type { FieldId } from './quizConfig';
 
@@ -44,6 +47,27 @@ export const QUIZ_COUNTRIES: readonly QuizCountry[] = Object.entries(allCountryF
   .map(([iso3, facts]) => ({ iso3, facts, region: facts.region, subregion: facts.subregion }))
   .sort((a, b) => a.facts.name.localeCompare(b.facts.name));
 
+/**
+ * The same pool in every language - and **in the same order**, which is not a detail.
+ *
+ * `buildQuiz` runs a seeded Fisher-Yates over this array, so the order decides WHICH
+ * countries a seed picks. Re-sorting the Russian pool alphabetically in Russian would mean
+ * `?seed=7` gave two different rounds in two languages, `quizBuilder.test.ts` would break,
+ * and `.maestro/quiz.yaml`'s pinned-seed answer would change. A pool order is not a display
+ * order; the setup screen sorts nothing, and the only place a country name is sorted for
+ * reading is `countrySearch.ts`.
+ *
+ * `region` and `subregion` stay the English identifiers here too - they are the URL param
+ * and the filter key. See `placeNames.ts`.
+ */
+export const QUIZ_COUNTRIES_BY_LOCALE: Record<Locale, readonly QuizCountry[]> = byLocale(
+  (locale) =>
+    QUIZ_COUNTRIES.map((country) => ({
+      ...country,
+      facts: factsFor(locale)[country.iso3] ?? country.facts,
+    })),
+);
+
 export type SubregionBucket = { subregion: string; region: string; count: number };
 
 /** The 24 subregions, each with how many countries it contributes. */
@@ -78,10 +102,14 @@ export const REGIONS: readonly { region: string; subregions: SubregionBucket[]; 
   })();
 
 /** How many countries a given selection covers. Empty selection means all of them. */
-export function countriesIn(subregions: readonly string[]): QuizCountry[] {
-  if (subregions.length === 0) return [...QUIZ_COUNTRIES];
+export function countriesIn(
+  subregions: readonly string[],
+  locale: Locale = getLocale(),
+): QuizCountry[] {
+  const pool = QUIZ_COUNTRIES_BY_LOCALE[locale] ?? QUIZ_COUNTRIES;
+  if (subregions.length === 0) return [...pool];
   const wanted = new Set(subregions);
-  return QUIZ_COUNTRIES.filter((country) => wanted.has(country.subregion));
+  return pool.filter((country) => wanted.has(country.subregion));
 }
 
 /**

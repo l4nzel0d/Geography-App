@@ -2,13 +2,18 @@
   "name": "Countries of the World",
   "short_name": "Countries",
   "description": "A world map you can explore offline: tap any country for its population, currency, languages, capital and area, colour the land by population or density, label every country, search 237 countries, or take a quiz.",
+  "lang": "en",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0d2b45",
   "theme_color": "#0d2b45",
-  "categories": ["education", "reference", "travel"],
+  "categories": [
+    "education",
+    "reference",
+    "travel"
+  ],
   "icons": [
     {
       "src": "/icons/icon-192.png",

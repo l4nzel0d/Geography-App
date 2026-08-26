@@ -28,6 +28,8 @@ import {
 import { CountryFlag } from './CountryFlag';
 import { getInfoSheetLayout, PORTRAIT_MAX_HEIGHT_FRACTION } from './infoSheetLayout';
 import { dismissDrag, dragProgress, shouldCaptureDrag, shouldDismiss } from './sheetDismiss';
+import { useTranslator } from '@/i18n/useTranslator';
+import { getLocale, subscribeToLocale } from '@/i18n/locale';
 
 type CountryInfoSheetProps = {
   iso3: string | null;
@@ -59,6 +61,8 @@ const FALLBACK_SIZE = { width: 360, height: 400 };
  * dependency surface (and therefore the rebuild surface) unchanged.
  */
 export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheetProps) {
+  const t = useTranslator();
+
   const insets = useSafeAreaInsets();
   const { landscape, panelWidth, tier } = getInfoSheetLayout(useWindowDimensions());
 
@@ -69,7 +73,21 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
    * on pointer type, so an Android tablet in landscape gets it too - which is right.
    */
   const desktop = tier === 'desktop';
-  const facts = getCountryFacts(iso3);
+  /**
+   * The language, read as a real value rather than left implicit.
+   *
+   * `getCountryFacts` defaults its locale to the singleton, which `reactCompiler: true`
+   * cannot see - it would be free to memoise this call on `iso3` alone and leave an open
+   * card in the old language after a switch. Passing the locale explicitly makes the
+   * dependency something the compiler can track.
+   *
+   * Subscribed inline for the same reason every other subscription in this app is; see
+   * the note in `MapScreen`.
+   */
+  const [locale, setActiveLocale] = useState(getLocale);
+  useEffect(() => subscribeToLocale(setActiveLocale), []);
+
+  const facts = getCountryFacts(iso3, locale);
   const slide = useRef(new Animated.Value(0)).current;
 
   // What is currently on screen. This lags `facts` on close: the card has to keep
@@ -229,7 +247,7 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
           onPress={onClose}
           hitSlop={16}
           accessibilityRole="button"
-          accessibilityLabel="Close country details"
+          accessibilityLabel={t('info.close')}
           style={styles.close}
         >
           <Text style={styles.closeText}>✕</Text>
@@ -248,24 +266,30 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
       >
         <Fact
           testID="fact-population"
-          label="Population"
+          label={t('info.fact.population')}
           value={formatPopulation(visibleFacts.population)}
           note={
-            visibleFacts.populationYear ? `World Bank, ${visibleFacts.populationYear}` : undefined
+            visibleFacts.populationYear
+              ? t('info.populationSource', { year: visibleFacts.populationYear })
+              : undefined
           }
         />
         <Fact
           testID="fact-currencies"
-          label={visibleFacts.currencies.length > 1 ? 'Currencies' : 'Currency'}
+          label={t.plural('info.fact.currencies', visibleFacts.currencies.length)}
           value={formatCurrencies(visibleFacts.currencies)}
         />
         <Fact
           testID="fact-languages"
-          label={visibleFacts.languages.length > 1 ? 'Official languages' : 'Official language'}
+          label={t.plural('info.fact.languages', visibleFacts.languages.length)}
           value={formatLanguages(visibleFacts.languages)}
         />
-        <Fact testID="fact-capital" label="Capital" value={formatCapital(visibleFacts.capital)} />
-        <Fact testID="fact-area" label="Area" value={formatArea(visibleFacts.area)} />
+        <Fact
+          testID="fact-capital"
+          label={t('info.fact.capital')}
+          value={formatCapital(visibleFacts.capital)}
+        />
+        <Fact testID="fact-area" label={t('info.fact.area')} value={formatArea(visibleFacts.area)} />
       </ScrollView>
     </Animated.View>
   );

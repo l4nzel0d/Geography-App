@@ -1,3 +1,6 @@
+import { DEFAULT_LOCALE, type Locale } from '@/i18n/localeTypes';
+import type { MessageKey } from '@/i18n/t';
+
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 
 import { MAP_FLAG_INTRINSIC_DP } from './labelFit';
@@ -45,34 +48,43 @@ export const LABEL_FIELD_IDS: readonly LabelFieldId[] = [
 /**
  * The picker's rows, in order. `none` leads because it is the default and the way out.
  *
- * Short labels: this list sits over the map on a phone. The description is what a screen
- * reader reads, and what makes "People" (a fill mode) and "Population" (a label field)
- * distinguishable when they are both on screen at once.
+ * Short labels: this list sits over the map on a phone, and each one is also a pill in the
+ * top-left row, whose whole width budget is ~379 dp shared with the row opposite -
+ * `chromeWidth.test.ts` is what holds that. The description is what a screen reader reads,
+ * and what makes "People" (a fill mode) and "Population" (a label field) distinguishable
+ * when they are both on screen at once.
+ *
+ * The rows carry message KEYS rather than words, so this table stays pure data and one
+ * table can still drive both the picker and the map in either language.
  */
 export const LABEL_FIELDS: readonly {
   field: LabelField;
-  label: string;
-  description: string;
+  labelKey: MessageKey;
+  descriptionKey: MessageKey;
 }[] = [
-  { field: 'none', label: 'None', description: 'No labels on the map' },
-  { field: 'name', label: 'Name', description: 'Show each country name on the map' },
+  { field: 'none', labelKey: 'map.label.none.label', descriptionKey: 'map.label.none.description' },
+  { field: 'name', labelKey: 'map.label.name.label', descriptionKey: 'map.label.name.description' },
   // Beside Name, because both answer the same question: which country is this.
-  { field: 'flag', label: 'Flag', description: 'Show each country flag on the map' },
-  { field: 'capital', label: 'Capital', description: 'Show each capital city on the map' },
+  { field: 'flag', labelKey: 'map.label.flag.label', descriptionKey: 'map.label.flag.description' },
+  {
+    field: 'capital',
+    labelKey: 'map.label.capital.label',
+    descriptionKey: 'map.label.capital.description',
+  },
   {
     field: 'languages',
-    label: 'Languages',
-    description: 'Show up to three official languages on each country',
+    labelKey: 'map.label.languages.label',
+    descriptionKey: 'map.label.languages.description',
   },
   {
     field: 'currencies',
-    label: 'Currencies',
-    description: 'Show up to three currencies on each country',
+    labelKey: 'map.label.currencies.label',
+    descriptionKey: 'map.label.currencies.description',
   },
   {
     field: 'population',
-    label: 'Population',
-    description: 'Show each population on the map, rounded',
+    labelKey: 'map.label.population.label',
+    descriptionKey: 'map.label.population.description',
   },
 ];
 
@@ -83,12 +95,50 @@ export const LABEL_FIELDS: readonly {
  * The `t` prefix means "the thing drawn" rather than strictly "text": for `flag` it holds the
  * name of a map image, not a string to render.
  */
-export function textPropertyFor(field: Exclude<LabelField, 'none'>): string {
-  return `t${field[0].toUpperCase()}${field.slice(1)}`;
+/**
+ * The suffix a locale's properties carry. English is UNSUFFIXED.
+ *
+ * Keeping English bare means every existing property name, every test expectation and
+ * every committed expression is byte-identical to what it was - the Russian pass is
+ * strictly additive.
+ */
+function localeSuffix(locale: Locale): string {
+  return locale === DEFAULT_LOCALE ? '' : `${locale[0].toUpperCase()}${locale.slice(1)}`;
 }
 
-export function zoomPropertyFor(field: Exclude<LabelField, 'none'>): string {
-  return `z${field[0].toUpperCase()}${field.slice(1)}`;
+/**
+ * `tName` in English, `tNameRu` in Russian - **both carried on the same feature**.
+ *
+ * This is the whole reason a language switch is cheap. The alternative was one
+ * `FeatureCollection` per locale and swapping `<GeoJSONSource data>`, which CLAUDE.md names
+ * the riskiest unproven operation in the app: nothing here had ever replaced a live map's
+ * source until mastery did, and doing it on every language change would put that on the
+ * critical path of a settings toggle.
+ *
+ * Baking both languages onto one source instead means switching locale changes only the
+ * layer's `text-field` and `filter` - a layout-property change, the identical code path the
+ * label-field picker already uses, with no re-upload at all. The cost is ~10 extra small
+ * properties per feature on 240 features.
+ */
+export function textPropertyFor(
+  field: Exclude<LabelField, 'none'>,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return `t${field[0].toUpperCase()}${field.slice(1)}${localeSuffix(locale)}`;
+}
+
+/**
+ * The fit threshold, which is **genuinely per-locale** rather than merely suffixed.
+ *
+ * "Соединённые Штаты Америки" is twice the width of "United States", so a Russian label
+ * needs a higher zoom before it fits over the same country. Sharing one threshold would
+ * either overhang badly in Russian or hide labels unnecessarily in English.
+ */
+export function zoomPropertyFor(
+  field: Exclude<LabelField, 'none'>,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return `z${field[0].toUpperCase()}${field.slice(1)}${localeSuffix(locale)}`;
 }
 
 /** Sort key property: `symbol-sort-key`, lower placed first. See `labelGeoJson.ts`. */
@@ -174,15 +224,18 @@ export const FLAG_ICON_SIZE = [
  * nothing is added to or removed from the map at runtime, which is the rule that keeps
  * the never-paints bug out of reach.
  */
-export function labelFilter(field: LabelField): ExpressionSpecification {
+export function labelFilter(
+  field: LabelField,
+  locale: Locale = DEFAULT_LOCALE,
+): ExpressionSpecification {
   // `flag` joins `none` here: it is drawn by the icon layer below, so the TEXT layer must be
   // off. Exactly one of the two filters ever matches anything.
   if (field === 'none' || field === 'flag') return NOTHING;
 
   return [
     'all',
-    ['has', textPropertyFor(field)],
-    ['<=', ['get', zoomPropertyFor(field)], ['zoom']],
+    ['has', textPropertyFor(field, locale)],
+    ['<=', ['get', zoomPropertyFor(field, locale)], ['zoom']],
   ] as unknown as ExpressionSpecification;
 }
 
@@ -194,9 +247,12 @@ export function labelFilter(field: LabelField): ExpressionSpecification {
  * property, and a malformed expression is exactly the class of bug that passes every
  * Jest test and then blanks the layer inside the native renderer.
  */
-export function labelTextField(field: LabelField): ExpressionSpecification | string {
+export function labelTextField(
+  field: LabelField,
+  locale: Locale = DEFAULT_LOCALE,
+): ExpressionSpecification | string {
   if (field === 'none' || field === 'flag') return '';
-  return ['get', textPropertyFor(field)] as unknown as ExpressionSpecification;
+  return ['get', textPropertyFor(field, locale)] as unknown as ExpressionSpecification;
 }
 
 /**

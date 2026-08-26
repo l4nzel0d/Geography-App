@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { getLocale } from '@/i18n/locale';
 import { goBack } from '@/navigation/goBack';
 import { quizScreenBox } from '@/quiz/quizScreenBox';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -31,6 +32,7 @@ import { type FieldId, MODE_USES_MAP, parseQuizParams } from '@/quiz/quizConfig'
 import { getQuizPanelLayout } from '@/quiz/quizPanelLayout';
 import { getMasterySnapshot, publishMastery, recordResult } from '@/mastery/masteryStore';
 import { setQuizResult } from '@/quiz/quizResultStore';
+import { useTranslator } from '@/i18n/useTranslator';
 
 /**
  * The round itself: map on one side, answer panel on the other.
@@ -90,6 +92,16 @@ export default function QuizPlayScreen() {
   // Params are only read once: re-parsing on every render would hand `buildQuiz` a new
   // seed the moment expo-router hands back a differently-shaped params object.
   const [config] = useState(() => parseQuizParams(params as Record<string, string | string[]>));
+
+  /**
+   * The translator for the active language.
+   *
+   * A hook rather than the module-level `t`, because `reactCompiler: true` will
+   * memoise a call with no reactive inputs and never recompute it - which is how a
+   * language switch left half the chrome in English until something else forced a
+   * render. See `useTranslator`.
+   */
+  const t = useTranslator();
   /**
    * The round, built once.
    *
@@ -417,7 +429,7 @@ export default function QuizPlayScreen() {
     return (
       <View style={styles.empty}>
         <Text testID="quiz-empty" style={styles.emptyText}>
-          Nothing to ask with those settings.
+          {t('quiz.empty')}
         </Text>
       </View>
     );
@@ -540,6 +552,7 @@ export default function QuizPlayScreen() {
           total: questions.length,
           // The open question counts once checked: `end` would score it too.
           graded: history.length + (result ? 1 : 0),
+          t,
         })}
         onDismiss={() => setConfirmingExit(false)}
         onPress={exit}

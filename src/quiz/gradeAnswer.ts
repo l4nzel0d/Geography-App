@@ -1,9 +1,17 @@
-import { formatCurrency } from '@/components/formatters';
+import { formatCurrency, formatPopulation } from '@/components/formatters';
 import type { CountryFacts } from '@/data/types';
 
-import { currencyAliases, languageAliases, nameAliases, NAME_INDEX } from './answerAliases';
+import { getLocale } from '@/i18n/locale';
+import type { Locale } from '@/i18n/localeTypes';
+
+import {
+  currencyAliases,
+  languageAliases,
+  nameAliases,
+  NAME_INDEX_BY_LOCALE,
+} from './answerAliases';
 import { allowedEdits, editDistance } from './editDistance';
-import { normalizeText } from './normalizeText';
+import { normalizeText, russianStem } from './normalizeText';
 import { ANSWERABLE_FIELDS, type FieldId, type GradedField, isSetField } from './quizConfig';
 
 /**
@@ -114,6 +122,14 @@ export function matchesText(
   accepted: readonly string[],
   reserved?: ReadonlyMap<string, string>,
   ownIso3?: string,
+  /**
+   * Fold inflection before comparing, for the languages where a noun changes shape.
+   *
+   * Passed only for the SET fields - see `russianStem`. Country names deliberately do not
+   * get it: there the confusable guard is doing safety work, and a looser comparison on
+   * the one field where a near miss means a *different country* is the wrong trade.
+   */
+  stem?: (text: string) => string,
 ): MatchKind | null {
   const guess = normalizeText(input);
   if (!guess) return null;
@@ -128,6 +144,13 @@ export function matchesText(
   // Naming a different country outright is wrong, however close the spelling.
   const claimed = reserved?.get(guess);
   if (claimed && claimed !== ownIso3) return null;
+
+  // Ranked as an alias rather than a typo, because it is not one: "рублей" is the right
+  // word in the wrong case, and the player knew the answer.
+  if (stem) {
+    const stemmed = stem(guess);
+    if (stemmed && normalized.some((candidate) => stem(candidate) === stemmed)) return 'alias';
+  }
 
   for (const candidate of normalized) {
     const budget = allowedEdits(candidate.length);
@@ -183,6 +206,8 @@ export function gradeSet(
    * but revealed in full, "Chinese yuan (CNY, ¥)".
    */
   displayFor: (item: string) => string = (item) => item,
+  /** Inflection folding for this language, or nothing. See `matchesText`. */
+  stem?: (text: string) => string,
 ): FieldGrade {
   const given = (chips ?? []).map((c) => c.trim()).filter(Boolean);
   const target = Math.min(required, expectedItems.length);
@@ -207,7 +232,17 @@ export function gradeSet(
     for (const item of [...unmatched]) {
       for (let i = 0; i < given.length; i++) {
         if (spent.has(i)) continue;
-        const how = matchesText(given[i], acceptedFor(item));
+        // Stemming is offered only on the SECOND pass, alongside fuzzy matching. An
+        // inflected form is a weaker match than a spelled-out one, and letting it compete
+        // in the exact pass would let "рублей" consume the entry that a later chip
+        // matches outright - the same greedy-consumption bug the two passes exist to stop.
+        const how = matchesText(
+          given[i],
+          acceptedFor(item),
+          undefined,
+          undefined,
+          exactPass ? undefined : stem,
+        );
         if (how === null) continue;
         if (exactPass && how === 'fuzzy') continue;
         unmatched.delete(item);
@@ -231,31 +266,52 @@ export function gradeSet(
 }
 
 /**
+ * Magnitude words, by the multiplier they mean.
+ *
+ * Both languages are accepted in either round, deliberately and for the same reason the
+ * alias lists are a superset: nobody typing "68m" into a Russian round has misunderstood
+ * the question, and a player switching languages mid-session should not have their muscle
+ * memory marked wrong.
+ *
+ * The Russian abbreviations are matched WITHOUT their full stops, because the `.` is
+ * stripped along with the spaces below - "1,4 млрд." and "1.4 млрд" are the same answer.
+ */
+const MAGNITUDES: readonly [RegExp, number][] = [
+  [/^(?:k|тыс|тысяч|тысячи|тысяча)$/, 1e3],
+  [/^(?:m|mn|mil|million|млн|миллион|миллиона|миллионов)$/, 1e6],
+  [/^(?:b|bn|billion|млрд|миллиард|миллиарда|миллиардов)$/, 1e9],
+];
+
+/**
  * Read a population out of whatever the player typed.
  *
  * People write big numbers in every shape there is - "68,000,000", "68 million", "68m",
- * "1.4bn" - and rejecting any of them would be marking presentation, not knowledge.
+ * "1.4bn", "68 млн", "1,4 млрд" - and rejecting any of them would be marking presentation,
+ * not knowledge.
+ *
+ * **The comma is stripped rather than read as a decimal point**, which is a real decision
+ * for Russian, where "1,4" means one point four. It is unresolvable in general - "1,400"
+ * is fourteen hundred in one convention and 1.4 in the other - and the population band is
+ * +/-20% wide, so the tie is broken the way that keeps "68,000,000" working. Anyone
+ * meaning 1.4 billion can write "1.4 млрд" or "1400 млн", and both parse.
  */
 export function parsePopulation(input: string | undefined): number | null {
   if (!input) return null;
 
-  const text = input.toLowerCase().replace(/[,\s_]/g, '');
-  const match = text.match(/^(\d+(?:\.\d+)?)(k|m|mn|mil|million|b|bn|billion)?$/);
+  const text = input.toLowerCase().replace(/[,\s _.]+$/g, '').replace(/[,\s _]/g, '');
+  const match = text.match(/^(\d+(?:\.\d+)?)\s*([a-zа-я]*)\.?$/);
   if (!match) return null;
 
   const value = Number(match[1]);
   if (!Number.isFinite(value)) return null;
 
-  const multiplier =
-    match[2] == null
-      ? 1
-      : match[2] === 'k'
-        ? 1e3
-        : match[2].startsWith('b')
-          ? 1e9
-          : 1e6;
+  const suffix = match[2].replace(/\.$/, '');
+  if (!suffix) return value;
 
-  return value * multiplier;
+  const magnitude = MAGNITUDES.find(([pattern]) => pattern.test(suffix));
+  // An unrecognised word is a rejection, not a silent multiplier of one: "68 people" is
+  // not an answer, and treating it as 68 would mark a wild guess correct.
+  return magnitude ? value * magnitude[1] : null;
 }
 
 export function gradeNumeric(
@@ -264,7 +320,10 @@ export function gradeNumeric(
   expected: number,
   tolerance = POPULATION_TOLERANCE,
 ): FieldGrade {
-  const expectedLabel = expected.toLocaleString('en-US');
+  // Both figures go straight onto the answer panel, so they follow the app's language -
+  // Russian groups with a thin space, not a comma. `formatPopulation` is the same
+  // formatter the info sheet uses, so a population never reads two ways in one session.
+  const expectedLabel = formatPopulation(expected);
   const value = parsePopulation(input);
 
   if (value == null) {
@@ -284,10 +343,21 @@ export function gradeNumeric(
     // Inclusive at the edge: exactly 20% out is within a 20% band.
     correct: Math.abs(percentOff) <= tolerance,
     how: Math.abs(percentOff) <= tolerance ? 'exact' : 'wrong',
-    given: value.toLocaleString('en-US'),
+    given: formatPopulation(value),
     expected: expectedLabel,
     percentOff,
   };
+}
+
+/**
+ * How this language folds inflection, or nothing if it does not need to.
+ *
+ * English nouns barely inflect for this purpose - "dollar"/"dollars" is one edit and the
+ * typo budget already covers it - so it gets no stemmer and its behaviour is byte-for-byte
+ * what it always was.
+ */
+function stemFor(locale: Locale): ((text: string) => string) | undefined {
+  return locale === 'ru' ? russianStem : undefined;
 }
 
 export function gradeField(
@@ -295,14 +365,17 @@ export function gradeField(
   facts: CountryFacts,
   field: FieldId,
   answers: AnswerInput,
+  locale: Locale = getLocale(),
 ): FieldGrade {
   const raw = answers[field];
   const asString = Array.isArray(raw) ? raw.join(' ') : raw;
 
   switch (field) {
     case 'name':
-      return gradeSingle(field, asString, nameAliases(iso3, facts), {
-        reserved: NAME_INDEX,
+      return gradeSingle(field, asString, nameAliases(iso3, facts, locale), {
+        // The index for THIS language. Handing it the English one in a Russian round makes
+        // the confusable guard blind, and "австрия" scores a point for Австралия.
+        reserved: NAME_INDEX_BY_LOCALE[locale],
         ownIso3: iso3,
       });
 
@@ -320,8 +393,9 @@ export function gradeField(
         Array.isArray(raw) ? raw : raw ? [raw] : [],
         facts.currencies.map((c) => c.name),
         CURRENCIES_REQUIRED,
-        currencyAliases(facts),
+        currencyAliases(facts, locale),
         (name) => byName.get(name) ?? name,
+        stemFor(locale),
       );
     }
 
@@ -331,7 +405,9 @@ export function gradeField(
         Array.isArray(raw) ? raw : raw ? [raw] : [],
         facts.languages,
         LANGUAGES_REQUIRED,
-        languageAliases(facts),
+        languageAliases(facts, locale),
+        undefined,
+        stemFor(locale),
       );
 
     case 'population':
@@ -342,9 +418,10 @@ export function gradeField(
 export function gradeQuestion(
   question: { iso3: string; facts: CountryFacts; fields: FieldId[] },
   answers: AnswerInput,
+  locale: Locale = getLocale(),
 ): QuestionResult {
   const grades = question.fields.map((field) =>
-    gradeField(question.iso3, question.facts, field, answers),
+    gradeField(question.iso3, question.facts, field, answers, locale),
   );
   return {
     iso3: question.iso3,

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PRACTICE_ROUND_SIZE } from '@/quiz/practicePool';
 
 import { quizColors, quizRadii } from '../palette';
+import { useTranslator } from '@/i18n/useTranslator';
 
 type PracticePickerProps = {
   practice: boolean;
@@ -22,21 +23,23 @@ type PracticePickerProps = {
  * note in `quiz/index.tsx`.
  */
 export function PracticePicker({ practice, onChange }: PracticePickerProps) {
+  const t = useTranslator();
+
   const options = [
     {
       value: false,
-      label: 'Everything',
+      label: t('quiz.practice.all.label'),
       /* Not a count, because it depends on the subregions chosen below and the start
          button already states the real number. */
-      hint: 'Ask about every country in the regions you pick',
+      hint: t('quiz.practice.all.hint'),
     },
     {
       value: true,
-      label: 'My weak spots',
+      label: t('quiz.practice.weak.label'),
       /* The second sentence is the ONLY place the never-asked rule is discoverable, and
          it is what stops the option looking broken on a fresh install - where the table
          is empty and every country is therefore equally, maximally weak. */
-      hint: `${PRACTICE_ROUND_SIZE} countries you get wrong most often. Countries you have never been asked count as weak.`,
+      hint: t.plural('quiz.practice.weak.hint', PRACTICE_ROUND_SIZE),
     },
   ];
 
@@ -46,7 +49,7 @@ export function PracticePicker({ practice, onChange }: PracticePickerProps) {
         const active = option.value === practice;
         return (
           <Pressable
-            key={option.label}
+            key={String(option.value)}
             testID={`practice-${option.value ? 'weak' : 'all'}`}
             onPress={() => onChange(option.value)}
             style={[styles.row, active && styles.rowActive]}

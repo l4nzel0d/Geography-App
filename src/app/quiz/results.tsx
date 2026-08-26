@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -11,9 +11,11 @@ import {
 import { quizColors, quizRadii } from "@/components/palette";
 import { useWindowSize } from "@/components/useWindowSize";
 import { getCountryFacts } from "@/data/countryFacts";
-import { FIELD_LABELS, newSeed, toQuizParams } from "@/quiz/quizConfig";
+import { FIELD_LABEL_KEYS, newSeed, toQuizParams } from "@/quiz/quizConfig";
 import { takeQuizResult } from "@/quiz/quizResultStore";
 import { summarize } from "@/quiz/quizScore";
+import { getLocale } from "@/i18n/locale";
+import { useTranslator } from "@/i18n/useTranslator";
 
 /**
  * The score, and what you actually got wrong.
@@ -55,11 +57,21 @@ export default function QuizResultsScreen() {
   // onto this URL finds nothing and bounces to setup rather than showing a stale round.
   const [run] = useState(takeQuizResult);
 
+  /**
+   * The translator for the active language.
+   *
+   * A hook rather than the module-level `t`, because `reactCompiler: true` will
+   * memoise a call with no reactive inputs and never recompute it - which is how a
+   * language switch left half the chrome in English until something else forced a
+   * render. See `useTranslator`.
+   */
+  const t = useTranslator();
+
   if (!run) {
     return (
       <View style={[styles.screen, styles.centered]}>
         <Text testID="quiz-results-empty" style={styles.emptyText}>
-          That quiz has already been counted.
+          {t("results.consumed")}
         </Text>
         <Pressable
           testID="quiz-results-restart"
@@ -67,7 +79,7 @@ export default function QuizResultsScreen() {
           style={styles.secondary}
           accessibilityRole="button"
         >
-          <Text style={styles.secondaryText}>Set up a new quiz</Text>
+          <Text style={styles.secondaryText}>{t("results.restart")}</Text>
         </Pressable>
       </View>
     );
@@ -87,19 +99,26 @@ export default function QuizResultsScreen() {
           { paddingBottom: insets.bottom + 24 },
         ]}
       >
-        <Text style={styles.title}>Round over</Text>
+        <Text style={styles.title}>{t("results.title")}</Text>
 
         <View style={styles.scoreCard}>
           <Text testID="quiz-score-countries" style={styles.scoreBig}>
             {summary.countriesAllCorrect} / {summary.countriesAsked}
           </Text>
-          <Text style={styles.scoreLabel}>countries fully correct</Text>
+          {/* Split from the big number above so the noun can agree with it in Russian:
+              1 страна, 2 страны, 5 стран. */}
+          <Text style={styles.scoreLabel}>
+            {t.plural("results.countriesFullyCorrect", summary.countriesAllCorrect)}
+          </Text>
           <Text testID="quiz-score-fields" style={styles.scoreSmall}>
-            {summary.fieldsCorrect} of {summary.fieldsAsked} answers right
+            {t("results.answersRight", {
+              correct: summary.fieldsCorrect,
+              asked: summary.fieldsAsked,
+            })}
           </Text>
           {run.endedEarly ? (
             <Text style={styles.endedEarly}>
-              Ended after {summary.countriesAsked} of {run.total}
+              {t("results.endedEarly", { asked: summary.countriesAsked, total: run.total })}
             </Text>
           ) : null}
         </View>
@@ -108,7 +127,7 @@ export default function QuizResultsScreen() {
           {Object.entries(summary.perField).map(([field, tally]) => (
             <View key={field} style={styles.fieldPill}>
               <Text style={styles.fieldPillLabel}>
-                {FIELD_LABELS[field as keyof typeof FIELD_LABELS]}
+                {t(FIELD_LABEL_KEYS[field as keyof typeof FIELD_LABEL_KEYS])}
               </Text>
               <Text style={styles.fieldPillValue}>
                 {tally.correct}/{tally.asked}
@@ -122,8 +141,8 @@ export default function QuizResultsScreen() {
             heading has to say so, or "1 to look at again" reads as a list of one. */}
         <Text testID="quiz-review-heading" style={styles.section}>
           {wrongOnly.length === 0
-            ? `Review — all ${summary.countriesAsked} correct`
-            : `Review — ${wrongOnly.length} missed`}
+            ? t("results.review.allCorrect", { count: summary.countriesAsked })
+            : t.plural("results.review.missed", wrongOnly.length)}
         </Text>
 
         {run.results.map((result, position) => {
@@ -158,15 +177,15 @@ export default function QuizResultsScreen() {
                     .map((grade) => (
                       <View key={grade.field} style={styles.missRow}>
                         <Text style={styles.missField}>
-                          {FIELD_LABELS[grade.field]}
+                          {t(FIELD_LABEL_KEYS[grade.field])}
                         </Text>
                         <Text style={styles.missAnswer}>{grade.expected}</Text>
                         {grade.given ? (
                           <Text style={styles.missGiven}>
-                            you said {grade.given}
+                            {t("results.youSaid", { given: grade.given })}
                           </Text>
                         ) : (
-                          <Text style={styles.missGiven}>left blank</Text>
+                          <Text style={styles.missGiven}>{t("results.blank")}</Text>
                         )}
                       </View>
                     ))}
@@ -189,7 +208,7 @@ export default function QuizResultsScreen() {
             style={styles.primary}
             accessibilityRole="button"
           >
-            <Text style={styles.primaryText}>Play again</Text>
+            <Text style={styles.primaryText}>{t("results.playAgain")}</Text>
           </Pressable>
           <View style={styles.footerRow}>
             <Pressable
@@ -198,7 +217,7 @@ export default function QuizResultsScreen() {
               style={styles.secondary}
               accessibilityRole="button"
             >
-              <Text style={styles.secondaryText}>Change settings</Text>
+              <Text style={styles.secondaryText}>{t("results.changeSettings")}</Text>
             </Pressable>
             <Pressable
               testID="quiz-back-to-map"
@@ -206,7 +225,7 @@ export default function QuizResultsScreen() {
               style={styles.secondary}
               accessibilityRole="button"
             >
-              <Text style={styles.secondaryText}>Back to map</Text>
+              <Text style={styles.secondaryText}>{t("results.backToMap")}</Text>
             </Pressable>
           </View>
         </View>

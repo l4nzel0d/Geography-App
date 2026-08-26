@@ -3,6 +3,9 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { REGIONS } from '@/quiz/quizCountries';
 
 import { quizColors, quizRadii } from '../palette';
+import { useTranslator } from '@/i18n/useTranslator';
+import { getLocale } from '@/i18n/locale';
+import { regionLabel, subregionLabel } from '@/data/placeNames';
 
 type SubregionPickerProps = {
   selected: string[];
@@ -17,6 +20,8 @@ type SubregionPickerProps = {
  * choosing - a round is every country in the selection.
  */
 export function SubregionPicker({ selected, onChange }: SubregionPickerProps) {
+  const t = useTranslator();
+
   const chosen = new Set(selected);
 
   const toggle = (subregion: string) => {
@@ -45,15 +50,20 @@ export function SubregionPicker({ selected, onChange }: SubregionPickerProps) {
         return (
           <View key={region.region} style={styles.region}>
             <View style={styles.regionHeader}>
-              <Text style={styles.regionName}>{region.region}</Text>
+              <Text style={styles.regionName}>{regionLabel(region.region, getLocale())}</Text>
               <Pressable
                 testID={`region-toggle-${region.region}`}
                 onPress={() => toggleRegion(names)}
                 hitSlop={10}
                 accessibilityRole="button"
-                accessibilityLabel={`${allOn ? 'Clear' : 'Select'} all of ${region.region}`}
+                accessibilityLabel={t('quiz.region.toggleA11y', {
+                  action: t(allOn ? 'quiz.region.clear' : 'quiz.region.select'),
+                  region: regionLabel(region.region, getLocale()),
+                })}
               >
-                <Text style={styles.regionAction}>{allOn ? 'Clear' : `All ${region.count}`}</Text>
+                <Text style={styles.regionAction}>
+                  {allOn ? t('quiz.region.clear') : t('quiz.region.all', { count: region.count })}
+                </Text>
               </Pressable>
             </View>
 
@@ -68,10 +78,12 @@ export function SubregionPicker({ selected, onChange }: SubregionPickerProps) {
                     style={[styles.chip, active && styles.chipActive]}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: active }}
-                    accessibilityLabel={`${bucket.subregion}, ${bucket.count} countries`}
+                    accessibilityLabel={t.plural('quiz.subregion.count', bucket.count, {
+                      subregion: subregionLabel(bucket.subregion, getLocale()),
+                    })}
                   >
                     <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                      {bucket.subregion}
+                      {subregionLabel(bucket.subregion, getLocale())}
                     </Text>
                     <Text style={[styles.count, active && styles.countActive]}>{bucket.count}</Text>
                   </Pressable>

@@ -1,3 +1,5 @@
+import type { Translator } from '@/i18n/t';
+
 /**
  * The wording and the buttons of the "you are leaving mid-round" confirmation.
  *
@@ -43,31 +45,48 @@ export type ExitPrompt = {
   buttons: ExitPromptButton[];
 };
 
-const SCORE: ExitPromptButton = { id: 'score', label: 'See my score', style: 'primary' };
-const DISCARD: ExitPromptButton = {
-  id: 'discard',
-  label: 'Discard and leave',
-  style: 'destructive',
-};
-const CANCEL: ExitPromptButton = { id: 'cancel', label: 'Cancel', style: 'quiet' };
-
 export function buildExitPrompt({
   index,
   total,
   graded,
+  t,
 }: {
   /** Zero-based, as the screen holds it; the message counts from one. */
   index: number;
   total: number;
   /** How many questions have been CHECKED - the number a score would be out of. */
   graded: number;
+  /**
+   * Passed in, never read from the locale singleton.
+   *
+   * The whole value of this module is that the dialog's wording and button list are
+   * decided somewhere Jest can read them, and a pure function that reaches for a global
+   * is not that. `translatorFor('ru')` is all a Russian test needs.
+   */
+  t: Translator;
 }): ExitPrompt {
-  const message = `You are on question ${index + 1} of ${total}.`;
+  const score: ExitPromptButton = {
+    id: 'score',
+    label: t('quiz.exit.score'),
+    style: 'primary',
+  };
+  const discard: ExitPromptButton = {
+    id: 'discard',
+    label: t('quiz.exit.discard'),
+    style: 'destructive',
+  };
+  const cancel: ExitPromptButton = {
+    id: 'cancel',
+    label: t('quiz.exit.cancel'),
+    style: 'quiet',
+  };
+
+  const message = t('quiz.exit.message', { index: index + 1, total });
 
   // Offering "See my score" before anything has been checked would promise a score of
   // nothing out of nothing. There is genuinely only one way out at that point, so the
   // dialog drops to two buttons rather than carrying a dead one.
-  const buttons = graded > 0 ? [SCORE, DISCARD, CANCEL] : [DISCARD, CANCEL];
+  const buttons = graded > 0 ? [score, discard, cancel] : [discard, cancel];
 
-  return { title: 'Leave quiz?', message, buttons };
+  return { title: t('quiz.exit.title'), message, buttons };
 }

@@ -5,6 +5,9 @@ import type { CountrySearchResult } from '@/search/countrySearch';
 
 import { CountryFlag } from '../CountryFlag';
 import { quizColors, quizRadii } from '../palette';
+import { useTranslator } from '@/i18n/useTranslator';
+import { getLocale } from '@/i18n/locale';
+import { subregionLabel } from '@/data/placeNames';
 
 type CountryResultRowProps = {
   result: CountrySearchResult;
@@ -26,11 +29,13 @@ export const CountryResultRow = memo(function CountryResultRow({
   result,
   onPress,
 }: CountryResultRowProps) {
+  const t = useTranslator();
+
   const { iso3, name, flag, subregion, matchedAs } = result;
 
   // The dataset leaves `subregion` empty for the four Antarctic records, and an empty
   // Text still takes a line's height.
-  const detail = matchedAs ?? subregion;
+  const detail = matchedAs ?? subregionLabel(subregion, getLocale());
 
   return (
     <Pressable
@@ -38,7 +43,9 @@ export const CountryResultRow = memo(function CountryResultRow({
       onPress={() => onPress(iso3)}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       accessibilityRole="button"
-      accessibilityLabel={matchedAs ? `${name}, also known as ${matchedAs}` : name}
+      accessibilityLabel={
+        matchedAs ? t('search.result.alias', { name, alias: matchedAs }) : name
+      }
     >
       {/* Shared with the info sheet, so a platform that cannot draw flag emoji gets a
           real image here too rather than a bare country code. See flagEmoji.ts. */}

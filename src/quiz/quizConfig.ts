@@ -1,3 +1,5 @@
+import type { MessageKey } from '@/i18n/t';
+
 /**
  * What a quiz round is, and how it survives a trip through the URL.
  *
@@ -27,17 +29,17 @@ export const QUIZ_MODES: readonly QuizMode[] = ['facts', 'locate', 'flag'];
 
 export const DEFAULT_MODE: QuizMode = 'facts';
 
-export const QUIZ_MODE_LABELS: Record<QuizMode, string> = {
-  facts: 'Name the facts',
-  locate: 'Find it on the map',
-  flag: 'Name it from the flag',
+export const QUIZ_MODE_LABEL_KEYS: Record<QuizMode, MessageKey> = {
+  facts: 'quiz.mode.facts.label',
+  locate: 'quiz.mode.locate.label',
+  flag: 'quiz.mode.flag.label',
 };
 
 /** What each mode asks of you - the picker's subtitle, and the setup screen's. */
-export const QUIZ_MODE_HINTS: Record<QuizMode, string> = {
-  facts: 'The map zooms to a country and you type what you know about it',
-  locate: 'You are given a name and have to find the country on the map',
-  flag: 'You are shown a flag and type what you know about the country',
+export const QUIZ_MODE_HINT_KEYS: Record<QuizMode, MessageKey> = {
+  facts: 'quiz.mode.facts.hint',
+  locate: 'quiz.mode.locate.hint',
+  flag: 'quiz.mode.flag.hint',
 };
 
 /**
@@ -109,13 +111,13 @@ export function isSetField(field: FieldId): boolean {
   return SET_FIELDS.includes(field);
 }
 
-export const FIELD_LABELS: Record<GradedField, string> = {
-  name: 'Country',
-  capital: 'Capital',
-  currency: 'Currency',
-  languages: 'Languages',
-  population: 'Population',
-  location: 'Location',
+export const FIELD_LABEL_KEYS: Record<GradedField, MessageKey> = {
+  name: 'quiz.field.name.label',
+  capital: 'quiz.field.capital.label',
+  currency: 'quiz.field.currency.label',
+  languages: 'quiz.field.languages.label',
+  population: 'quiz.field.population.label',
+  location: 'quiz.field.location.label',
 };
 
 export type QuizConfig = {
