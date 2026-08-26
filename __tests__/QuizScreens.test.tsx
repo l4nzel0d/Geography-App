@@ -844,6 +844,42 @@ describe('the play screen', () => {
     expect(typeof currency.props.accessibilityElementsHidden).toBe('boolean');
   });
 
+  /**
+   * The answer boxes in Russian.
+   *
+   * The same shape of bug as `FieldPicker`'s English hints table: the catalogue carried
+   * `quiz.placeholder.*` from the day the app went bilingual, and the inputs went on
+   * passing their own English literals - so a Russian round asked 'Столица' over a box
+   * reading 'Your answer'. Every leftover English literal is a bug of this shape.
+   */
+  describe('in Russian', () => {
+    beforeEach(() => {
+      setLocale('ru');
+    });
+
+    afterEach(() => {
+      __resetLocale('en');
+    });
+
+    it('translates the placeholder of every plain answer box', async () => {
+      mockSearchParams = {
+        subregions: 'Australia and New Zealand',
+        fields: 'name,capital,population',
+        seed: '1',
+      };
+      await render(<QuizPlayScreen />);
+
+      const placeholderOf = (field: string) =>
+        screen.getByTestId(`quiz-input-${field}`, { includeHiddenElements: true }).props
+          .placeholder;
+
+      expect(placeholderOf('name')).toBe('Ваш ответ');
+      expect(placeholderOf('capital')).toBe('Ваш ответ');
+      expect(placeholderOf('population')).toMatch(/млн/);
+      expect(placeholderOf('population')).not.toMatch(/e\.g\./);
+    });
+  });
+
   describe('leaving mid-round', () => {
     const dialog = () => screen.queryByTestId('quiz-exit');
 

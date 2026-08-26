@@ -1,1414 +1,1186 @@
 # geography-app
 
-An Android app showing a world map with country outlines. Tapping a country opens an info box with its
-population, currency and official languages.
+An offline world map. Tap a country → it highlights and an info sheet shows population, currency,
+languages, capital, area. Plus a choropleth, map labels, country search, a three-mode quiz, and
+per-country mastery tracking. Runs on Android and as a PWA. English and Russian.
 
 ## Hard constraint: the app must work fully offline
 
-This is the requirement that drives every other decision. No map tile server, no REST call at tap time,
-no font/glyph fetch. Everything ships inside the APK.
+This drives every other decision. No tile server, no REST call at tap time, no font/glyph fetch.
+Everything ships inside the APK (or the precached web bundle).
 
-**Never introduce a runtime network dependency** — a tile source, a `glyphs`/`sprite` URL in the map
-style, a live API call — without flagging it explicitly. The offline acceptance test (release build,
-wifi + data disabled) is the gate that this must pass.
+**Never introduce a runtime network dependency** — a tile source, a `glyphs`/`sprite` URL, a live API
+call — without flagging it explicitly. The offline acceptance test (release build, wifi + data
+disabled) is the gate.
 
 The rule is **no remote URL**, not "no symbol layers". Map labels draw real text through a TTF bundled
-in the APK and referenced as `asset://`; see *Map labels* below. An older version of this file, and of
-`offlineStyle.ts`, said any symbol layer broke the requirement. That was wrong, and the label layer
-depends on it being wrong.
+in the APK and referenced as `asset://` — see *Map labels*.
 
 ## Status
 
-**Working and verified on the emulator.** Tap a country → it highlights and the info sheet shows
-population, currency, official languages, capital and area.
+Everything below is implemented and unit-tested (~1000 Jest tests across 44 suites, typecheck clean).
+Verification state, which is what actually varies:
 
-Verified end to end on 2026-08-16:
+| | state |
+|---|---|
+| Emulator (`Medium_Phone`, x86_64) | all features seen working, dev + release builds |
+| Web (both locale trees, desktop browser) | verified |
+| **Offline acceptance test** | last passed at the *map-labels* commit; **not re-run** since flag labels, mastery or Russian |
+| **Galaxy S25 (SM-S931B)** | last verified long ago; not re-checked since 1:50m geometry, the font, flag PNGs or mastery |
+| Maestro | six flows pass; **no flow for locate mode, flag mode, or Russian** |
 
-- debug build: 14m 48s first build, installs and runs on `Medium_Phone`
-- release build: 5m 48s
-- 36 Jest tests pass, typecheck clean
-- Maestro flow passes all 18 steps
-- **offline acceptance test passes** — release build, airplane mode, `ping` unreachable: map renders,
-  taps work, info sheet populates, and logcat shows no HTTP/DNS/tile/glyph request from the app
-- **verified on physical hardware**: Galaxy S25 (SM-S931B), Android 16, arm64-v8a, 1080x2340 @480dpi.
-  Cold start matches the emulator, and the Maestro flow passes unchanged — the tap percentages survive
-  the aspect-ratio difference. Only Samsung/Qualcomm platform noise in logcat (Adreno, ashmem,
-  libpenguin, Kumiho); nothing from the app.
-
-Added 2026-08-17, verified on the emulator (`Medium_Phone`, x86_64 debug build):
-
-- the info card **animates out** instead of vanishing, and **landscape** docks it to the right edge
-- the **Region row is gone** from the info sheet, and `region`/`subregion` are gone from the pipeline,
-  `CountryFacts` and `countryFacts.json` entirely
-- geometry moved to **Natural Earth 1:50m**, so the ~65 microstates the 110m tier omitted now exist:
-  **Liechtenstein selected on the emulator** (41,024, Vaduz, 160 km²), as did Switzerland beside it
-- 61 Jest tests pass, typecheck clean
-- both Maestro flows pass unchanged — portrait 20 steps, landscape 24, **no tap point needed
-  re-deriving** despite the geometry change (the camera is what pins those, and it did not move)
-- **not re-verified on the S25 or against the offline acceptance test.** The manifest lost
-  `android:screenOrientation`, so those two need a re-run before release; nothing here adds a network
-  call — the geometry is still a bundled `import` — but the gate is the gate, and the bundle did grow
-  by ~1.4 MB, which is worth a look at cold-start time on real hardware.
-
-Added 2026-08-17, **not yet verified on any device**:
-
-- the **population choropleth** — a toggle in the top-left switches the land between the flat green
-  basemap and a log-scaled white→deep-red ramp, with a stepped legend. See *Map fill modes*.
-- 102 Jest tests pass, typecheck clean. The x86_64 debug APK builds and installs.
-- **the visual check never happened.** The emulator could not reach the dev server: the app dials
-  `10.0.2.2:8081` and got `Failed to connect`, and that AVD had no working DNS either
-  (`play.googleapis.com` unresolvable), so its whole NAT stack looks wedged rather than this being a
-  Metro problem — Metro served the bundle to the host fine (HTTP 200, 10.9 MB). `adb reverse` does not
-  help on its own because the client dials `10.0.2.2`, not `localhost`; launching via
-  `adb shell am start -a android.intent.action.VIEW -d "geographyapp://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"`
-  is the way to point it at the reversed port, and that still needs a re-try on a healthy AVD.
-- So **nothing below the unit tests is confirmed**: not the colours on screen, not the legend layout,
-  not that the paint expression parses in the native renderer, and not
-  `.maestro/choropleth-modes.yaml`, which had never been run. *(Superseded — see below.)*
-
-Added 2026-08-18, verified on the emulator (`Medium_Phone`, x86_64, dev build over Metro):
-
-- **the dev loop is unwedged.** The AVD's NAT was the problem, not Metro: a cold boot
-  (`emulator -avd Medium_Phone -no-snapshot-load`, launched detached) came up with working DNS and a
-  reachable `10.0.2.2`, and `adb reverse tcp:8081 tcp:8081` plus the
-  `geographyapp://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081` intent connects first
-  time. A JS edit reaches the screen in about a second. **Do not set `CI=1` when starting Metro** —
-  it disables watch mode, which is exactly the thing you want.
-- that also clears the choropleth's backlog: the mode toggle and the legend paint, and
-  `.maestro/choropleth-modes.yaml` now passes.
-- **quiz mode** — zoom to a country, paint it yellow, type the answers. See *Quiz mode*.
-- 389 Jest tests across 15 suites pass, typecheck clean, and **all four Maestro flows pass**.
-- **not re-verified on the S25, and the offline acceptance test has still not been re-run** since the
-  1:50m switch. Nothing in quiz mode adds a network call — the new fields come from the same bundled
-  `countryFacts.json` — but the gate is the gate.
-
-Added 2026-08-18, verified on the emulator (`Medium_Phone`, x86_64, dev build over Metro):
-
-- **country search** — a pill in the top-right row opens `/search`; type a name, pick a result, and the
-  map highlights the country exactly as a tap would and flies to frame it clear of the info sheet.
-  See *Country search*.
-- **explore `maxZoom` is now 10**, up from 8, so a searched microstate is actually visible. At 8 Monaco
-  framed correctly and rendered as a 22 dp dot.
-- **quiz "Change settings" pops back** to the setup screen instead of building a fresh one, so the
-  round's subregions and fields are still selected. It now agrees with the back gesture.
-- 464 Jest tests across 18 suites pass, typecheck clean, and **all five Maestro flows pass**.
-- verified by hand on the emulator in both orientations: Netherlands, Liechtenstein, Russia (the
-  pole-clamped case), Fiji (antimeridian), the "Holland" alias, and a rotation mid-selection.
-- **still not re-verified on the S25, and the offline acceptance test has still not been re-run.**
-  Search adds no network call — names, aliases and geometry are all already bundled — but the gate is
-  the gate, and this is now two features deep into owing it.
-
-Added 2026-08-20, verified on the emulator (`Medium_Phone`, x86_64, dev build over Metro **and** a
-release build):
-
-- **map labels** — a pill in the top-left row writes one fact on top of every country: name, capital,
-  languages, currencies or population. Independent of the fill mode. See *Map labels*.
-- **MapLibre draws real text, and the app is still fully offline.** A bundled Noto Sans TTF reached
-  through the style's `font-faces` and an `asset://` URL, embedded by `expo-font`'s config plugin.
-  **This disproves the old claim in this file and in `offlineStyle.ts` that any symbol layer breaks the
-  offline requirement** — the rule is no *remote* URL. Both comments have been corrected.
-- **the fill-mode toggle collapsed into a pill.** The three-segment control and the top-right row no
-  longer fitted side by side once a label pill existed — they overlapped on screen at 411 dp. Both
-  appearance settings are now pills opening an always-mounted panel, sharing the top-left row.
-- 520 Jest tests across 20 suites pass, typecheck clean, and **all six Maestro flows pass** — the five
-  existing ones unchanged in their tap points, because both panels are closed by default.
-- **the offline acceptance test has finally been re-run, and passes.** Release build, wifi and data
-  disabled, `ping` unreachable: the map renders, all five label fields draw, taps work, the info sheet
-  populates, and logcat shows nothing from the app but the platform's own boilerplate
-  `NetworkSecurityConfig` line — no HTTP, DNS, glyph or font request, and no errors. This was three
-  features overdue and is the first change that touched how the style resolves resources.
-- verified by hand: labels legible over the flat basemap and over both ends of the population ramp;
-  Türkiye, Brasília, Côte d'Ivoire and São Tomé all render their diacritics; microstates correctly
-  unlabelled at world zoom.
-- **still not re-verified on the S25.** The font adds 569 KB to the APK and the symbol layer adds a
-  native text buffer, so cold-start time and `dumpsys meminfo` are worth a look there.
-
-Added 2026-08-24, **not yet verified on any device**:
-
-- **leaving a round mid-way asks first.** A back press on `/quiz/play` raises a styled
-  confirmation — *See my score* / *Discard and leave* / *Cancel* — instead of silently
-  binning the round. See *Leaving mid-round asks first*.
-- the card is a `Modal` in the app's own palette, not the native `Alert` this was first
-  built as. That swap is the whole reason *The confirmation is a `Modal`* exists as a
-  section: it is the paint bug's one genuinely unavoidable case.
-- 535 Jest tests across 21 suites pass, typecheck clean.
-- **`.maestro/quiz.yaml` has not been run since the new steps were added**, and neither has
-  anything else here been seen on a screen. What is unproven is specifically: that Android
-  routes a back press into our handler at all (Jest resolves the iOS `BackHandler` stub, so
-  no unit test can show it), and that the card paints over the MapLibre surface. Both are
-  exactly what the new flow steps assert, so running that flow is the gate.
-- nothing here adds a network call.
-
-Added 2026-08-25, **not yet verified on any device**:
-
-- **quiz modes.** The setup screen now asks *how* you want to play before it asks what.
-  The second mode is **locate** — you are given a country's name and have to find it on
-  the map. See *Locate mode*.
-- **every camera move is now a `fly` whose duration is computed from how far it travels**,
-  replacing a flat 900 ms `ease`. This is not confined to the new mode: it changes the
-  pacing of **every question of an existing facts round**, and reverses a decision the old
-  comment recorded. See *Pacing a camera move*.
-- 669 Jest tests across 29 suites pass, typecheck clean.
-- **nothing here has been seen on a screen.** Three things in particular are unproven, and
-  each is the kind Jest structurally cannot reach: that the new `country-reveal` fill layer
-  paints at all, that a reveal camera stop parses in the native renderer rather than
-  blanking the map, and whether the new pacing actually *feels* better — which is a
-  judgement no test can make. There is **no Maestro flow for locate mode**, so the first
-  two are covered by nothing.
-- nothing here adds a network call, and nothing here is a native change — no `app.json`
-  edit, no new native dependency, so a JS reload is enough to see all of it.
-
-Added 2026-08-26, verified on the emulator:
-
-- **a third quiz mode, `flag`.** You are shown a country's flag and type the same facts a
-  `facts` round asks for. See *Flag mode*.
-- **country flags are now real SVGs on every platform**, bundled in the app, replacing the
-  emoji. That was not a polish pass: a flag emoji cannot be made large without running into
-  four separate properties of glyph layout, and switching deleted every workaround at once.
-  **This is the part of the entry worth reading** — see *The flags are real SVGs, on every
-  platform*.
-- 689 Jest tests across 29 suites pass, typecheck clean.
-- **verified on the emulator**: the mode runs, the panel grades, and a bundled SVG does
-  decode through `expo-image`'s Android Glide decoder, which was the one assumption Jest
-  could not test. The flag fills the stage on both Android and the browser.
-- **still unverified**: landscape, the S25, and a Windows browser specifically — which is
-  the only path that was already drawing an image and so the only one this did not change.
-- nothing here adds a network call — the SVGs are bundled, not fetched — and nothing here
-  is a native change: `expo-image` was already a dependency and ships the SVG decoder, so
-  no `react-native-svg`, no `expo prebuild`, no rebuild.
-
-Added 2026-08-26, verified on the emulator (`Medium_Phone`, x86_64) **in a release build**,
-and in a desktop browser:
-
-- **a sixth map-label option, `flag`.** The Labels pill now draws each country's flag over
-  it instead of text. See *Flag labels are a second layer, and they must be raster*.
-- **the flags on the map are PNG, not the SVGs the rest of the app uses**, because
-  **MapLibre's icon pipeline is raster-only on every platform** — and the same
-  `assets/flags/*.svg` that renders happily in `<CountryFlag>` draws *nothing* as a map
-  icon, log-only, with no exception. `npm run flags:data` now rasterises them.
-- 729 Jest tests across 31 suites pass, typecheck clean.
-- **verified on a release APK, which is the part that matters**: it launches, the map
-  renders, and all 249 flags draw. Also verified in a browser: the flags appear, the baked
-  border reads against the green basemap, the info sheet is unaffected, and switching back
-  to Name leaves no flags behind.
-- **`icon-padding: 2` crashed the app on launch, fatally, and the browser never noticed.**
-  That is the entry's most useful lesson and it has its own note below.
-- **not run: `.maestro/map-labels.yaml`** (the flag stanza is written but unexercised), the
-  **offline acceptance test**, landscape, and the S25.
-- nothing here adds a network call — the PNGs are bundled on native and served same-origin
-  from `public/` on web — and nothing here is a native change: no `app.json` edit and no new
-  native dependency, so a JS reload is enough. **A release build is still worth its own run**,
-  because a required PNG reaches MapLibre through a `drawable-*` resource lookup there and a
-  Metro URL in dev, and those are two different code paths.
-
-Added 2026-08-26, verified on the web (both trees, in a browser) and by 1002 unit tests;
-**not yet verified on Android or the S25**:
-
-- **the app is fully bilingual, English and Russian** - UI *and* data. Country names,
-  capitals, languages, currencies and regions all have Russian values; the map labels, the
-  info sheet, search, all three quiz modes and the grader work in either language. See
-  *Localization*.
-- **the web ships twice**: English at `/`, Russian at `/ru`, as two static exports. Each is
-  pre-rendered in its own language, so `<html lang>` is real and there is no hydration
-  flash, and **every `router.push('/search')` is unchanged** because expo-router prefixes
-  `experiments.baseUrl` itself.
-- **nothing re-uploads to MapLibre on a language switch.** Both languages' label text rides
-  on the same features (`tName` + `tNameRu`), so switching changes only the layer's
-  `text-field` and `filter` - the same code path the label picker already uses.
-  `MapScreen.test.tsx` asserts both sources are `toBe`-identical across a switch.
-- 1002 tests across 44 suites pass, typecheck clean, and the two-locale `npm run build:web`
-  succeeds with its own per-tree assertions.
-- **three bugs were found on a device, not by the tests**, and all three are now covered:
-  a leftover English hints table in `FieldPicker`, and two symptoms of the same
-  React Compiler staleness described under *`useTranslator`, and why `t` alone is a trap*.
-- **found and fixed a pre-existing bug**: `npm run enrich:data` would have silently
-  reverted the three hand-corrected capitals (Eswatini, Equatorial Guinea, Sri Lanka) the
-  next time anyone ran it. See *Corrections to world-countries*.
-- **not done**: no Maestro flow for Russian, nothing run on Android, and the offline
-  acceptance test has not been re-run. The web offline path is the riskiest untested part -
-  each locale's service worker is scoped to its own subtree and that is only proven online.
+Nothing added since the last offline run introduces a network call, but the gate is the gate, and the
+web half changed how resources resolve (two service workers, per-subtree scope), which is exactly the
+class of change it exists for.
 
 ## Stack
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Framework | **Expo SDK 57** + React Native 0.86.2, TypeScript | Development build, **not Expo Go** — MapLibre is a native module |
-| Routing | expo-router, routes in **`src/app/`** | SDK 57's default template layout |
-| Map | **`@maplibre/maplibre-react-native` 11.3.6** | Free, no API key, GPU polygon rendering, native hit-testing |
-| Info box | Hand-rolled on RN `Animated` | See below — deliberately not a bottom-sheet dependency |
+| Framework | **Expo SDK 57** + React Native 0.86.2, TypeScript | Development build, **not Expo Go** — MapLibre is native |
+| Routing | expo-router, routes in **`src/app/`** | `typedRoutes: true`, `reactCompiler: true` |
+| Map | **`@maplibre/maplibre-react-native` 11.3.6** (native) / `maplibre-gl` (web) | free, no API key |
+| Info box | hand-rolled on RN `Animated` | keeps the native dependency surface unchanged |
 | Geometry | Natural Earth *Admin 0 Countries, 1:50m* | public domain, 242 features → 240 countries |
-| Facts | `world-countries` npm (= mledoze/countries) | ODbL; the dataset REST Countries itself serves |
-| Population | World Bank `SP.POP.TOTL` | free, no key, most-recent-year values |
-| Languages | English + Russian, hand-authored data, no i18n library | see *Localization* |
+| Facts | `world-countries` npm (= mledoze/countries) | ODbL |
+| Population | World Bank `SP.POP.TOTL` | free, no key |
+| i18n | English + Russian, hand-authored, no library | see *Localization* |
 
-Chosen over Android Studio + Kotlin because polygon rendering happens inside MapLibre's native renderer
-either way — so RN costs nothing in performance while giving a far faster iteration loop.
+RN over Kotlin because polygon rendering happens inside MapLibre's native renderer either way.
 
 ### MapLibre v11 API — do not follow v10 docs
-
-v11 renamed the components. Verified against the installed type definitions:
 
 - `Map` (not `MapView`), `GeoJSONSource` (not `ShapeSource`), `<Layer type="fill">` (not `FillLayer`)
 - `Map` takes **`mapStyle`**; `GeoJSONSource` takes **`data`** (not `shape`)
 - press payloads arrive on **`event.nativeEvent.features`**
 - ornament props are `attribution` / `logo` / `compass` / `scaleBar` booleans
-- use `paint` / `layout`; the `style` prop is deprecated and goes away in v12
+- use `paint` / `layout`; the `style` prop is deprecated
 - `LngLatBounds` is a flat `[west, south, east, north]` tuple
-
-**v11 requires the New Architecture** (Fabric + TurboModules) — it is not optional. `newArchEnabled=true`
-is set in `android/gradle.properties`. Setting it to `false` breaks the map rather than fixing anything.
-
-### Why the info box is hand-rolled
-
-`@gorhom/bottom-sheet` was the original plan. The interaction is a simple show/hide, and hand-rolling on
-RN's `Animated` keeps the native dependency surface — and therefore the rebuild surface — unchanged.
-Dismissal is a close button plus tapping the ocean, not a swipe. If you later want drag-to-dismiss,
-adding the dependency is JS-only (reanimated and gesture-handler are already installed) and needs no
-native rebuild, but check its reanimated 4 compatibility first.
-
-### The info card in both orientations
-
-`orientation` is `"default"` in `app.json` and `android:screenOrientation` is **absent** from the
-manifest — re-adding either pins the app to portrait again. The card docks to a different edge per
-orientation, decided by `getInfoSheetLayout(window)`:
-
-| | Portrait | Landscape |
-|---|---|---|
-| Dock | bottom, full width | **right**, full height |
-| Size | `maxHeight: 55%`, content-height | `width` = clamp(280, 42% of width, 360) dp, capped at 60% |
-| Slides along | `translateY` | `translateX` |
-| Facts list | `flexGrow: 0` | `flex: 1`, scrolls inside the panel |
-
-A bottom sheet in landscape would cover most of the little vertical space there is, while the map is
-wider than it is tall — the spare room is at the side. The panel is capped at 60% of the width so the map
-keeps at least 40% on the narrowest landscape screens.
-
-**The card animates out, so it outlives its selection.** It keeps its own `visibleFacts` state that lags
-the `iso3` prop: on close it goes on rendering the country it was showing, slides off, and drops the
-content in the animation's completion callback. Returning `null` as soon as `iso3` is `null` unmounts it
-on the same frame and there is nothing left to animate — which is what the code used to do, despite a
-comment claiming otherwise. It also sets `pointerEvents="none"` while sliding out so taps reach the map,
-and the slide distance is **measured via `onLayout`**, not a constant: `maxHeight: 55%` is ~429 dp on a
-780 dp-tall phone, so a hardcoded 400 left a visible sliver at the moment it unmounted.
+- **v11 requires the New Architecture.** `newArchEnabled=true` in `android/gradle.properties`; setting
+  it false breaks the map rather than fixing anything.
 
 ## Layout
 
 ```
 src/
   app/
-    _layout.tsx             # GestureHandlerRootView + Stack
-    index.tsx               # MapScreen: owns selectedIso3, fillMode, and the search camera stop
-    search.tsx              # /search: the country search route (no map on it)
+    _layout.tsx  index.tsx (MapScreen)  search.tsx
+    quiz/index.tsx  quiz/play.tsx  quiz/results.tsx
   map/
-    WorldMap.tsx            # Map + GeoJSONSource + fill/selected/reveal/line Layers
-    cameraFit.ts            # pure: zoom floors - world-fit width, and the both-axes fit
-    choropleth.ts           # pure: population ramp + the fill-color paint expression
-    offlineStyle.ts         # inline style: background layer, a bundled font-face, no sources
-    mapLabels.ts            # pure: label field catalogue + both symbol layers' expressions
-    mapFlagImages.ts        # GENERATED: 249 PNG requires, keyed flag-<iso2>
-    mapFlagImages.web.ts    # GENERATED: the same keys, as /map-flags/ URLs
-    labelFit.ts             # pure: one fit core; text width or flag width -> that zoom
-  i18n/
-    localeTypes.ts          # pure: Locale, LOCALES, coerceLocale, byLocale
-    locale.ts / .web.ts     # the active language: singleton+storage / a build constant
-    localeStorage.ts / .web.ts
-    localePath.ts           # pure: '/quiz/play?seed=7' <-> '/ru/quiz/play?seed=7'
-    baseUrl.ts              # EXPO_BASE_URL + withBaseUrl, for hand-written asset URLs
-    en.ts / ru.ts           # the catalogue; en is the schema, ru is Record<MessageKey,...>
-    en.plurals.ts / ru.plurals.ts
-    plural.ts               # pure: one/few/many, hand-rolled
-    t.ts                    # translate / translatorFor - Translator is callable + .plural
-    useTranslator.ts        # what COMPONENTS use; see the note in Localization
-  data/
-    countries.geo.json      # 240 outlines, properties trimmed to { iso3, name }   (1.6 MB)
-    countryFacts.json       # 250 records keyed by ISO-3, each with translations.ru (184 KB)
-    countryFacts.ts         # per-locale tables, built eagerly; getCountryFacts(iso3, locale)
-    placeNames.ts           # display names for the 6 regions and 24 subregions
-    ru/                     # the hand-authored dictionaries; build-time inputs
-    labelPoints.json        # 240 label anchors + landmass widths                    (9 KB)
-    labelGeoJson.ts         # one label point per country, every field's text folded on
-    worldGeoJson.ts         # outlines + population folded on, for the choropleth
-    types.ts
-  components/
-    LocaleToggleButton.tsx  # the two-letter language pill, top-right
-    CountryFlag.tsx         # the flag, as a bundled SVG through expo-image
-    flagAssets.ts           # GENERATED: 249 static requires, one per flag
-    CountryInfoSheet.tsx
-    ConfirmDialog.tsx       # a Modal-hosted confirmation card in the app's colours
-    infoSheetLayout.ts      # pure: sheet dock per orientation, and the map's unobstructed band
-    palette.ts              # the shared chrome colours (was components/quiz/palette.ts)
-    formatters.ts           # pure, unit-tested
-    MapControls.tsx         # the chrome: fill + label pills and their panels top-left,
-                            #   legend under them, search + quiz pills top-right
-    MapOptionPill.tsx       # a pill that opens one of the option panels
-    MapOptionPanel.tsx      # the always-mounted radio list behind a pill
-    ChoroplethLegend.tsx    # stepped key, driven by the active ramp
-    quiz/                   # QuizPanel, LocatePanel, FlagStage, AnswerField,
-                            #   ChipInput, SubregionPicker, FieldPicker, ModePicker,
-                            #   QuizLaunchButton, useKeyboardHeight
-    search/                 # SearchLaunchButton, CountryResultRow
-  map/
-    countryBounds.ts        # pure: which polygons to frame for one country
-    quizCamera.ts           # pure: bbox + viewport -> centre and zoom, whole-viewport or
-                            #   into a focus rect (search frames around the info sheet);
-                            #   and getFlightDuration - how long a move should take
-  quiz/
-    quizConfig.ts           # pure: QuizMode + its exhaustive records, FieldId/
-                            #   GradedField, QuizConfig, router-param coercion
-    quizCountries.ts        # the 193-country pool and the subregion catalogue
-    quizBuilder.ts          # pure: seeded shuffle -> ordered questions
-    normalizeText.ts        # pure
-    editDistance.ts         # pure: Damerau, and the typo budget
-    answerAliases.ts        # accepted spellings, plus NAME_INDEX for the confusable guard
-    gradeAnswer.ts          # pure: the marking
-    gradeLocation.ts        # the marking for a locate round: one country, `===`
-    quizScore.ts            # pure: the tallies
-    quizPanelLayout.ts      # pure: the map/panel split, and the map's own viewport
-                            #   (a locate panel is content-height: panelHeight is null)
-    exitPrompt.ts           # pure: the wording and buttons of the leave-mid-round dialog
-    quizResultStore.ts      # one-slot handover from the round to the score screen
-  search/
-    countrySearch.ts        # pure: the 237-country index and the ranked matcher
-    pendingCountry.ts       # subscription handover from /search back to the map
-scripts/countryOverrides.mjs        # deliberate corrections to world-countries, asserted
-scripts/manifest.mjs                # the web manifest, per locale, with its invariants
-scripts/build-flag-assets.mjs       # offline; the SVG set, the PNG map rasters, 3 require maps
-scripts/build-label-points.mjs      # offline; polylabel anchors from the committed geometry
-scripts/build-country-data.mjs      # full online rebuild
-scripts/enrich-country-facts.mjs    # offline facts-only re-derivation
-scripts/countryFactRecord.mjs       # the record shape, shared by both
-plugins/withJsonBundleInputs.js      # config plugin: makes .json a Gradle bundle-task input
-__tests__/ , __mocks__/ , .maestro/
+    WorldMap.tsx / .web.tsx   # Map + source + fill/selected/reveal/line/label/flag layers
+    worldMapProps.ts          # props + camera constants shared by both implementations
+    cameraFit.ts              # world-fit width zoom, and the both-axes fit
+    choropleth.ts             # log + linear ramps and their paint expressions
+    offlineStyle.ts / web     # inline style: background layer, bundled font-face, no sources
+    mapLabels.ts              # label field catalogue + both symbol layers' expressions
+    mapFlagImages.ts / .web   # GENERATED: 249 PNG requires / URLs, keyed flag-<iso2>
+    labelFit.ts               # text or flag width -> the zoom that fits it
+    countryBounds.ts          # which polygons to frame for one country
+    quizCamera.ts             # bbox + viewport -> centre/zoom (whole viewport or a focus rect);
+                              #   and getFlightDuration
+  i18n/       localeTypes  locale(.web)  localeStorage(.web)  localePath  baseUrl
+              en/ru + plurals  plural.ts  t.ts  useTranslator.ts
+  data/       countries.geo.json (1.6 MB)  countryFacts.json (184 KB)  countryFacts.ts
+              placeNames.ts  ru/  labelPoints.json  labelGeoJson.ts  worldGeoJson.ts  types.ts
+  components/ CountryInfoSheet  ConfirmDialog  infoSheetLayout  palette  formatters
+              MapControls  MapOptionPill  MapOptionPanel  ChoroplethLegend
+              CountryFlag(.web)  flagAssets.ts (GENERATED)  LocaleToggleButton
+              quiz/  search/
+  quiz/       quizConfig  quizCountries  quizBuilder  normalizeText  editDistance
+              answerAliases  gradeAnswer  gradeLocation  quizScore  quizPanelLayout
+              exitPrompt  resetPrompt  quizResultStore  practicePool
+  mastery/    masteryStore  masteryCodec  masteryStorage(.web)  masteryScore
+  search/     countrySearch.ts  pendingCountry.ts
+scripts/  countryOverrides  manifest  build-flag-assets  build-label-points
+          build-country-data  enrich-country-facts  countryFactRecord  build-web
+plugins/withJsonBundleInputs.js
+__tests__/  __mocks__/  .maestro/
 ```
 
-**Single source of identity: ISO 3166-1 alpha-3.** Geometry features and fact records join on it.
+**Single source of identity: ISO 3166-1 alpha-3.** Geometry and facts join on it.
 
-Both JSON files are `import`ed directly — Metro inlines them into the bundle, so there is no filesystem
-read and no async load at runtime. Do not convert either to a fetch.
+Both JSON files are `import`ed — Metro inlines them into the bundle. No filesystem read, no async
+load. Do not convert either to a fetch.
+
+## The paint bug — read this before adding any view over the map
+
+**The most expensive bug in the project.** A view inserted over the MapLibre surface *after* the
+initial mount is never drawn. It sits in the hierarchy with entirely correct bounds — `uiautomator
+dump` shows it exactly where it belongs — and paints nothing; sampling the screenshot at those
+coordinates returns pure map pixels.
+
+Four escapes, and every UI decision in this app picks one of them:
+
+1. **Mounted from startup and parked** — `ChoroplethLegend` lives at `left: -200` and animates `left`,
+   a **layout** property, on the **JS thread** (`useNativeDriver: false`). Always-mounted gives it the
+   stable insertion order the pills have; animating layout supplies the re-layout that reveals it.
+   `visible` therefore drives `accessibilityElementsHidden`, not mounting — so in tests presence proves
+   nothing and **RNTL queries need `{ includeHiddenElements: true }`**.
+2. **A flex sibling, never an overlay** — the quiz panel splits the screen with the map.
+3. **A separate route with no map on it** — `/search`, `/quiz`, and a `flag` quiz round.
+4. **A `Modal`** — RN's Android backend hosts it in its own `Dialog` window, composited over the app.
+   `ConfirmDialog` is the one genuinely unavoidable case (a dialog must cover the map *and* appear on
+   demand).
+
+**The corollary matters as much:** inside 2, 3 and 4, ordinary conditional rendering is correct.
+Copying the always-mounted discipline into `/search` would mount 237 rows forever for nothing. The
+`display: 'none'` rows in `AnswerField` and the fixed chip slots in `ChipInput` exist *only* because
+those views share a window with a live map surface.
+
+What did **not** work — one release build each, do not repeat: a translucent `backgroundColor`;
+`pointerEvents`; `elevation: 6`; an absolute shrink-wrapped container; `absoluteFillObject` +
+`box-none`; and an opacity/translateY entrance with `useNativeDriver: true`. That last is the
+instructive failure — `CountryInfoSheet` uses exactly that pattern and paints fine, because its
+container is mounted at startup. The animation never mattered; the insertion order did.
+
+Diagnosis in one step: `adb shell uiautomator dump` to prove the view **is** laid out, then sample the
+screenshot's pixels at those bounds to prove it is **not** painted. Free behavioural signal: if
+rotating the device makes it appear and it *stays*, this is the bug, not styling.
 
 ## The data pipeline
 
 `npm run build:data` — a **one-off**, run while online; its output is committed. The app never calls
 these APIs.
 
-**There are two writers of `countryFacts.json`, and one record builder shared between them** so they
-cannot drift (`scripts/countryFactRecord.mjs`):
+**Two writers of `countryFacts.json`, one shared record builder** (`scripts/countryFactRecord.mjs`):
 
 | | |
 |---|---|
-| `npm run build:data` | the full rebuild. Fetches Natural Earth + the World Bank; rewrites **both** JSON files. |
-| `npm run enrich:data` | **offline.** Re-derives the facts from the local `world-countries`, carries the committed population through untouched, rewrites **only** `countryFacts.json`. |
+| `npm run build:data` | full rebuild. Fetches Natural Earth + World Bank; rewrites **both** JSON files. |
+| `npm run enrich:data` | **offline.** Re-derives facts from local `world-countries`, carries the committed population through untouched, rewrites **only** `countryFacts.json`. |
 
-Prefer `enrich:data` for anything that comes from `world-countries`. A full rebuild re-fetches Natural
-Earth `master`, and the geometry drifts — this file already records a border moving between tiers and
-flipping a `pickCountry` expectation, and every Maestro percentage tap is pinned to today's outlines.
-Taking an unreviewable 1.6 MB coordinate diff to gain four fields from a pinned local devDependency is a
-bad trade. The enrich script **fails if any population would change**, which is the proof it never
-touched the World Bank join.
+Prefer `enrich:data`. A full rebuild re-fetches Natural Earth `master` and the geometry drifts — a
+border has already moved between tiers and flipped a `pickCountry` expectation, and every Maestro
+percentage tap is pinned to today's outlines. `enrich:data` **fails if any population would change**,
+which proves it never touched the World Bank join.
 
-Quiz mode added four fields to each record: `region`, `subregion`, `unMember` and `altSpellings`
-(region/subregion having been removed in `3cb9f6e` and now restored). Both scripts assert the quiz's own
-invariants — 193 UN members with geometry, each with a subregion, a population, a capital and a language,
-and a currency for all but FSM — and `data-integrity.test.ts` mirrors them.
+Both scripts assert the quiz's invariants — 193 UN members with geometry, each with a subregion,
+population, capital and language, and a currency for all but FSM — and `data-integrity.test.ts`
+mirrors them. Genuine upstream gaps go in an explicit allowlist (`FACTLESS_ALLOWLIST` = Northern
+Cyprus, Somaliland, Siachen Glacier; `POPULATIONLESS_ALLOWLIST` = Taiwan, Western Sahara, Falklands,
+French Southern Territories, Antarctica + 17 small territories) — **never a silent skip**. The script
+fails the build on any unresolved code, duplicate, or missing record.
 
-### Why 1:50m, and what it cost
+### Why 1:50m
 
-1:110m has **177 features and no microstates at all** — Liechtenstein, Dominica, Monaco, San Marino,
-Andorra, Malta, Singapore, Vatican and ~25 others simply had no polygon, so they could not be tapped,
-highlighted or reached in any way. 1:50m carries every one of them. Measured before choosing:
+1:110m has **177 features and no microstates at all** — Liechtenstein, Monaco, San Marino, Malta,
+Singapore, Vatican and ~25 others had no polygon, so they could not be tapped at all.
 
-| Tier | Features | Committed size @3dp | Unmatched slivers |
+| Tier | Features | Committed @3dp | Unmatched |
 |---|---|---|---|
 | 1:110m | 177 | 0.24 MB | 0 — but no microstates |
 | **1:50m** | 242 → **240** | **1.6 MB** | 1 (Siachen Glacier) |
 | 1:10m | 258 | ~8 MB | 13 |
 
-10m was rejected on size, and because it splits disputed slivers (Bir Tawil, the Spratlys, the Cyprus
-buffer zone) into their own ISO-less, factless features — a lot of allowlist for detail invisible on a
-world map.
+10m was rejected on size, and because it splits disputed slivers into ISO-less, factless features.
 
 Two things the higher tier forced:
 
-- **Some countries arrive as several features and must be merged.** Australia ships as the mainland
-  plus `Indian Ocean Territories` plus `Ashmore and Cartier Islands`, all resolving to AUS through
-  `ISO_A3_EH`. The build folds every same-ISO feature into one MultiPolygon (`mergePolygons`). It has
-  to: the highlight layer filters on `iso3`, so a second AUS feature would be an untappable duplicate.
-- **17 more territories have no World Bank population** (Vatican, Jersey, Guernsey, Niue, Cook Islands,
-  Anguilla, …). Every one was checked against `GET /v2/country/<code>` and is genuinely not a World Bank
-  economy — none is a join failure. Jersey and Guernsey are reported only as a combined "Channel
-  Islands" (CHI), which would double-count if split across both, so both stay blank.
+- **Some countries arrive as several features and must be merged.** Australia ships as mainland +
+  Indian Ocean Territories + Ashmore and Cartier, all resolving to AUS. The build folds every same-ISO
+  feature into one MultiPolygon (`mergePolygons`) — the highlight layer filters on `iso3`, so a second
+  AUS feature would be an untappable duplicate.
+- **17 more territories have no World Bank population.** Every one was checked against
+  `GET /v2/country/<code>`; none is a join failure. Jersey and Guernsey are reported only as combined
+  "Channel Islands", so both stay blank.
 
-**`roundCoords` never rounded anything.** It recursed on numbers and arrays and returned everything else
-untouched — but it was called with `f.geometry`, an *object*, so it hit that identity branch and the
-110m file shipped at full 6dp precision for its whole life, despite the comment. `roundGeometry` now
-takes the geometry and recurses into `.coordinates`; the integrity suite asserts nothing finer than 3dp
-survives. At 50m that is worth ~0.5 MB.
+### Pipeline traps
 
-Things that bit us, preserved so they don't bite again:
-
-- **REST Countries is no longer usable.** v3.1 is deprecated (returns an error envelope, not data) and
-  v5 requires an API key. `world-countries` is the same upstream dataset, but it has **no population
-  field** — hence the separate World Bank call.
+- **REST Countries is no longer usable** — v3.1 deprecated, v5 needs a key. `world-countries` is the
+  same upstream dataset but has **no population field**, hence the separate World Bank call.
 - **Natural Earth ships `ISO_A3 = "-99"`** for disputed/dependent territories. `NE_TO_ISO3` patches
-  Kosovo (`KOS` → `UNK`) and South Sudan (`SDS` → `SSD`); France and Norway resolve via the `ADM0_A3`
+  Kosovo (`KOS`→`UNK`) and South Sudan (`SDS`→`SSD`); France and Norway resolve via the `ADM0_A3`
   fallback. Without this France silently becomes an untappable blank.
-- **Kosovo is `UNK` in mledoze but `XKX` at the World Bank** — see `ISO3_TO_WORLD_BANK`.
-- Coordinates are rounded to 3 dp (~110 m), which takes ~25% off the file and is still far finer than a
-  1:50m basemap resolves.
-
-The script **fails the build** on any unresolved code, duplicate, missing facts record, or missing
-population. Genuine upstream gaps go in an explicit allowlist (`FACTLESS_ALLOWLIST` = Northern Cyprus,
-Somaliland, Siachen Glacier; `POPULATIONLESS_ALLOWLIST` = Taiwan, Western Sahara, Falklands, French
-Southern Territories, Antarctica plus the 17 small territories 50m added) — never a silent skip. The
-same invariants are re-asserted in `__tests__/data-integrity.test.ts` so they cannot rot.
+- **Kosovo is `UNK` in mledoze but `XKX` at the World Bank** — `ISO3_TO_WORLD_BANK`.
+- Coordinates round to 3 dp (~110 m), ~25% off the file. `roundGeometry` takes the geometry and
+  recurses into `.coordinates`; the old `roundCoords` was handed an *object*, hit its identity branch
+  and **never rounded anything** for the 110m file's whole life. The integrity suite now asserts it.
+- **`scripts/countryOverrides.mjs`** holds deliberate corrections to `world-countries` (three
+  capitals: Eswatini, Equatorial Guinea, Sri Lanka), because `enrich-country-facts.mjs` rebuilds every
+  record from the pinned dataset and would otherwise silently revert any hand-edit into a minified
+  single-line file nobody diffs. An override that has *stopped* differing from upstream also fails the
+  build, so a fix upstream tells you to delete a line instead of rotting.
 
 ## Selection
 
 Highlight is a **filtered layer**, not feature-state:
 `filter: ['==', ['get','iso3'], selectedIso3 ?? '']`. An empty string matches nothing, which is how
-"no selection" is expressed.
+"no selection" is expressed. Layers stay mounted and are switched by handing the ISO-3 to only one of
+them, rather than adding/removing layers at runtime.
 
-There are **three** such layers. Two of them exist because the choropleth needs a different marker (see
-below): `country-selected` (orange fill) and `country-selected-outline` (white line, drawn last so it
-sits over `country-border`). Both stay mounted in both modes and the fill mode is expressed by handing
-the ISO-3 to only one of them — the same empty-string idiom, rather than adding and removing layers
-at runtime.
-
-The third is **`country-reveal`**, and it exists because one `selectedIso3` cannot say two things at
-once: locate mode has to show where the answer was *alongside* the country the player tapped, and
-whenever the guess was wrong those are two different countries. Same idiom, its own colour, drawn
-immediately after `country-selected` so that the one case where both name the same country — a correct
-guess — resolves to the reveal colour rather than to draw order.
+Three such layers: `country-selected` (orange), `country-selected-outline` (white, drawn over
+`country-border`), and **`country-reveal`** — which exists because one `selectedIso3` cannot say two
+things at once: locate mode must show where the answer was *alongside* what the player tapped. Drawn
+immediately after `country-selected`, so a correct guess resolves to the reveal colour rather than to
+draw order.
 
 ### `GeoJSONSource.onPress` MUST call `event.stopPropagation()`
 
-This cost real debugging time. Source presses **bubble up to `Map.onPress`**, which is our
-tap-the-ocean-to-deselect handler. Without `stopPropagation()` the ocean handler fires immediately
-after every country press and clears the selection that was just made, so tapping a country appears to
-do nothing at all — no error, no log, just silence.
+Source presses **bubble up to `Map.onPress`**, our tap-the-ocean-to-deselect handler. Without
+`stopPropagation()` the ocean handler fires immediately after every country press and clears the
+selection just made — so tapping a country appears to do nothing at all, with no error and no log.
 
-Unit tests cannot catch this on their own (the mock doesn't model native bubbling), so there is an
-explicit assertion that `stopPropagation` was called, plus a Maestro step that taps ocean after
-selecting.
+Unit tests can't catch this alone (the mock doesn't model bubbling), so there is an explicit assertion
+that `stopPropagation` was called, plus a Maestro step tapping ocean after selecting.
 
-## Map fill modes — the population choropleth
+### Which country a press selects — `pickCountry.ts`
 
-`WorldMap` takes `fillMode: 'flat' | 'population'`, owned by `MapScreen` and driven by the toggle in
-`MapControls`. `flat` is the original green basemap; `population` paints the ColorBrewer *Reds* ramp
-defined in `src/map/choropleth.ts`.
+`onPress` returns **every feature the hitbox touches**, in arbitrary order. Taking `features[0]` was a
+real user-visible bug. Measured on device, a press on **Paris** returned
+`["GBR","ITA","NLD","BEL","LUX","CHE","DEU","FRA"]` — France **last**.
 
-**The scale is `log10(population)`, and that is not a preference.** Population runs from ~11k (Tuvalu)
-to ~1.45B (India) — five orders of magnitude. A linear ramp renders the entire world white except China
-and India. The stops sit one per decade, so each colour step is a 10× step of people.
+Both halves of the fix matter:
 
-| 10k | 100k | 1M | 10M | 100M | 1B | 1.5B |
-|---|---|---|---|---|---|---|
-| `#ffffff` | `#fee0d2` | `#fcbba1` | `#fc9272` | `#ef3b2c` | `#a50f15` | `#67000d` |
+1. **`hitbox` tightened to 10 dp** (from MapLibre's 44 dp default). At zoom 0 the default spans ~30° of
+   longitude. The tighter box also means open water yields *no* candidates, which is what lets
+   `Map.onPress` deselect.
+2. **`pickCountry`** prefers the country whose polygon **contains** the pressed point
+   (`@turf/boolean-point-in-polygon`), falling back to nearest only when none does — which keeps small
+   islands reachable and handles presses into the Caspian, inside no country.
 
-`interpolate` clamps outside its domain, so under 10k is white and over 1.5B is the darkest stop without
-extra branches. `ChoroplethLegend` renders these same stops, so the key and the map cannot drift.
+**Containment is what makes microstates usable**: at any zoom where Liechtenstein is visible the 10 dp
+box still returns Switzerland and Austria alongside it. Both cases pinned in `pickCountry.test.ts`.
 
-**Population reaches the paint expression through a runtime join, not the pipeline.** The build script
-trims outline properties to `{ iso3, name }`, and a data-driven expression can only read what is on the
-feature. `src/data/worldGeoJson.ts` folds `population` on at module load — keeping `countryFacts.json` the
-single source of truth, where emitting it into `countries.geo.json` too would give you two committed
-copies free to drift and would need an online rebuild to change. It is cheap because **`geometry` is
-passed through by reference**; only the small properties object is rebuilt. `worldGeoJson.test.ts` asserts
-that identity, since losing it means duplicating 1.6 MB at import.
+**A sharper border can change the right answer.** A recorded Sahara press used to be inside Libya and
+is now inside Algeria. If a `pickCountry` expectation flips after a data change, check the geometry
+before the code.
 
-**Features with no World Bank figure omit `population` entirely rather than carrying null**, which is what
-lets the expression split them off with `['has','population']` into the grey `NO_DATA_COLOR`. A null would
-also reach `log10` and poison the whole expression — as would a `0`, which `data-integrity.test.ts` now
-forbids.
+## Camera
 
-### Never conditionally mount an overlay above the map
+`INITIAL_CENTER = [10, 20]`. The zoom is **not** a constant: both `initialViewState.zoom` and `minZoom`
+come from `getWorldFitZoom(windowWidth)` = `max(0, log2(width / 512))`.
 
-**The most expensive bug in the project so far.** A view inserted over the MapLibre surface *after* the
-initial mount is never drawn. It sits in the view hierarchy with entirely correct bounds — `uiautomator
-dump` showed the legend card, all seven swatches and every label exactly where they belonged — and
-paints nothing at all; sampling the screenshot at those coordinates returns pure map pixels.
+- **Do not switch back to `bounds`.** Fitting `[-180,-60,180,85]` on a tall phone fills the height with
+  the latitude range and crops most of the longitude range.
+- **Zoom 0 is a request, not a guarantee.** MapLibre clamps so the world covers the viewport — measured
+  ~0.61 on the S25. Derive projection mappings empirically.
+- **The floor is derived because the clamp only saves you in portrait.** A landscape window is *wider*
+  than the world at zoom 0 (914 dp vs 512), so MapLibre tiles the world horizontally — a cold landscape
+  launch rendered ~1.8 copies with a seam through the Pacific. The formula is exactly 0 in portrait (so
+  portrait taps are untouched) and 0.836 in landscape. Keep the `max(0, …)`: `log2(0)` would send
+  `-Infinity` to the native camera.
+- **A cold launch and a rotation do not settle at the same camera.** `32%,56%` is Brazil after a
+  rotation and Guyana on a cold launch. Derive Maestro points from a cold launch in the flow's
+  orientation.
 
-So `ChoroplethLegend` is **mounted from startup and never conditionally rendered**. `MapControls` parks it
-at `left: -200` when hidden and animates `left` — a **layout** property, on the **JS thread**
-(`useNativeDriver: false`) — to slide it in. Every part of that sentence is load-bearing:
+Explore and quiz `maxZoom` are both **10**. At 8 a 400 dp screen spans ~1.1° and Monaco is a 22 dp dot
+— framed correctly and useless. 3 dp geometry makes 10 the honest ceiling.
 
-- *Always mounted* gives it the same stable insertion order as the toggle pill, which never had the bug
-  precisely because it is present in the first pass.
-- *Animating a layout property* supplies the re-layout that reveals it. Rotating the device fixed it
-  manually for the same reason — and it then stayed visible, because the view was never recreated.
-- *JS-driven* so each frame commits through the shadow tree.
+No camera ref: v11's `Camera` takes a declarative `Partial<CameraStop>`, and the imperative
+`fitBounds`/`setStop` *throw* when the native view is not ready — which is exactly the first question
+of a round. `initialViewState` stays alongside to supply frame one.
 
-`visible` therefore drives `accessibilityElementsHidden` / `importantForAccessibility`, not mounting.
-In tests that means presence proves nothing, and **RNTL queries need `{ includeHiddenElements: true }`**
-or they will not find the parked legend at all.
+**We compute centre and zoom ourselves** (`quizCamera.ts`) rather than handing MapLibre `bounds` +
+`padding`, whose antimeridian behaviour cannot be verified offline and which Fiji and Russia exercise
+on day one. Doing the Mercator arithmetic here makes it unit-testable — a bad stop is otherwise
+invisible until the native renderer blanks the map. Stops are `useMemo`'d on the country and map box
+only; `Camera` is `memo()`'d and rebuilds its animation from its props, so a freshly allocated object
+re-fires the fly on every keystroke.
 
-What did **not** work — one release build each, do not repeat them: a translucent `backgroundColor`;
-the `pointerEvents` prop; `elevation: 6`; restructuring `MapControls` into a shrink-wrapped absolute
-container, then into `absoluteFillObject` + `box-none`; and an entrance animation on opacity + translateY
-with `useNativeDriver: true`. That last one is the instructive failure — `CountryInfoSheet` uses exactly
-that pattern and paints fine, because its container is mounted at startup. The animation was never the
-thing that mattered; the insertion order was.
+**A stop is never withdrawn.** `WorldMap` spreads `{...(camera ?? {})}`, so handing back `undefined`
+takes the native `stop` prop from `{center, zoom, duration, easing}` to `{}` — a real prop change
+pushed into a renderer Jest replaces with a stub. Both the search focus and the locate reveal follow
+this rule. `MapScreen.test.tsx` asserts the explore camera is **never** handed a stop.
 
-Method that actually found it: `adb shell uiautomator dump` to prove the view **is** laid out with the
-right bounds, then sample the screenshot's pixels at those bounds to prove it is **not** painted. That
-splits "layout bug" from "paint bug" in one step, and is far faster than changing styles and rebuilding.
-The other free signal is behavioural: if rotating the device makes it appear and it then stays, you are
-looking at this bug, not a styling one.
+### Which polygons to frame — `countryBounds.ts`
 
-Two more traps worth keeping:
+A plain bbox is wrong, and the reason is France: Natural Earth draws French Guiana as part of FRA, so
+the full extent spans 63°. Guiana is ~13% of France's polygon area, so **no area threshold separates it
+from Sicily** — only distance does.
 
-- **The Jest mock used to strip `paint`.** It now forwards it, like `filter`. Without that no test can see
-  the fill colour at all.
-- **A malformed paint expression fails inside the native renderer**, which is exactly the thing Jest
-  replaces with a stub — so it passes every unit test and then blanks the layer on a device.
-  `.maestro/choropleth-modes.yaml` exists solely to catch that.
+Rank polygons by area, seed a cluster with the largest, absorb any whose bbox is within
+`max(GAP_MIN_DEG, 0.35 × cluster diagonal)`, to a fixpoint.
 
-The map now has **chrome in the top-left** (`MapControls`, safe-area inset). It is the one corner free in
-both orientations — the info sheet docks bottom in portrait and right in landscape. Keep Maestro tap
-points clear of it; the portrait Greenland tap at `19%,13%` passes just under it.
+- **Pick the longitude frame first, from the country's total extent**, then cluster inside it. Deciding
+  per polygon yields "Kiribati is one atoll" and "the UK is Great Britain only".
+- **`GAP_MIN_DEG` is 5.5 because of Malaysia**, whose halves sit 5.2° apart with Borneo the larger — a
+  tighter floor drops the peninsula and its capital. At 5.5 Spain rejects the Canaries by 2.5°,
+  Portugal the Azores by 2.8, South Africa the Prince Edward Islands by 5.7.
+- Degenerate spans widen to `MIN_SPAN_DEG` and deliberately **overshoot by a relative epsilon** — one
+  ulp at latitude 44 is ~7e-15, so correcting the shortfall exactly does nothing. A zero span sends
+  `log2(0)` to the native camera.
+- Accepted limitation: **Kiribati and Micronesia frame to their largest island group** (38° and 25° of
+  ocean otherwise). The subregion filter is the opt-out.
+
+### Pacing a camera move — `getFlightDuration`
+
+Every camera move is a **`fly` whose duration is computed from the flight's length**. A fixed duration
+is wrong in both directions at once, and time alone can't fix the long case: `ease` interpolates the
+centre linearly at the *starting* scale, so at zoom 8 the ground tears past however long you give it.
+Zooming out on the way is what makes a long move readable.
+
+**The unit is screenfuls, not kilometres** — the van Wijk & Nuij (2003) path length, the same thing
+`maplibre-gl` computes for a parameterless `flyTo` (`curve` 1.42).
+
+**Reimplemented rather than delegated because MapLibre Native Android cannot do it.** From
+`CameraUpdateItem.kt`: a `duration` of `0` takes the `moveCamera` path (an instant jump); a negative
+one falls back to a **fixed** `ANIMATION_DURATION`. The file says so itself — iOS has the dynamic API,
+Android does not. Computing it here makes the two platforms agree and puts the number where Jest can
+read it; the web implementation needs it too, for `applyStop`'s `duration + ARRIVAL_GRACE_MS` deadline.
+
+`FLIGHT_SPEED` is **the one number to turn** — screenfuls per second, 2 here against `maplibre-gl`'s
+1.2 (at which France→Japan takes over three seconds, twenty times a round). Measured on a 411x500 map:
+
+| flight | ms |
+|---|---|
+| France–Germany, Brazil–Argentina | 450 (floor) |
+| world view–Australia, **USA–China** | ~620 |
+| France–Japan | 1588 |
+| NZ–Iceland, **world view–Monaco** | 2000 (ceiling) |
+
+The two bold ones read as wrong until you remember the unit: USA–China is short because both frame at
+about zoom 1 so little moves, and Monaco–Liechtenstein is 2 s despite 500 km because at zoom 10 that is
+hundreds of screenfuls. `flightDuration.test.ts` pins them.
+
+**Where the flight starts** is derived, since nothing reports the pose back: `facts` uses the previous
+question's country (a pure function of the question list), `locate` uses the last stop sent. Being
+wrong costs a slightly mis-paced move, never a wrong destination.
+
+## Map fill modes
+
+`WorldMap` takes a `fillMode`, owned by `MapScreen`: `flat` (green basemap), `population`, `density`,
+and `mastery`. Each non-flat mode is a ramp in `src/map/choropleth.ts` with seven stops, matched by
+`ChoroplethLegend` so key and map cannot drift.
+
+**Population and density are `log10`, and that is not a preference.** Population runs from ~11k
+(Tuvalu) to ~1.45B (India) — five orders of magnitude, and a linear ramp renders the world white except
+China and India. Stops sit one per decade, so each colour step is a 10× step of people. `interpolate`
+clamps outside its domain, so no extra branches are needed at either end.
+
+**Values reach the paint expression through a runtime join, not the pipeline.** The build trims outline
+properties to `{ iso3, name }`, and a data-driven expression can only read what is on the feature.
+`src/data/worldGeoJson.ts` folds `population`/`area` on at module load — keeping `countryFacts.json`
+the single source of truth. It is cheap because **`geometry` is passed by reference**; only the small
+properties object is rebuilt, and `worldGeoJson.test.ts` asserts that identity, since losing it
+duplicates 1.6 MB at import.
+
+**Features with no figure omit the property entirely rather than carrying null**, which lets the
+expression split them off with `['has', …]` into the grey `NO_DATA_COLOR`. A null would reach `log10`
+and poison the whole expression — as would a `0`, which `data-integrity.test.ts` forbids.
+
+Two test traps: the Jest mock had to be taught to forward `paint` (and later `layout` and `data`); and
+**a malformed paint expression fails inside the native renderer**, which is exactly what Jest replaces
+with a stub — so it passes every unit test and blanks the layer on a device.
+`.maestro/choropleth-modes.yaml` exists solely to catch that.
 
 ## Map labels
 
-A pill in the top-left row writes one fact on top of every country: **name, capital, languages,
-currencies or population**. Independent of the fill mode — the density choropleth with capital labels
-over it is a legal and useful combination — so it has its own state, its own pill and its own panel.
+A pill in the top-left row writes one fact over every country: **name, capital, languages, currencies,
+population, or flag**. Independent of the fill mode, so it has its own state, pill and panel.
 
 ### Real text, and still no network
 
-**This is the feature that corrected the "no symbol layers" rule at the top of this file.** MapLibre
-needs glyph data to draw text, but that data does not have to come over the wire:
+**This is the feature that corrected the "no symbol layers" rule.** MapLibre needs glyph data, but it
+does not have to come over the wire:
 
-- **`font-faces`** (root of the style, spec 24.x) maps a font name to a real TTF/OTF file. The shipped
-  `libmaplibre.so` implements it — `mbgl::FontFace`, the error string `"Invalid font-face definition
-  for: "`, and FreeType plus HarfBuzz are all in the binary. Characters a face covers never touch the
-  `glyphs` URL, and there is no `glyphs` URL here at all.
-- **`asset://`** resolves against the APK's own `assets/` directory through the Android asset manager.
-  `mbgl::AssetFileSource` is in the same binary. No socket, no DNS, no permission.
-- **`expo-font`'s config plugin** puts the file there. Its Android path copies every plain-string entry
-  of the plugin's `fonts` array into `app/src/main/assets/fonts`, so
-  `asset://fonts/NotoSans-Regular.ttf` resolves. It has to be the plugin and not a hand-placed file,
-  because **`android/` is gitignored and regenerated by `expo prebuild`** — anything dropped in by hand
-  is destroyed on the next one.
+- **`font-faces`** (style spec 24.x) maps a font name to a real TTF. The shipped `libmaplibre.so`
+  implements it — `mbgl::FontFace`, FreeType and HarfBuzz are all in the binary. Characters a face
+  covers never touch the `glyphs` URL, and there is no `glyphs` URL here at all.
+- **`asset://`** resolves against the APK's `assets/` via the Android asset manager
+  (`mbgl::AssetFileSource`). No socket, no DNS, no permission.
+- **`expo-font`'s config plugin** puts the file there — it must be the plugin, because **`android/` is
+  gitignored and regenerated by `expo prebuild`**, which destroys anything hand-placed.
 
-Noto Sans Regular, 569 KB, SIL Open Font License — **which belongs in the About screen** with Natural
-Earth, mledoze and the World Bank. It covers the Latin Extended-A these strings need: Türkiye, Côte
-d'Ivoire, São Tomé, Curaçao and Asunción all render.
+Noto Sans Regular, 569 KB, SIL OFL — **belongs in the About screen** with Natural Earth, mledoze and
+the World Bank. It covers Latin Extended-A (Türkiye, Côte d'Ivoire, São Tomé) and the **entire**
+Cyrillic block plus `№`, verified by parsing its cmap — so Russian needed no font change.
 
-Adding the font means `app.json` changed, so this needs `expo prebuild` and a **native rebuild** — a JS
-reload is not enough.
+Adding the font changed `app.json`, so it needed `expo prebuild` and a native rebuild.
+
+**On the web there is no `font-faces` and no `glyphs` key either**, and the tempting conclusion — "so
+the web needs a glyph server" — is wrong. From maplibre-gl's `glyph_manager.ts`, with no `glyphs` key
+every glyph is rasterised locally through canvas/TinySDF using the `text-font` name as a CSS family. So
+`text-font: [LABEL_FONT]` carries over unchanged and `expo-font`'s runtime hook registers the family.
+Verified with the origin dead: zero glyph requests.
 
 ### Labels come from their own point source
 
 `GeoJSONSource id="country-labels"`, one Point per country, **not** a symbol layer on the outlines.
-
-MapLibre labels a polygon at its pole of inaccessibility, which is a good anchor, but it computes one
-**per polygon**. France is a MultiPolygon of the mainland plus five overseas departments, so labelling
-the outlines directly draws "France" six times, once over South America; Kiribati gets one per atoll.
+MapLibre labels a polygon at its pole of inaccessibility — but computes one **per polygon**, so
+labelling the outlines draws "France" six times, one over South America, and Kiribati once per atoll.
 
 `scripts/build-label-points.mjs` (offline, `npm run labels:data`) picks each country's largest polygon
-by latitude-weighted area and runs **`polylabel`** on it, writing `{ at: [lng, lat], w: <degrees> }` to
-the committed `labelPoints.json`. `polylabel` is a **devDependency** — it never ships, and there is no
-startup cost.
+by latitude-weighted area and runs **`polylabel`** (a devDependency — never ships) on it, writing
+`{ at, w }` to the committed `labelPoints.json`.
 
 - **The anchor must be inside the country, and a bbox centre is not.** Norway, Chile, Croatia, Vietnam
   and Indonesia all have centroids in the sea. `data-integrity.test.ts` asserts all 240 anchors pass
-  `booleanPointInPolygon` against their own geometry; if that fails after a geometry change, re-run the
-  script rather than editing the expectation.
-- **`polylabel`'s tolerance is relative, not absolute.** At a flat 0.01 degrees the Vatican — 0.011
-  degrees wide in total — came back with an anchor *outside its own outline*, because the search grid
-  was coarser than the country. It is now a fraction of the polygon's own bbox.
-- **Antarctica is an explicit allowlist entry.** The script fails any polygon spanning more than 180
-  degrees, on the assumption that it wrapped the antimeridian. Antarctica genuinely spans 360, being
-  drawn as one ring around the pole. `POLAR_SPAN_ALLOWLIST` names it, in keeping with the pipeline's
-  "explicit allowlist, never a silent skip" rule.
+  `booleanPointInPolygon`; if that fails after a geometry change, re-run the script rather than editing
+  the expectation.
+- **`polylabel`'s tolerance is relative, not absolute.** At a flat 0.01° the Vatican — 0.011° wide in
+  total — came back with an anchor *outside its own outline*. It is now a fraction of the polygon bbox.
+- **Antarctica is an explicit allowlist entry** (`POLAR_SPAN_ALLOWLIST`): the script fails any polygon
+  spanning >180°, assuming an antimeridian wrap, and Antarctica genuinely spans 360.
 
-`data/labelGeoJson.ts` folds every field's text onto those points at module load, following
-`worldGeoJson.ts`'s idioms: a module-scope constant so the `data` identity is stable, and a field the
-country has no value for is **absent, not null**, so the filter can split it off with `['has', …]`.
-Micronesia has no currency and Vatican no population; both simply go unlabelled in that field.
+`labelGeoJson.ts` folds every field's text onto those points at module load, following
+`worldGeoJson.ts`'s idioms — a module-scope constant for stable `data` identity, and a field a country
+has no value for is **absent, not null**.
 
 ### Decluttering is collision plus fit
 
 At the launch camera a 411 dp screen shows ~166° of longitude, so "Luxembourg" is ~60 dp of text over
-~1 dp of country. Two mechanisms, doing different halves of the job:
+~1 dp of country. Two mechanisms:
 
-- **Collision is MapLibre's**, and free: `text-allow-overlap: false` drops overlapping labels, and
-  `symbol-sort-key` (the negated landmass width) decides who wins — widest country first. This is the
-  single biggest reason labels are a native symbol layer rather than RN views over the map.
-- **Fit is ours.** Collision has no idea a country is too small for its own name; it would draw
-  "Luxembourg" at world zoom simply because nothing else is there. `labelFit.ts` precomputes, per
-  country **and per field**, the zoom at which the country is wide enough, and the layer filters
-  `['<=', ['get', zoomProp], ['zoom']]`.
+- **Collision is MapLibre's**, and free: `text-allow-overlap: false` drops overlaps and
+  `symbol-sort-key` (the negated landmass width) decides who wins. This is the single biggest reason
+  labels are a native symbol layer rather than RN views over the map.
+- **Fit is ours.** Collision has no idea a country is too small for its own name. `labelFit.ts`
+  precomputes, per country **and per field**, the zoom at which the country is wide enough, and the
+  layer filters `['<=', ['get', zoomProp], ['zoom']]`.
 
-**`['zoom']` is legal inside a `filter`** — the spec says "Zoom expressions in filters are only
-evaluated at integer zoom levels" — which is what lets the fit test be declarative. The alternative was
-subscribing to camera changes and re-rendering on every pan.
+**`['zoom']` is legal inside a `filter`** — the spec evaluates zoom expressions in filters at integer
+zoom levels — which is what lets the fit test be declarative instead of a camera subscription.
 
 Mercator x is linear in longitude, so a country's on-screen width is exactly `w / 360 × 512 × 2^zoom`
-dp — no projection correction needed on the one axis a text width cares about. `FIT_TOLERANCE` is 0.55,
-meaning a label may be ~1.8× its country's width: requiring strict containment would permanently
-unlabel Chile, Norway, Vietnam and Italy, none of which is ever as wide as its own name. **It is the
-one number to turn if labels overhang more or less than you want.**
+dp. **`FIT_TOLERANCE` (0.55) is the one number to turn**: a label may be ~1.8× its country's width,
+because strict containment would permanently unlabel Chile, Norway, Vietnam and Italy.
 
-Countries that lose show nothing — no dot, no abbreviation. Zoom in and they appear.
-
-Two consequences worth expecting: **population labels are far denser than name labels**, because "47m"
-is a quarter the width of "Uzbekistan" and clears the fit test at a much lower zoom. And the label
-source carries **no `onPress`**, so presses fall through to the outlines and `pickCountry` is
-unaffected.
-
-### The chrome had to be rebuilt around it
-
-The fill mode was a three-segment control until this landed. On the 411 dp emulator there are 379 dp
-between the safe areas, and the segmented group (~206 dp) plus a top-right row carrying the label pill
-(~187 dp idle, ~216 dp with "Currencies" selected) came to 393–422 dp. **They overlapped on screen.**
-
-So both appearance settings are now pills that open an always-mounted panel, sitting together in the
-top-left row, and search and quiz keep the top-right row they had before. `MapOptionPill` and
-`MapOptionPanel` are shared by both.
-
-- Choosing a fill mode is now **two taps**, which is why `choropleth-modes.yaml` opens
-  `toggle-fill-mode` before every `mode-*` tap, and why `MapScreen.test.tsx`'s `selectMode` helper does
-  the same — and must `await` both, because RNTL v14's `fireEvent` is async and the panel's rows are
-  hidden from queries until the opening press has re-rendered.
-- **Only one panel is open at a time.** Two opaque menus on a phone-sized map leave almost no map.
-- **Both panels are closed by default, which is what kept all five existing Maestro flows valid** —
-  they cover the map only while open, so no percentage tap moved.
-- The panels share the left column with the legend and are drawn over it while open, deliberately:
-  parking the legend below a panel's full height would push it into the Greenland tap permanently.
-
-### What the tests can and cannot see
-
-- **The Jest mock had to start forwarding `layout`.** It stripped it, exactly as it once stripped
-  `paint`, so `text-field`, `text-size` and `symbol-sort-key` were invisible to every test.
-- **The mock's `GeoJSONSource` testID is now `source-<id>`.** It was hardcoded to `countries-source`,
-  which was fine with one source and threw "found multiple elements" with two.
-- **Maestro cannot see the labels themselves.** They are drawn inside the MapLibre GPU surface, not the
-  view hierarchy, so no `assertVisible: 'Paris'` will ever match. `.maestro/map-labels.yaml` switches
-  each field on and re-asserts that the map and a country selection still work — the same proof-of-parse
-  trick `choropleth-modes.yaml` uses, and the only automated defence against a malformed layout
-  expression or a `text-font` naming a face that `font-faces` does not define. **Confirming that text
-  actually appears is a manual screenshot step.**
+Countries that lose show nothing — no dot, no abbreviation. Expect **population labels far denser than
+name labels** ("47m" is a quarter the width of "Uzbekistan"), and note the label source carries **no
+`onPress`**, so presses fall through to the outlines.
 
 ### Flag labels are a second layer, and they must be raster
 
-The sixth option draws each country's flag instead of text. It sits second in the picker, beside
-Name, because both answer the same question: which country is this.
-
-**The app already bundles all 249 flags as SVGs, and not one of them can be used here.** MapLibre's
-icon pipeline is raster-only on every platform, and each half of that was read out of the shipped
-source rather than guessed:
+**The app bundles all 249 flags as SVGs and not one can be used here.** MapLibre's icon pipeline is
+raster-only on every platform, read out of the shipped source rather than guessed:
 
 - **Android** — `DownloadMapImageTask.java`: a `require`d asset in release goes to
-  `BitmapUtils.getBitmapFromResource` → `BitmapFactory.decodeResource`; in dev the same require is a
-  Metro URL decoded by **Fresco**, which demands a `CloseableStaticBitmap`. Neither decodes SVG.
+  `BitmapFactory.decodeResource`; in dev the same require is a Metro URL decoded by **Fresco**, which
+  demands a `CloseableStaticBitmap`. Neither decodes SVG.
 - **iOS** — `UIImage` via `RCTImageLoader`, round-tripped through `UIImagePNGRepresentation`.
-- **Web** — `maplibre-gl`'s `arrayBufferToImageBitmap` hardcodes `new Blob([…], {type:"image/png"})`
-  and throws *"Note that SVGs are not supported."*
+- **Web** — `arrayBufferToImageBitmap` hardcodes `{type:"image/png"}` and throws *"Note that SVGs are
+  not supported."*
 
-**`expo-image`'s Android SVG decoder is expo-image's own Glide pipeline and never reaches MapLibre.**
-That is the trap: the identical file that renders in the info sheet draws nothing as a map icon, and
-it fails **log-only** — one `FLog.e("Failed to load bitmap from: …")` line and a blank map.
+**`expo-image`'s Android SVG decoder is expo-image's own Glide pipeline and never reaches MapLibre** —
+so the identical file that renders in the info sheet draws nothing as a map icon, and it fails
+**log-only**: one `FLog.e("Failed to load bitmap from: …")` and a blank map.
 
-So `npm run flags:data` now rasterises with `@resvg/resvg-js` (a devDependency; output committed) into
-`assets/map-flags/`, `public/map-flags/` and two generated require maps. ~380 KB for the native pair
-and ~285 KB for the web — an eighth of the 2.0 MB SVG set, because a flag at 72 px is about 1 KB.
+So `npm run flags:data` rasterises with `@resvg/resvg-js` (devDependency; output committed) into
+`assets/map-flags/`, `public/map-flags/` and two generated require maps. ~380 KB native, ~285 KB web.
 
-**A `sprite` entry in the style is still forbidden**, for the reason `offlineStyle.ts` gives: it is a
-remote-URL-shaped dependency. Images go in imperatively instead — `<Images>` on native,
-`map.addImage` on web.
+**A `sprite` entry in the style is still forbidden** — it is a remote-URL-shaped dependency. Images go
+in imperatively: `<Images>` on native, `map.addImage` on web.
 
 #### Two raster scales, because of a density trap
 
 `DownloadMapImageTask` sets `inDensity` **only when the resolved asset's scale is not 1**. Ship a
-single unsuffixed `br.png` and React Native files it under `drawable-mdpi`, so `decodeResource` takes
-`inDensity` from the bucket (160) against an `inTargetDensity` of 480 on a 3x phone and **upsamples
-every flag 3x at decode time** — a blurry icon, and ~35 MB of style bitmaps for the set.
+single unsuffixed `br.png` and RN files it under `drawable-mdpi`, so `decodeResource` takes `inDensity`
+160 against an `inTargetDensity` of 480 on a 3x phone and **upsamples every flag 3x at decode time** —
+blurry, and ~35 MB of style bitmaps.
 
-With `br@3x.png` beside it, `resolveAssetSource` reports scale 3, the two densities match, and the
-bitmap is used as-is: crisp, ~3.9 MB. Verified in the build output — the 1x lands in `drawable-mdpi`
-and the @3x in `drawable-xxhdpi` (density 480), which is exactly the `160 * 3` the loader computes.
-Both therefore arrive as **24 style px**, which is what lets one `icon-size` expression be right on
-every density. The 1x file also keeps **Jest** working, whose resolver does no `@Nx` lookup.
-
-`icon-size` is expressed as a fraction of `MAP_FLAG_INTRINSIC_DP`, not as bare numbers: if the flags
-are ever the wrong size on a device, the image arrived at a different pixel ratio than assumed and
-that is the one place to correct it. Web is told the ratio outright — `addImage(…, {pixelRatio: 3})`.
+With `br@3x.png` beside it, `resolveAssetSource` reports scale 3, the densities match, and the bitmap
+is used as-is: crisp, ~3.9 MB. Both arrive as **24 style px**, which is what lets one `icon-size`
+expression be right at every density. The 1x file also keeps **Jest** working, whose resolver does no
+`@Nx` lookup. `icon-size` is expressed as a fraction of `MAP_FLAG_INTRINSIC_DP` — if flags are ever the
+wrong size on a device, that is the one place to correct it. Web is told outright:
+`addImage(…, {pixelRatio: 3})`.
 
 #### `icon-padding: 2` is a fatal crash, and the browser will not tell you
-
-The text layer sets `text-padding: 2`, so the symmetrical thing to write on the icon layer is
-`icon-padding: 2`. It killed the app on launch:
 
 ```
 UnexpectedNativeTypeException: Value for value cannot be cast from Double to ReadableArray
   at MLRNStyleFactory.setIconPadding(MLRNStyleFactory.kt:1606)
 ```
 
-The two are not symmetrical in the binding. **`setTextPadding` calls `getFloat`; `setIconPadding`
-calls `getFloatArray`**, because the spec types `text-padding` as a `number` and `icon-padding` as a
-`padding`. maplibre-gl on the web accepts the scalar without a murmur, so the feature looked perfect
-in a browser and crashed instantly on a device — which is exactly how it got in.
+**`setTextPadding` calls `getFloat`; `setIconPadding` calls `getFloatArray`**, because the spec types
+`text-padding` as a `number` and `icon-padding` as a `padding`. maplibre-gl accepts the scalar without
+a murmur, so it looked perfect in a browser and killed the app on launch on Android.
 
-It is now **unset**, because the spec's own default is already `[2]`. If it ever needs setting it must
-be an **array**. `MapScreen.test.tsx` guards that, and the same question is worth asking of any other
-icon property: check the `else` branch of its setter in `MLRNStyleFactory.kt` before trusting a
-scalar. The ones this layer does use are fine — `icon-allow-overlap` takes `getBoolean`, and
-`icon-image`, `icon-size` and `symbol-sort-key` all take the expression branch.
+It is now **unset** (the spec default is already `[2]`); if ever set it must be an **array**.
+`MapScreen.test.tsx` guards it, and **the same question is worth asking of any other icon property —
+check the `else` branch of its setter in `MLRNStyleFactory.kt` before trusting a scalar.**
 
 #### The layer, the latch, and what draws
 
-- **A second symbol layer, `country-flag`**, on the same `country-labels` source. One symbol layer has
-  one `text-field`, and a flag has none. Both layers stay mounted in every mode and **exactly one of
-  the two filters ever matches** — `labelFilter` goes empty for `flag`, `flagIconFilter` for
-  everything else. Nothing is added or removed at runtime, so the never-paints bug stays out of reach.
-- **`icon-image` is a constant**, unlike `text-field`. An expression that emptied out off-mode would
-  be a missing-image lookup, and a log line, every time labels were anything but flags — noise in the
-  one log the offline acceptance test reads.
+- **A second symbol layer, `country-flag`**, on the same source. One symbol layer has one `text-field`
+  and a flag has none. Both layers stay mounted and **exactly one filter ever matches** —
+  `labelFilter` goes empty for `flag`, `flagIconFilter` for everything else. Nothing is added or
+  removed at runtime, so the paint bug stays out of reach.
+- **`icon-image` is a constant**, unlike `text-field`. An expression that emptied out off-mode would be
+  a missing-image lookup and a log line every time labels were anything but flags — noise in the one
+  log the offline acceptance test reads.
 - **`<Images>` is permanently mounted but its `images` prop is latched**, `{}` until flags are first
-  selected. Registering 249 bitmaps costs one sequential `AsyncTask`, ~3.9 MB of style images, and in
-  a **dev build 249 HTTP round-trips to Metro** — too much to pay on every cold start for a mode most
-  sessions never open. `setImages` only ever ADDS keys, so the latch is one-way by construction.
-- **The border is baked into the PNG**, because **MapLibre has no `icon-halo`**. Japan, Finland and
-  Nigeria are nearly all white and would otherwise be holes against the near-white end of a choropleth
-  ramp. The stroke **straddles the viewBox edge** rather than sitting inside it: a centred stroke on an
-  inset rect lands on a fractional pixel at 24 px wide and antialiases to a pale grey. Flags are also
-  composited **onto white** first — Nepal is a pennant on transparency, and a dark frame around empty
-  space reads as a broken image.
+  selected. Registering 249 bitmaps costs one sequential `AsyncTask`, ~3.9 MB of style images, and in a
+  **dev build 249 HTTP round-trips to Metro**. `setImages` only ever ADDS keys, so the latch is one-way
+  by construction.
+- **The border is baked into the PNG, because MapLibre has no `icon-halo`.** Japan, Finland and Nigeria
+  are nearly all white and would be holes against a pale choropleth. The stroke **straddles the viewBox
+  edge** — a centred stroke on an inset rect lands on a fractional pixel at 24 px and antialiases to
+  pale grey. Flags are composited **onto white** first: Nepal is a pennant on transparency, and a dark
+  frame around empty space reads as a broken image.
 - **`flag` is a `LabelField` but deliberately NOT a `LabelFieldId`**, the same trade `location` makes
-  against `FieldId`. Everything iterating `LABEL_FIELD_IDS` — `labelTextFor`'s exhaustive switch, the
-  text layer — is about a string, so none of them needs a flag case.
-- Fit reuses `FIT_TOLERANCE` through a shared `getFitMinZoom`. A 20 dp flag clears the test where 66 dp
-  of "Uzbekistan" does not, so **flag labels are markedly denser than name labels** — expected, and the
-  same effect the population field already shows.
+  against `FieldId`: everything iterating `LABEL_FIELD_IDS` is about a string.
+- Fit reuses `FIT_TOLERANCE` via a shared `getFitMinZoom`. A 20 dp flag clears where 66 dp of
+  "Uzbekistan" does not, so **flag labels are markedly denser than name labels**.
 
 #### `assets/**/*.png` had to join the Gradle bundle inputs
 
 `withJsonBundleInputs` widened to `assets/**/*.png` for exactly the reason it was written: that task
-also runs the `--assets-dest` pass, and re-rendering the flags at a different size or border colour
-touches no `.js`/`.ts`/`.json`, so Gradle would mark it UP-TO-DATE and ship the previous flags.
+also runs the `--assets-dest` pass, and re-rendering flags touches no `.js`/`.ts`/`.json`, so Gradle
+would mark it UP-TO-DATE and ship the previous flags. See *A release build can package a stale JS
+bundle*.
+
+### The chrome
+
+Both appearance settings (fill mode, labels) are **pills opening an always-mounted panel**, sharing the
+top-left row; search and quiz share one row top-right. The fill mode was a three-segment control until
+labels landed and the two rows **overlapped on screen** at 411 dp.
+
+- Choosing a fill mode is **two taps**, which is why `choropleth-modes.yaml` opens `toggle-fill-mode`
+  before every `mode-*` tap, and why `MapScreen.test.tsx`'s `selectMode` helper does the same — and
+  must `await` both, because RNTL v14's `fireEvent` is async and the rows are hidden until the opening
+  press re-renders.
+- **Only one panel is open at a time**, and **both are closed by default**, which is what kept every
+  existing Maestro flow valid — no percentage tap moved.
+- The panels are drawn over the legend while open, deliberately: parking the legend below a panel's
+  full height would push it into the Greenland tap permanently.
+- Top-right is *not* free in both orientations: with the info card open in landscape it docks right
+  full-height and **covers both pills**. Pre-existing, and only while the card is open.
+- **Keep Maestro tap points clear of the chrome**; the portrait Greenland tap at `19%,13%` passes just
+  under it. Keep any future control the same height and **never on a second line**.
+
+Width budget, measured by the project's own estimator against the 379 dp available at 411 dp:
+
+| | left row | right row | total |
+|---|---|---|---|
+| English | 186 | 147 | 333 |
+| Russian | 204 | 151 | **355** |
+
+24 dp of slack in Russian, and only because the language toggle is a **compact two-letter pill** and
+the quiz button says **`Тест`, not `Викторина`** — which alone would overflow. `chromeWidth.test.ts`
+sweeps every fill mode × label field × locale against the budget.
+
+## The info card
+
+`orientation` is `"default"` in `app.json` and `android:screenOrientation` is **absent** from the
+manifest — re-adding either pins the app to portrait. `getInfoSheetLayout(window)` decides the dock:
+
+| | Portrait | Landscape |
+|---|---|---|
+| Dock | bottom, full width | **right**, full height |
+| Size | `maxHeight: 55%`, content-height | clamp(280, 42% of width, 360) dp, capped at 60% |
+| Slides along | `translateY` | `translateX` |
+| Facts list | `flexGrow: 0` | `flex: 1`, scrolls inside the panel |
+
+A bottom sheet in landscape would cover most of the little vertical space there is, while the spare
+room is at the side. Capped at 60% so the map keeps at least 40%.
+
+**The card animates out, so it outlives its selection.** It keeps its own `visibleFacts` state lagging
+the `iso3` prop: on close it goes on rendering the country it was showing, slides off, and drops the
+content in the animation's completion callback. Returning `null` as soon as `iso3` is `null` unmounts
+it on the same frame with nothing left to animate. It sets `pointerEvents="none"` while sliding out,
+and the slide distance is **measured via `onLayout`** — `maxHeight: 55%` is ~429 dp on a 780 dp phone,
+so a hardcoded 400 left a visible sliver.
+
+Dismissal is a close button plus tapping the ocean, not a swipe. `@gorhom/bottom-sheet` was the
+original plan; hand-rolling on `Animated` keeps the native rebuild surface unchanged. Adding it later
+is JS-only (reanimated and gesture-handler are installed) but check reanimated 4 compatibility.
+
+## Country search
+
+A pill in the top-right opens `/search`. Type a name, pick a result, and the map behind it highlights
+that country exactly as a tap would and flies to frame it clear of the info sheet.
+
+**It is a route, not a dropdown**, because a results list appearing as you type is precisely the paint
+bug. Which means the **opposite** rule applies on that screen — see the corollary in *The paint bug*.
+
+### The handover is a subscription, not a params round-trip
+
+`/search` is **pushed** over `MapScreen`, so the map stays mounted underneath and only needs telling
+what was picked. `src/search/pendingCountry.ts` is a module singleton with `selectCountry` /
+`subscribeToCountrySelection`; the screen announces, then calls `router.back()`.
+
+Three alternatives, each rejected for a concrete reason: `router.back()` cannot carry params;
+`router.replace('/', {params})` would mount a **second MapLibre surface**; and `useFocusEffect` calls
+`useNavigation()`, needing navigator context at render time — which the map's chrome deliberately
+avoids (it uses the imperative `router` singleton) **so `MapScreen.test.tsx` can render the screen bare
+with no router mock at all**. The subscription also fires while the search screen is still sliding
+away, so the fly has already started by the time the map is uncovered.
+
+### Matching — forgiving in the opposite direction to grading
+
+Reuses `normalizeText`, `nameAliases` and `editDistance` from the quiz. **The duty is inverted**:
+grading must *reject* a near-miss ("Gambia" for Zambia), search must *offer* one. So there is no
+confusable guard here, and partial input is the normal case.
+
+Ranked in ordinal tiers, ties broken alphabetically (the index is pre-sorted and `sort` is stable):
+exact name, exact alias, name prefix, alias prefix, name word-start, alias word-start, name substring,
+alias substring, fuzzy. Ordinal rather than scored, because `editDistance(a, b, max)` returns `max + 1`
+once the budget blows — it may only be compared against a threshold, never used as a score.
+
+- **Both the spaced and space-free forms are compared.** `normalizeText` *deletes* hyphens, so
+  "Guinea-Bissau" indexes as `guineabissau` while a player types `guinea bissau`.
+- **Fuzzy is skipped below 4 characters** — `allowedEdits` returns 0 under 5, so it is a pure no-op
+  costing time over 237 countries on every keystroke.
+- **An empty query lists all 237 alphabetically**, uncapped; a real query caps at 50. That makes the
+  screen a browsable index of the world, and is why the Maestro flow can assert on `country-result-AFG`.
+
+The pool is **237**: every ISO-3 in *both* JSON files — wider than the quiz's 193, because the map draws
+Greenland, Puerto Rico and Western Sahara. The three excluded are the geometry-only `FACTLESS_ALLOWLIST`
+entries, which would open an empty info sheet.
+
+`matchedAs` carries the alias that matched so the row can show it — offering "Netherlands" for "holland"
+with no explanation reads like a bug, and that line is the only place alias support is discoverable.
+
+### Framing around the info sheet
+
+`getCountryCameraStop` centres a bbox in the **whole** viewport — right for the quiz, whose panel is a
+flex sibling, wrong here, where the sheet is a genuine overlay. So `quizCamera.ts` gained
+**`getFocusedCameraStop`**: the same arithmetic plus a focus rect. `getCountryCameraStop` is untouched
+so quiz framing cannot regress, and a test asserts the two agree when the focus rect *is* the viewport.
+
+The camera always points at the viewport's centre, so putting a country elsewhere means pointing the
+camera **away** from it by the offset between the two centres. **Both axes shift with the same sign,
+and the missing negation is deliberate**: `mercatorY` is 0 at the north pole and grows southward, and
+screen y also grows downward — the conventions cancel.
+
+`getMapFocusRect` says which band that is: top is `safeArea.top + MAP_CHROME_HEIGHT`; bottom is the top
+of the sheet (55% down) in portrait and the foot of the window in landscape; width is full in portrait
+and `width − panelWidth` in landscape.
+
+- **It uses the sheet's MAXIMUM height, not its measured one.** The card is content-height and only
+  knows its extent after `onLayout`; threading that up would change the camera's inputs once per country
+  and **fire the fly twice per search**. `PORTRAIT_MAX_HEIGHT_FRACTION` is the one literal, and
+  `CountryInfoSheet`'s `maxHeight` derives from it.
+- **`MAP_CHROME_HEIGHT` is why the band does not start at the top of the window** — without it
+  Liechtenstein's northern tip landed under the toggle. An estimate mirroring `MapControls`' spacing,
+  for the same re-fire reason.
+
+**The pole clamp is load-bearing, and was found by prototyping.** Without it, searching Russia in
+portrait sends the camera to latitude −54 and Russia leaves the top of the screen: its fit zoom is
+already at the floor, so the 232 dp the offset wants is ~45% of the globe.
+
+```ts
+const half = viewport.height / 2 / worldPx;
+const camY = half >= 0.5 ? 0.5 : Math.max(half, Math.min(1 - half, wanted));
+```
+
+Exactly five countries reach it on today's geometry — `USA`, `RUS`, `GRL`, `CAN`, `ATA` — pinned in
+`focusedCamera.test.ts`. A sixth means the geometry moved, not the maths.
+
+Its companion is **`getViewportFitZoom`**: the lowest zoom at which one world covers *both* axes.
+`getWorldFitZoom` only answers for the width, which is all the launch camera needs because MapLibre
+clamps the height itself. A stop fitted to *part* of the screen is different — asking for a zoom
+MapLibre will override means the offset was computed against a scale the map never used. This is a
+floor for the computed **stop** only; do not raise `Camera`'s `minZoom`, which is the pinch limit.
+
+### The rest of the wiring
+
+- `MapScreen` holds `focus: { iso3, nonce }`, set **only by a search**, never by a tap. The **nonce is
+  required**: the same country searched twice yields an identical stop, and an identical stop is not a
+  change, so the map would not move.
+- **A map press clears `focus`**, so a later rotation re-fits the map rather than yanking the camera
+  back. Rotation *while* focused does re-frame, matching quiz mode.
+
+### `disableFullscreenUI` is not optional
+
+Found on the emulator: **in landscape Android decides the field has too little vertical room and
+replaces the entire screen with its own IME "extract" editor** — a white full-screen box with a SEARCH
+button and the app nowhere to be seen. `SearchScreen.test.tsx` asserts the prop, which is as close as
+Jest can get.
+
+The quiz's own `TextInput`s do **not** set it and are likely to have the same problem in landscape —
+unverified, because `.maestro/quiz.yaml` only types in portrait.
 
 ## Quiz mode
 
-Three routes, none of which touch `src/app/index.tsx`:
+Three routes, none of which touch `src/app/index.tsx`: `/quiz` (setup, no map), `/quiz/play` (the
+round), `/quiz/results` (score and review, no map).
 
-| Route | File | Map? |
-|---|---|---|
-| `/quiz` | `src/app/quiz/index.tsx` | no — subregion + field picker |
-| `/quiz/play` | `src/app/quiz/play.tsx` | **yes** — the round |
-| `/quiz/results` | `src/app/quiz/results.tsx` | no — score and per-question review |
+Config crosses `/quiz → /quiz/play` as **router params** (`mode`, `subregions`, `fields`, `seed`,
+`practice`), which makes a round deep-linkable and pinnable from a test. The finished round crosses to
+results through **`quizResultStore.ts`**, a one-slot singleton — 193 × 5 graded fields will not fit in a
+URL, and results are reached with `router.replace`, which tears down the second MapLibre surface. The
+store **clears on read**, so a back gesture cannot resurrect a stale score.
 
-The config crosses `/quiz → /quiz/play` as **router params** (`subregions`, `fields`, `seed`), which
-also makes a round deep-linkable and therefore pinnable from a test. The finished round crosses
-`/quiz/play → /quiz/results` through **`quizResultStore.ts`**, a one-slot module singleton: 193 × 5
-graded fields will not fit in a URL, and results are reached with `router.replace`, which is what tears
-down the second MapLibre surface. The store **clears on read**, so a back gesture cannot resurrect a
-stale score.
+### The three modes
+
+| mode | stimulus | asks | map? |
+|---|---|---|---|
+| `facts` | the map flies to a country and paints it | the configured fields | yes |
+| `locate` | a country's name | tap it on the map | yes |
+| `flag` | the country's flag | the same fields as `facts` | **no** |
+
+`MODE_USES_MAP` and `MODE_ASKS_FIELDS` are `Record<QuizMode, boolean>` rather than `mode === …` tests at
+the call site, deliberately: a fourth mode fails to **compile** until someone answers them, and "does
+this screen mount a MapLibre surface?" must never be answered by accident.
+
+`play.tsx` reads them from a `config` that is `useState`-parsed once and never re-read, so the ternary
+is decided on the first frame and cannot flip. Three things would break that licence, each named in the
+comment above it: making the mode switchable mid-round; mounting `WorldMap` with `display: 'none'` "to
+keep the tree stable" (which pays a full MapLibre init for nothing); and re-parsing params on render,
+already forbidden because it would reseed `buildQuiz`.
+
+**`buildQuiz` needed no change for `flag` or for practice** — it already reads `config.mode ===
+'locate'`, and its second parameter is already an injectable pool.
 
 ### The panel is a flex sibling, never an overlay
 
-**This is the structural answer to the paint bug above, not a styling preference.** The answer panel
-grows a chip every time the player names a language, and a view inserted over a live MapLibre surface
-after the first mount lays out perfectly and never paints. So the quiz screen *splits*: map on top and
-panel below in portrait, map left and panel right in landscape, sized by `quizPanelLayout.ts`. Nothing
-is ever positioned over the map, so the bug is unreachable rather than worked around. Belt to that
-braces: one row per **configured** field for the whole round, hidden with `display: 'none'` when the
-current country cannot be asked it, a fixed pool of chip slots, and one button whose label swaps
-`Check` → `Next`.
+See *The paint bug*, escape 2. Belt to braces: one row per **configured** field for the whole round,
+hidden with `display: 'none'` when the current country cannot be asked it; a fixed pool of chip slots;
+one button whose label swaps `Check` → `Next`.
 
-`QuizPanel`'s root needs `flex: 1`. Without it the panel shrink-wraps its header and button, the body
-`ScrollView`'s own `flex: 1` resolves against a zero-height parent, and **every answer field collapses
-to nothing** — which looks exactly like the fields failing to render.
+**`QuizPanel`'s root needs `flex: 1`.** Without it the panel shrink-wraps, the body `ScrollView`'s own
+`flex: 1` resolves against a zero-height parent, and **every answer field collapses to nothing** — which
+looks exactly like the fields failing to render.
+
+**`LocatePanel` uses `flexGrow: 1`, and the two are not interchangeable.** Its portrait slot has *no*
+explicit height (`getQuizPanelLayout` returns `panelHeight: null`), because a fixed-height panel left a
+growing gap above the Check button. RN's `flex: 1` also sets `flexBasis: 0`, so a panel carrying it
+reports a content height of zero to an auto-height parent and collapses; `flexGrow: 1` keeps
+`flexBasis: auto` — content-height in portrait, still filling the stretched landscape column.
+`quizPanelLayout.test.ts` pins both. **`flag` takes the `facts` branch**: same rows, so same need for a
+definite height.
+
+`LOCATE_PORTRAIT_HEIGHT` survives as an **estimate with one consumer** — `mapViewport`, which the reveal
+camera fits into. Being a few dp out costs a marginally roomier frame; measuring it would mean threading
+an `onLayout` into the camera's inputs, the same trade `getMapFocusRect` refuses.
 
 ### The keyboard is an inset, not a resize
 
-The app is **edge-to-edge** (the RN 0.86 / Expo 57 default), so Android does **not** resize the window
-when the IME opens — `android:windowSoftInputMode` is irrelevant, and `KeyboardAvoidingView`'s Android
-path assumes a resize and does nothing useful. `useKeyboardHeight` listens to `keyboardDidShow` /
-`keyboardDidHide` and the screen gives that space back as `paddingBottom`; the map absorbs the loss.
+The app is **edge-to-edge** (the RN 0.86 default), so Android does **not** resize the window when the
+IME opens — `android:windowSoftInputMode` is irrelevant and `KeyboardAvoidingView`'s Android path
+assumes a resize. `useKeyboardHeight` listens to `keyboardDidShow`/`Hide` and the screen gives that
+space back as `paddingBottom`; the map absorbs the loss.
 
-**Add `insets.bottom` to the reported height.** Measured on the emulator, `endCoordinates.height` stops
-at the top of the navigation bar, so reserving it alone leaves the Check button 56 px under the keyboard.
+**Add `insets.bottom` to the reported height.** `endCoordinates.height` stops at the top of the
+navigation bar, so reserving it alone leaves the Check button 56 px under the keyboard.
 
 ### Leaving mid-round asks first
 
-A back press on `/quiz/play` used to pop straight to the setup screen and bin the round
-without a word. It now raises a confirmation offering three ways out — **See my score**
-(the same thing the panel's *End quiz* button does), **Discard and leave**, and **Cancel**.
-The score button is dropped when nothing has been checked yet, because a score of nothing
-out of nothing is not an offer; the wording and the button list are `quiz/exitPrompt.ts`,
-pure and unit-tested, so what is on the dialog is decided somewhere Jest can read it.
+A back press on `/quiz/play` raises a confirmation — **See my score** / **Discard and leave** /
+**Cancel**. The score button is dropped when nothing has been checked. Wording and buttons live in
+`quiz/exitPrompt.ts`, pure and unit-tested.
 
-**It is `BackHandler`, not `usePreventRemove`.** Both work. `BackHandler` wins because
-expo-router's own root handler is itself a `hardwareBackPress` listener and RN calls those
-in **reverse registration order** — so a subscription added when this screen mounts runs
-first, and returning `true` stops the pop dead. `usePreventRemove` would need navigator
-context at render time, which is exactly what `QuizLaunchButton` and `pendingCountry.ts`
-record this app avoiding so its screens stay renderable bare in `QuizScreens.test.tsx`.
-It is also not a public export: expo-router 57 **vendors React Navigation** (there is no
-`@react-navigation` in `node_modules` at all) and reaches it only via the deep subpath
+**It is `BackHandler`, not `usePreventRemove`.** Both work; `BackHandler` wins because expo-router's own
+root handler is itself a `hardwareBackPress` listener and RN calls those in **reverse registration
+order**, so a subscription added on mount runs first and returning `true` stops the pop dead.
+`usePreventRemove` would need navigator context at render time — the thing this app avoids so screens
+stay renderable bare in Jest. It is also not a public export: expo-router 57 **vendors React
+Navigation** (there is no `@react-navigation` in `node_modules`) and reaches it via
 `expo-router/react-navigation`.
 
-`predictiveBackGestureEnabled` is **false** in `app.json`, so the edge swipe and the
-hardware button are the same plain back press and there is no predictive-back animation to
-fight. If that is ever turned on, re-check this — a committed predictive gesture is not a
+`predictiveBackGestureEnabled` is **false** in `app.json`, so the edge swipe and the hardware button are
+the same plain press. If that is ever turned on, re-check this — a committed predictive gesture is not a
 press you can decline.
 
-The listener is registered **once for the whole round** and reached through a ref that a
-second, dependency-less effect keeps current. Re-subscribing on every keystroke would be
-churn, and the ref is written in an effect rather than during render because `app.json`
-has `reactCompiler: true`.
+The listener registers **once for the whole round** and is reached through a ref kept current by a
+second, dependency-less effect. Re-subscribing per keystroke would be churn, and the ref is written in
+an effect rather than during render because of `reactCompiler`.
 
-### The confirmation is a `Modal`, and that is the paint bug again
+`ConfirmDialog` (see *The paint bug*, escape 4) is generic and takes its colours from `palette.ts`.
 
-A dialog is the one thing the rest of this app is not allowed to be: it must **cover** the
-map and it must **appear on demand**, and a view inserted above the MapLibre surface after
-the first mount lays out perfectly and never paints. The quiz panel dodged that by being a
-flex sibling, the legend by being mounted from startup and parked, `/search` by being a
-route with no map on it. None of those is available to a confirmation.
-
-`Modal` sidesteps the question entirely: RN's Android backend hosts it in a **separate
-`Dialog` with its own window**, which the system composites over the app's. Nothing is
-added above the map surface, so the bug is unreachable rather than avoided — the same
-reason the native `Alert` this started as was safe. **The corollary is that ordinary
-conditional rendering is correct inside `ConfirmDialog`**, exactly as it is on `/search`.
-
-`ConfirmDialog` lives in `src/components/` and is generic; it takes its colours from
-`palette.ts`, so the card is the panel's navy, the primary button is the same filled accent
-pill as *Check*/*Next*, and the destructive one is outlined in the wrong-answer red.
-Buttons are **stacked**, not a row: three actions do not fit side by side at 411 dp once
-one of them is "Discard and leave".
-
-- **`onRequestClose` is required**, not optional. The dialog holds window focus, so
-  Android's back key goes to it and never reaches the screen's own `BackHandler` — without
-  it, back while the card is open does nothing at all.
-- **The button order changed when the native `Alert` was dropped.** `Alert.alert` on
-  Android pops the array from the **end** to fill its neutral/negative/positive slots, so
-  the list had to be written backwards to read forwards. Drawing it ourselves removed that
-  constraint. If it ever goes back to `Alert`, invert `buildExitPrompt`'s order again.
-- **Jest cannot see any of the interception.** It resolves `BackHandler.ios.js`, a stub
-  whose `addEventListener` stores nothing and returns a shared no-op `remove` — so the
-  tests invoke the registered handler directly and wrap that `remove` to observe it at all.
-  That a real Android back press arrives here is `.maestro/quiz.yaml`'s job.
-
-### The camera
-
-`WorldMap` gained four optional props — `selectionColor`, `camera`, `maxZoom`, and an `onSelect` whose
-*absence* makes the map read-only. All default to today's behaviour, so `index.tsx` renders
-byte-identically and every existing tap point still lands where it did. **`MapScreen.test.tsx` asserts
-that the explore camera is never handed a stop**, which is what protects the three coordinate flows from
-a future edit here.
-
-No camera ref: v11's `Camera` takes a declarative `Partial<CameraStop>`, and the imperative
-`fitBounds`/`setStop` *throw* when the native view is not ready — which is exactly the first question of
-a round. `initialViewState` stays alongside it to supply frame one.
-
-**We compute centre and zoom ourselves** (`quizCamera.ts`) rather than handing MapLibre `bounds` +
-`padding`, whose antimeridian behaviour cannot be verified offline and which Fiji and Russia exercise on
-day one. Doing the Mercator arithmetic here makes it unit-testable — and a bad stop is otherwise
-invisible until the native renderer blanks the map, exactly like a malformed paint expression. Quiz
-`maxZoom` is **10**, not the explore map's 8: at 8 a 400 dp screen shows ~1° of longitude, which leaves
-Liechtenstein a few pixels; 3 dp geometry makes 10 the honest ceiling. The stop is `useMemo`'d on the
-country and the map's box only — `Camera` is `memo()`'d and rebuilds its animation from its props, so a
-freshly allocated object would re-fire the fly on every keystroke.
-
-### Pacing a camera move — `getFlightDuration`
-
-A fixed duration is wrong in both directions at once. 900 ms is a crawl between two neighbouring
-countries and a blur across an ocean, and lengthening it only chooses which half to be wrong about. Time
-alone cannot fix the long case either: `ease` interpolates the centre linearly at the *starting* scale,
-so at zoom 8 the ground tears past however many seconds you give it. Zooming out on the way is what makes
-a long move readable — which is what `fly` is.
-
-So both modes now use **`easing: 'fly'` with a duration computed from the flight's length**, and the two
-halves are one change: a fly at a fixed 900 ms has to cover the distance *and* the arc in the time of a
-short hop, which is precisely the jank.
-
-**The unit is screenfuls, not kilometres**, and that is the whole idea. This is the van Wijk & Nuij
-(2003) path length — the same thing `maplibre-gl` computes for a `flyTo` given no duration, with its own
-`curve` of 1.42.
-
-#### Why it is reimplemented rather than delegated
-
-**MapLibre Native Android cannot do it.** From `CameraUpdateItem.kt` in the RN binding: a `duration` of
-`0` — which is what an absent one becomes — takes the `moveCamera` path, an instant jump; a negative one
-falls back to a **fixed** `MapLibreConstants.ANIMATION_DURATION`. The file says so itself:
-
-> On iOS a duration of -1 means default or dynamic duration (based on flight-path length). On Android we
-> can fallback to MapLibre's default duration as there is no such API. TODO: Implement in MapLibre Native
-> Android
-
-Web would compute it happily; Android is the primary target and would jump. Computing it ourselves is
-what makes the two agree, and it puts the number somewhere Jest can read it — the same argument
-`quizCamera.ts` already makes for doing the Mercator arithmetic here rather than handing MapLibre a
-`bounds`. The web implementation needs the number too: `applyStop`'s starvation deadline is
-`duration + ARRIVAL_GRACE_MS`, and there is no deadline to set without one.
-
-`CameraEasing.FLY` maps to `animateCamera` on Android and `flyTo` on web, so the arc is the renderer's;
-only its pacing is ours.
-
-#### The numbers, and the two that look wrong
-
-`FLIGHT_SPEED` is **the one number to turn.** It is screenfuls per second; `maplibre-gl` defaults to 1.2,
-tuned for someone browsing a map, at which France to Japan takes over three seconds — a wait rather than
-an animation, twenty times a round. **2** is the quiz's version of that judgement. Measured against the
-committed geometry on a 411x500 dp map box:
-
-| flight | ms |
-|---|---|
-| France - Germany, Brazil - Argentina | 450 (the floor) |
-| world view - Australia, USA - China | ~620 |
-| France - Turkey | 766 |
-| France - Japan | 1588 |
-| New Zealand - Iceland, world view - Monaco | 2000 (the ceiling) |
-
-Two of those read as wrong until you remember the unit. **USA to China is 620 ms** because both frame at
-about zoom 1, so nearly the whole world is already on screen at each end and very little of it moves.
-**Monaco to Liechtenstein is 2 s** despite being 500 km apart, because at zoom 10 that is hundreds of
-screenfuls. Any distance-based scheme gets both backwards, and `flightDuration.test.ts` pins them.
-
-The ceiling matters more than the floor: the formula will spend four seconds crossing the world from a
-street-level zoom and is *right* that this is what smooth costs — but not twenty times a round. Past it
-the move is simply faster than optimal, which is the better failure.
-
-#### Where the flight starts
-
-The formula needs the camera's current pose, and nothing reports it back — so it is derived:
-
-- **`facts`**: the previous question's country, which is a pure function of the question list. A player
-  who pans mid-question makes it an estimate (the map is read-only for *selection*, not for gestures).
-- **`locate`**: the last stop we sent, or the world view if there has not been one. Rougher, because
-  hunting for a country *is* panning and zooming.
-
-Being wrong costs a move paced for a slightly longer or shorter journey than the real one, never a wrong
-destination. Tracking the true pose would mean a camera-change event on both `WorldMap` implementations
-and a ref written on every pan, which is a lot of surface for a pacing estimate.
-
-### Which polygons to frame — `countryBounds.ts`
-
-A plain bounding box is wrong, and the reason is France: Natural Earth draws French Guiana as part of
-FRA, so the full extent spans 63° and the camera frames the Atlantic with a speck of Europe in it.
-Guiana is ~13% of France's polygon area, so **no area threshold separates it from Sicily** — only
-distance does.
-
-So: rank the polygons by area, seed a cluster with the largest, and absorb any polygon whose bbox is
-within `max(GAP_MIN_DEG, 0.35 × cluster diagonal)`, to a fixpoint. Two things that bite:
-
-- **Pick the longitude frame first, from the country's total extent**, then cluster inside it. Deciding
-  per polygon instead silently yields "Kiribati is one atoll" and "the UK is Great Britain only".
-- **`GAP_MIN_DEG` is 5.5 because of Malaysia**, whose two halves sit 5.2° apart with Borneo the larger —
-  a tighter floor seeds on Borneo and drops the peninsula, capital and all. Measured margins at 5.5:
-  Spain rejects the Canaries by 2.5°, Portugal the Azores by 2.8, Ecuador the Galápagos by 2.8, South
-  Africa the Prince Edward Islands by 5.7, France its overseas departments by 53. Raising it much
-  further starts pulling the Canaries in.
-
-Degenerate spans are widened to `MIN_SPAN_DEG`, and the widening deliberately **overshoots by a relative
-epsilon**: `mid ± MIN_SPAN_DEG / 2` around Monaco's latitude lands at 0.04999999999999716, and
-correcting by that 2.8e-15 shortfall does nothing at all, because one ulp at latitude 44 is ~7e-15. A
-zero span sends `log2(0)` to the native camera.
-
-Accepted limitation: **Kiribati and Micronesia frame to their largest island group.** Their islands span
-38° and 25° of ocean; framing either in full is an empty blue rectangle. The subregion filter is the way
-to opt out.
+- **`onRequestClose` is required**, not optional. The dialog holds window focus, so Android's back key
+  goes to it and never reaches the screen's own `BackHandler` — without it, back does nothing at all.
+- **Buttons are stacked, not a row**: three actions do not fit at 411 dp once one is "Discard and leave".
+- **The order changed when the native `Alert` was dropped.** `Alert.alert` on Android pops the array
+  from the **end**, so the list had to be written backwards to read forwards. If it ever goes back to
+  `Alert`, invert `buildExitPrompt`'s order again.
+- **Jest cannot see any of the interception.** It resolves `BackHandler.ios.js`, a stub whose
+  `addEventListener` stores nothing and returns a shared no-op `remove` — so tests invoke the handler
+  directly and wrap that `remove` to observe it. That a real Android back press arrives here is
+  `.maestro/quiz.yaml`'s job.
 
 ### Grading — forgiving about spelling, unforgiving about being a different country
 
 Normalize (NFD, strip combining marks, drop punctuation, `&`→`and`, `st.`→`saint`, strip a leading
-"the"), then accept an exact match, an alias, or a small typo. Aliases come mostly from the dataset:
-`altSpellings` already carries "Ivory Coast", "Holland", "UK", "DRC" and "Republic of Korea". The build
-strips **the cca2 code** out of that list — not entries under some length — or "fr" would pass for
-France while UK, USA, UAE, DRC and RSA would all be thrown away.
+"the"), then accept an exact match, an alias, or a small typo. Aliases come mostly from `altSpellings`
+("Ivory Coast", "Holland", "UK", "DRC"). The build strips **the cca2 code** out of that list — not
+entries under some length — or "fr" would pass for France while UK, USA, UAE, DRC and RSA would be
+thrown away.
 
 Typo tolerance is **Damerau**, not plain Levenshtein: adjacent transposition is the commonest typing
-mistake, and plain Levenshtein scores "Frnace" two edits from "France", outside the budget for a
-six-letter target. The budget is 0 edits under 5 characters, 1 under 9, 2 above.
+mistake, and plain Levenshtein scores "Frnace" two edits from "France". Budget: 0 edits under 5
+characters, 1 under 9, 2 above.
 
-**The confusable guard is load-bearing.** Edit distance alone accepts **"Gambia" for Zambia** — one edit
-on a six-letter target. So a *fuzzy* match (never an exact or alias one) is rejected outright when the
-thing typed is itself the name of another country, via `NAME_INDEX`. `grading.test.ts` sweeps all
-193 × 193 combinations and asserts no country is ever accepted for another, while every country's own
-name and every dataset alias still passes.
+**The confusable guard is load-bearing.** Edit distance alone accepts **"Gambia" for Zambia**. So a
+*fuzzy* match (never an exact or alias one) is rejected outright when the thing typed is itself the name
+of another country, via `NAME_INDEX`. `grading.test.ts` sweeps all 193 × 193 combinations.
 
 Set fields (languages, currencies) match **exact before fuzzy** — with one greedy pass a loosely spelled
-chip can consume the entry that a later chip matches exactly, marking a right answer wrong. Head nouns
-count when unambiguous *within that country*: "rand" for the South African rand, "German" for
-Switzerland's "Swiss German" — but not "peso" for Cuba, which has two, nor "Sotho" for South Africa,
-which lists Northern and Southern. Currency **codes are rejected**: "USD" is different knowledge from
-"United States dollar".
+chip can consume the entry a later chip matches exactly. Head nouns count when unambiguous *within that
+country*: "rand" for the South African rand, "German" for Switzerland's "Swiss German" — but not "peso"
+for Cuba, which has two. Currency **codes are rejected**: "USD" is different knowledge from "United
+States dollar".
 
-The rules, all settled: name and capital are single answers (any one of South Africa's three capitals
-counts), currencies need **all** of them, languages need **any 3** (Zimbabwe lists 15, and demanding all
-15 is a wall rather than a question), and population is correct **within ±20%**, parsed from
-`68,000,000`, `68m`, `68 million` or `1.4bn`.
+The rules: name and capital are single answers (any one of South Africa's three capitals counts),
+currencies need **all**, languages need **any 3** (Zimbabwe lists 15), population is within **±20%**,
+parsed from `68,000,000`, `68m`, `68 million` or `1.4bn`.
+
+`gradeLocation.ts` is its own module rather than a sixth case in `gradeAnswer.ts`: everything there is
+about being forgiving with a *string*, and none of it has anything to say about an ISO-3 code out of
+`pickCountry`. There is one right answer and comparing it is `===`.
 
 ### Who gets asked
 
-`QUIZ_COUNTRIES` is the **193 UN member states** that have an outline. mledoze flags 194: it counts
-**Vatican City**, which is a permanent observer rather than a member — and which is also the only
-UN-flagged record with no World Bank population. `NON_MEMBER_ISO3` excludes it by name, in keeping with
-the pipeline's "explicit allowlist, never a silent skip" rule.
+`QUIZ_COUNTRIES` is the **193 UN member states** with an outline. mledoze flags 194: it counts **Vatican
+City**, a permanent observer rather than a member — and the only UN-flagged record with no World Bank
+population. `NON_MEMBER_ISO3` excludes it by name.
 
 A country missing data for a selected field is still asked; it just skips that field. Only one real case
-exists: **Micronesia has no currency** upstream. A country left with nothing askable — a currency-only
-round over Micronesia — drops out entirely rather than becoming a question with no inputs.
+exists: **Micronesia has no currency**. A country left with nothing askable drops out entirely.
 
-Order is a **seeded** Fisher-Yates (`mulberry32`), so a round replays identically and a Maestro flow can
-pin it.
+Order is a **seeded** Fisher-Yates (`mulberry32`), so a round replays identically and Maestro can pin
+it. **A practice round is the one config the seed does not pin** — selection reads the device's mastery
+table, so "Play again" gives a different ten. That is right for practice, and a real break from the rule.
 
-### Locate mode — find it on the map
-
-`QuizConfig` gained a **`mode`**: `facts` is everything above, `locate` gives you a country's name and
-makes you find it. They are mutually exclusive rather than a sixth field you can tick, because they run
-the map in opposite directions — `facts` paints the country and asks about it, and `locate` must **not**
-paint it, since that is the answer. The mode crosses into `/quiz/play` as one more router param, and an
-absent or unrecognised `mode` is `facts`, which is what every link written before this says by omission.
-
-The round: tap a country to highlight it, press **Check** to commit. Right → it turns green. Wrong → your
-pick turns red, and a beat later the camera goes to the country you were asked for and paints it green.
+### Locate mode specifics
 
 **Nothing may name the pick before it is checked.** "Your pick — New Zealand" under a prompt reading
-*Find New Zealand* answers the question outright, and lets a player retap until the panel agrees with the
-prompt. So an open question gets a bare "Ready — press Check" and the highlight on the map is the only
-thing that says *which* country is selected, which is the judgement being tested. Once graded there is
-nothing left to spoil and the verdict names it.
+*Find New Zealand* answers the question outright and lets a player retap until the panel agrees. So an
+open question gets a bare "Ready — press Check", and the highlight on the map is the only thing that
+says *which* country is selected — which is the judgement being tested. Once graded there is nothing
+left to spoil and the verdict names it.
 
-#### The camera never resets, and only ever moves to reveal
+**The camera never resets, and only ever moves to reveal.** A locate round issues **no stop at all**
+while a question is open: `WorldMap`'s own default is the world-fit opening this mode wants, and the
+player pans from there. The reveal stop is never withdrawn (see *Camera*), and leaving it in place *is*
+the behaviour — the next question starts from wherever the reveal left you.
 
-A `locate` round issues **no camera stop at all** while a question is open. It does not need one:
-`WorldMap`'s own default is `INITIAL_CENTER` at the world-fit zoom, which is exactly the whole-world
-opening this mode wants, and the player pans and zooms from there. `MapScreen.test.tsx`'s rule that the
-explore camera is never handed a stop now has a sibling assertion here.
-
-The **only** stop the mode ever issues is the reveal, and it is deliberately **never withdrawn**:
-
-- handing the native `Camera` a stop and then taking it away turns its stop prop from
-  `{center, zoom, duration, easing}` into `{}` — a real prop change pushed into a renderer Jest replaces
-  with a stub. `MapScreen`'s search focus records the same rule.
-- and leaving it in place *is* the behaviour: the next question starts from wherever the reveal left you,
-  which is what makes a regional round playable without the map snapping back to the world every time.
-
-Three details that are each load-bearing:
-
-- **`easing: 'fly'`, not the `'ease'` the facts camera uses.** There the camera hops between countries
-  from a known world view. Here the player may be at zoom 8 in the Alps when the answer turns out to be
-  in Peru, and an ease across that is an unreadable blur. The objection that a fly telegraphs where you
-  are heading does not apply to a move that happens only after the answer is already out.
+- **`easing: 'fly'`** — the player may be at zoom 8 in the Alps when the answer is in Peru. The
+  objection that a fly telegraphs the destination doesn't apply to a move that happens after the answer.
 - **The red sits for `REVEAL_DELAY_MS` (700) before the camera moves**, so the verdict reads as being
-  about the country you picked rather than as part of the camera move. `answerShown` and `revealStop` are
-  two pieces of state written by that one timer: the first is cleared per question, the second never is.
-  The panel takes `answerShown` as a prop rather than running its own timer, so the words and the map
-  cannot get out of step.
-- **Pressing Next inside the delay cancels the reveal.** They have moved on; yanking the camera
-  afterwards would land them somewhere they did not ask to be, on a question that is already over.
+  about the country you picked. `answerShown` and `revealStop` are two pieces of state written by that
+  one timer; the panel takes `answerShown` as a **prop** rather than running its own timer, so words and
+  map cannot get out of step.
+- **Pressing Next inside the delay cancels the reveal** — they have moved on.
+- A correct guess moves nothing at all.
 
-A correct guess moves nothing at all. They found it — there is nothing to show them.
+Checking with **nothing** picked is legal, scores as blank/wrong, and still reveals — the "no idea, show
+me" move, matching facts mode where Check with every box empty has always been allowed.
 
-#### What it reuses, and the two small things it did not
+**`location` is a `GradedField` but deliberately not a `FieldId`.** Everything iterating
+`ANSWERABLE_FIELDS` — the field picker, `toAnswerInput`, the `fields=` parser, `gradeField`'s exhaustive
+switch — is about a fact you type into a box. Keeping it out means none of them needs a case, and no
+deep link can smuggle `fields=location` into a facts round.
 
-`buildQuiz`, the seeded shuffle, the subregion pool, the exit confirmation, `summarize` and the whole
-results screen are untouched. Two things had to give:
+**`buildQuiz` skips its completeness filter for locate**: that filter drops a country that cannot answer
+any *chosen fact*, and a locate round asks something every country can answer — a config carrying
+`fields: ['currency']` over from a previous round must not silently drop Micronesia.
 
-- **`location` is a `GradedField` but deliberately not a `FieldId`.** Everything that iterates
-  `ANSWERABLE_FIELDS` — the field picker, `toAnswerInput`, the `fields=` parser, `gradeField`'s exhaustive
-  switch — is about a fact you type into a box, and this is not one. Keeping it out of that union means
-  none of them needs a case for it, and no deep link can smuggle `fields=location` into a facts round. It
-  is still a `GradedField`, so `FieldGrade`, `perField` and the review list carry it unchanged.
-- **`buildQuiz` skips its completeness filter.** That filter exists to drop a country that cannot answer
-  any of the *chosen facts* — Micronesia in a currency-only round. A locate round asks something every
-  country can answer, and a config carrying `fields: ['currency']` over from a previous facts round must
-  not silently drop Micronesia from it.
+### Flag mode specifics
 
-`gradeLocation.ts` is its own module rather than a sixth case in `gradeAnswer.ts`: everything there is
-about being forgiving with a *string*, and none of it — accents, a typo budget, the confusable guard —
-has anything to say about an ISO-3 code that came out of `pickCountry`. There is one right answer and
-comparing it is `===`.
+**Nothing names the country, at any point** — not before the answer, and **not after it either**,
+because that is what `facts` mode does. A capital-only round reveals `Answer: Kathmandu` and never says
+Nepal; the map is what answers "which country was that", and a flag round has no map.
 
-Checking with **nothing** picked is legal, scores as blank/wrong, and still reveals. It is the "no idea,
-show me" move, and it matches facts mode, where Check with every box empty has always been allowed.
+That is why `CountryFlag` gained a `label`: its default names the ISO-2 code, which on web becomes
+`alt="Flag of NP"` — the answer, handed to a screen reader unasked. It does not hide the
+`<img src="/flags/np.svg">`, so view-source always spoils a web round; it fixes the case that matters.
 
-#### The panel is content-height, and `flexGrow` is why
+`FlagStage` takes the map's flex shape — `flex: 1` plus a `minHeight` — because a flag cannot absorb the
+keyboard the way a map can: measured on 411x914, a five-field round with the IME open leaves the stage a
+fair share of **60 dp**. So the stage keeps a floor and the panel gives way (it already has
+`flexShrink: 1` and scrolls). Paired with the `compact` swap while the IME is up, the floor while typing
+sits *below* the map's own 96 dp, so a flag round never leaves the panel less room than a facts round.
 
-`LocatePanel` is a sibling of `QuizPanel`, not a mode branch inside it — they share only a frame, and
-this one has no inputs, so none of `QuizPanel`'s field rows, chip slots, focus chain or keyboard handling
-applies. It keeps the same testIDs (`quiz-panel`, `quiz-progress`, `quiz-end`, `quiz-submit`) so the
-screen's wiring does not care which mode is on screen.
+The plaque behind the flag is not decoration: Japan, Finland and Nigeria are mostly white and read as a
+shapeless blob against the navy.
 
-In portrait its slot is given **no explicit height** (`getQuizPanelLayout(..., locate)` returns
-`panelHeight: null`, which the screen spreads as `height: undefined`). A panel sized like a facts panel
-left a growing gap between the last line and the Check button — wider the taller the screen.
+### The flags are real SVGs, on every platform
 
-**Which means its root uses `flexGrow: 1`, not `flex: 1`, and the two are not interchangeable.** RN's
-`flex: 1` also sets `flexBasis: 0`, so a panel carrying it reports a content height of zero to an
-auto-height parent and collapses. `flexGrow: 1` keeps `flexBasis: auto`: content-height in portrait, and
-still filling the stretched column in landscape, which is untouched. CLAUDE.md's warning that
-**`QuizPanel` needs `flex: 1`** still stands for that panel — its slot has a definite height and its body
-must fill it or every answer field collapses. This one has neither property.
+**Worth reading, because the emoji route looked obviously cheaper and cost most of an afternoon.** The
+flag used to be a regional indicator pair in a `Text`. That works at 20 dp and falls apart the moment
+you want a big one, because **an emoji is a glyph, not an image**, and each of these is a property of
+glyph layout rather than a bug:
 
-`LOCATE_PORTRAIT_HEIGHT` survives as an **estimate with exactly one consumer**: `mapViewport`, which the
-reveal camera fits a country into. Being a few dp out costs a marginally roomier frame, and
-`CONTEXT_MARGIN` already spends 12% on that. Measuring it for real would mean threading an `onLayout` up
-into the camera's inputs and re-firing the fly whenever it settled — the same trade `getMapFocusRect`
-refuses for the info sheet.
-
-#### What is not covered
-
-There is **no Maestro flow for locate mode**, which leaves the two things Jest structurally cannot see
-uncovered: that `country-reveal` paints at all, and that a reveal stop parses in the native renderer
-rather than blanking the map. Both are exactly the failure modes `choropleth-modes.yaml` and `quiz.yaml`
-exist for elsewhere.
-
-Worth knowing when one is written: unlike `quiz.yaml`, a locate flow **can** use coordinate taps, because
-the map sits at the launch camera for the whole question — there is no stop until the reveal. The
-percentages are not the explore flows' though: the map is a band between the top inset and the panel, not
-the whole window, so only the *x* percentages carry over.
-
-
-### Flag mode — the same facts, from a flag
-
-`facts` mode with the stimulus swapped: instead of the map zooming to a country, you get
-its flag. Everything downstream is literally the same code — `QuizPanel`, `answerableFields`,
-`gradeQuestion`, `summarize`, the review list — which is why the whole mode is one new
-component and four changed lines in `play.tsx`.
-
-**`buildQuiz` needed no change at all.** It already reads `config.mode === 'locate'`, so
-anything that is not locate takes the `answerableFields` path with the completeness filter
-still applied. A currency-only flag round drops Micronesia for the same reason a facts one
-does.
-
-**Nothing names the country, at any point.** Not before the answer is checked, obviously,
-and **not after it either** — because that is what `facts` mode does. A round asking only
-for the capital reveals `Answer: Kathmandu` and never says the word Nepal; the map is what
-answers "which country was that", and a flag round simply has no map. Adding a reveal the
-round never asked for would make this mode quietly different from the one it copies.
-
-That is also why `CountryFlag` gained a `label`: its default names the ISO-2 code, which on
-the web path becomes `alt="Flag of NP"` — the answer, handed to a screen reader or a
-find-in-page unasked. It does not hide the `<img src="/flags/np.svg">`, so view-source
-always spoils a web round; it fixes the case that matters.
-
-#### There is no map on the screen, and that is load-bearing
-
-`MODE_USES_MAP` in `quizConfig.ts` is a `Record<QuizMode, boolean>` rather than a
-`mode === 'flag'` test at the call site, and that is deliberate: a fourth mode fails to
-**compile** until someone answers it, and this is the one question on that screen that must
-never be answered by accident.
-
-`play.tsx` reads it from a `config` that is `useState`-parsed once and never re-read, so
-the ternary is decided on the first frame and cannot flip. A flag round therefore mounts no
-MapLibre surface at all, which puts `FlagStage` in the same position as `/search` and
-`/quiz`: **ordinary conditional rendering is correct in there.** The always-mounted
-discipline in `AnswerField` and `ChipInput` exists only where a view shares a window with a
-live map surface.
-
-Three things would break that licence, and each is named in the comment above the ternary:
-making the mode switchable mid-round (a "show me on the map" button would insert a surface
-*under* an already-mounted tree); mounting `WorldMap` with `display: 'none'` "to keep the
-tree stable", which mounts the surface and pays a full MapLibre init for nothing; and
-re-parsing the params on render, which is already forbidden because it would reseed
-`buildQuiz`.
-
-#### The panel keeps the `facts` split, however tempting the symmetry
-
-`getQuizPanelLayout`'s third parameter is now a `QuizMode`, not a `locate` boolean. `flag`
-takes the **facts** branch: its panel has the same rows, so it needs the same *definite*
-height. `QuizPanel`'s body `ScrollView` resolves its own `flex: 1` against that slot, and
-given the locate branch's auto height every answer field collapses to nothing — which looks
-exactly like the fields failing to render. `LocatePanel` gets away with an auto height only
-because it uses `flexGrow` instead. `quizPanelLayout.test.ts` pins this.
-
-`mapViewport` comes out of a flag round with no consumer at all. Left as it is rather than
-modelled away: it still means "what would be left if there were a map", and making it
-nullable would put non-null assertions into three call sites that never reach it.
-
-#### The stage, and the keyboard
-
-`FlagStage` replaces the map slot. It takes the map's flex shape — `flex: 1` plus a
-`minHeight` — because a flag cannot absorb the keyboard the way a map can: measured on a
-411x914 dp screen, a five-field round with the IME open leaves the stage a fair share of
-**60 dp**, which would crush the flag to a stripe.
-
-So the stage keeps a floor and the panel gives way instead; it already has `flexShrink: 1`
-and its body already scrolls, and you have to see the flag to answer. Paired with the
-`compact` size swap (to `md` while the IME is up, back to `lg` when it closes, and tapping
-the stage dismisses the keyboard to get it back), the floor while typing sits *below* the
-map's own 96 dp — so a flag round never leaves the panel less room than the facts round it
-is copied from.
-
-The plaque behind the flag is not decoration. Japan, Finland and Nigeria are mostly white,
-and against the screen's navy they read as a shapeless blob with no edge; the web path
-already solves this at small sizes with a hairline ring around its `<img>`.
-
-#### The flags are real SVGs, on every platform
-
-**And the reason they are is worth the whole of this subsection**, because the emoji route
-looked obviously cheaper and cost most of an afternoon.
-
-The flag used to be the regional indicator pair in a `Text`, which Android, iOS and macOS
-all compose into a flag for free. That works at 20 dp. It falls apart the moment you want a
-big one, because **an emoji is a glyph, not an image**, and every one of these is a property
-of glyph layout rather than a bug to be fixed:
-
-- **It is not centred in the box the text engine lays out for it.** The font's metrics leave
-  a tall empty band above the glyph and almost none below, so centring that box parks the
-  flag on the floor of its frame. Measured on Android at 120 dp: 35 dp of gap above and 3
-  below.
-- **The error is proportional to the font size**, so it hid at 20 dp for three call sites
-  and was glaring at 120. It also made the first diagnosis wrong: the flag looked fine
-  whenever the keyboard was up, because that swapped to a smaller size.
-- **The glyph can be drawn taller than its own line box**, and Android then clips it.
-- **`transform: translateY` to correct any of that clips it too**, because Android
-  composites a transformed child against the bounds it had *before* the transform.
+- **It is not centred in the box the text engine lays out for it** — 35 dp of gap above and 3 below,
+  measured on Android at 120 dp.
+- **The error is proportional to the font size**, so it hid at 20 dp and was glaring at 120 — and made
+  the first diagnosis wrong, because the flag looked fine whenever the keyboard was up (smaller size).
+- **The glyph can be drawn taller than its own line box**, and Android clips it.
+- **`transform: translateY` to correct that clips it too** — Android composites a transformed child
+  against its pre-transform bounds.
 - **Below Android 13 emoji are 136x128 bitmap strikes**, so any large flag is an upscale.
 
-An image has none of those properties: it occupies exactly the width and height it is
-given, centres by arithmetic, and is vector all the way up. Switching deleted the nudge
-constant, the line-box-derived frame, `useFlagSupport` and its canvas measurement, and the
-emoji branch on web — and made the flag responsive, which is what it should always have
-been.
+An image has none of those: it occupies exactly the box it is given, centres by arithmetic, and is
+vector all the way up. Switching deleted the nudge constant, the line-box-derived frame,
+`useFlagSupport` and its canvas measurement, and the emoji branch on web.
 
-**It needed no new native module and no rebuild.** `expo-image` was already a dependency
-and ships its own Android SVG support: it vendors AndroidSVG and registers a Glide decoder,
-`InputStream -> SVG -> Drawable`. `react-native-svg` is *not* installed and was not needed.
-Verified on the emulator.
+**It needed no new native module and no rebuild.** `expo-image` was already a dependency and vendors
+AndroidSVG with a Glide decoder. `react-native-svg` is *not* installed and was not needed.
 
-**And it does not weaken the offline requirement.** The SVGs are bundled in the APK, not
-fetched: `scripts/build-flag-assets.mjs` (`npm run flags:data`, offline, output committed)
-copies the 249 the dataset references into `assets/flags/` and writes
-`src/components/flagAssets.ts`. They live under `assets/` rather than `public/` because
-Metro only bundles what the app `require`s and `public/` is web staging that never reaches
-an APK.
+**And it does not weaken the offline requirement.** `scripts/build-flag-assets.mjs` (`npm run
+flags:data`, offline, output committed) copies the 249 the dataset references into `assets/flags/` and
+writes `src/components/flagAssets.ts`. They live under `assets/` rather than `public/` because Metro
+only bundles what the app `require`s and `public/` is web staging that never reaches an APK.
 
-That same script now also emits a **raster** set for the map's flag labels, which is a
-different set for a real reason — MapLibre cannot decode an SVG icon on any platform. See
-*Flag labels are a second layer, and they must be raster* under *Map labels*.
+**The map is generated because Metro cannot do a dynamic `require`** — there is no way to write a
+template-literal require path. 249 literals in a generated file is the honest way to say that.
 
-**The map is generated because Metro cannot do a dynamic `require`.** There is no way to
-write ``require(`../assets/flags/${{iso2}}.svg`)`` — the bundler resolves requires at build
-time, so every path has to appear literally. 249 literals in a generated file is the honest
-way to say that.
+**Sizing: the flag is sized by its box, not by a number.** `FLAG_SIZES` has **no `lg`**, deliberately.
+The flag round passes `fill`: `width: '100%'` with `aspectRatio: 4/3` (every `flag-icons` SVG is 4:3),
+`maxHeight: '100%'` so it gives way when height binds (which is what makes landscape work), and
+`maxWidth: 460` so a desktop browser does not render wallpaper. The frame carries **no padding** —
+padding inside an `aspectRatio` box would make the picture some other shape — so it is a border directly
+around the flag with `overflow: 'hidden'`. That clipping is safe here **and only here**: the thing being
+clipped is an image that occupies exactly the box, not a glyph hanging out of its line box.
 
-#### Sizing: the flag is sized by its box, not by a number
+`FLAG_SIZES` survives for the three fixed-size call sites, and its `fontSize` for exactly one case: BES,
+the only record with no flag, where the white-flag glyph is still text.
 
-`FLAG_SIZES` has **no `lg`**, deliberately, and the file says so. The flag round passes
-`fill` and lets the frame do the sizing: `width: '100%'` with `aspectRatio: 4/3` (every
-`flag-icons` SVG is 4:3), `maxHeight: '100%'` so it gives way when height is the binding
-constraint — which is what makes landscape work — and `maxWidth: 460` so a desktop browser
-does not render a flag as wallpaper. On a 411 dp phone that is a 379x284 flag.
+**The web draws the image unconditionally now**, where it used to use emoji except on Windows. The cost
+is worth naming: macOS and Android browsers previously downloaded nothing. In production the service
+worker precaches all of them; in dev there is no worker (`+html.tsx` registers it only for
+`production`), so every flag is a cold fetch from Metro, once per question — the reported "flags take
+forever on web", now on every platform. The unbuilt fix is to prefetch the next question's flag, which
+this app can do because it knows the whole question order up front.
 
-Two consequences. The keyboard no longer swaps the flag to a smaller size, because it
-shrinks with its box on its own; `compact` now only lowers the stage's floor. And the frame
-carries **no padding**, because padding inside an `aspectRatio` box would make the picture
-some other shape — it is a border directly around the flag, with `overflow: 'hidden'` to
-round its corners. That clipping is safe here and only here: the thing being clipped is an
-image that occupies exactly the box, not a glyph hanging out of its own line box.
+## Per-country mastery
 
-`FLAG_SIZES` survives for the three fixed-size call sites (info sheet, search row, results
-row), and its `fontSize` for exactly one case: BES, the only record with no flag at all,
-where the white-flag glyph is still text.
+The app remembers how you answer each country, colours the map by what you know, and can build a
+practice round out of your weak spots. It is the first thing in the project that **persists anything**.
 
-#### The web draws the image unconditionally now
+### The model is a weakness score, and there is deliberately no clock
 
-It used to reach for an SVG only on Windows, where Segoe UI Emoji has no flags, and use the
-emoji everywhere else. It no longer does — the native side stopped using emoji too, and the
-two should not disagree about what a flag looks like.
+Per `(iso3, GradedField)` the table keeps `asked`, `correct`, `lastCorrect`. Nothing else. No dates, no
+due times, no spaced repetition, and **`Date.now()` still appears nowhere in `src/`**.
 
-**The cost is worth naming:** macOS and Android browsers previously downloaded nothing and
-now fetch flag SVGs like Windows does. In production the service worker precaches all of
-them so it is a one-time cost, but in dev there is no worker at all (`+html.tsx` registers
-it only for `NODE_ENV === 'production'`), so every flag is a cold fetch from Metro, once per
-question. That is the reported "flags take forever on web", and it now applies to every web
-platform rather than just Windows. The fix, unbuilt, is to prefetch the next question's flag
-— this app knows the whole question order up front, which a normal image gallery does not.
+```
+recency  = 1 - RECENCY_WEIGHT * (lastWrong / fields)   // weight = 0.4
+display  = (correct / asked)            * recency      // what the map paints,  [0, 1]
+practice = (correct / (asked + PRIOR))  * recency      // what the sampler weighs, prior = 1
+```
 
-#### What is not covered
+**Two scores, one formula, one parameter apart** — `scoreWith(record, prior)`. They disagree on purpose:
 
-There is **no Maestro flow for flag mode**, matching locate. It would be the easiest of the
-three to write — no coordinate taps, no camera — but it cannot judge the one thing that has
-actually been wrong here, which is whether the flag looks right. That is a screenshot.
+- **Never asked is `null`, never `0`.** A country you have not seen and one you always get wrong are
+  different things. The null becomes an *absent* property, which `['has','mastery']` splits into the
+  grey band.
+- **The displayed score carries NO prior, and 100% is reachable.** Everything you were asked about a
+  country, answered right, is 100% — however few times that was.
+- **The prior survives only in the practice score**, so a country proven once (weight ~0.40) resurfaces
+  far more often than one proven nine times (~0.16). One lucky guess must not retire a country, and
+  that is the only thing the prior was ever buying.
+- **Fields are pooled, not averaged as per-field rates**, so the score is weighted by how often you were
+  actually asked. The recency discount is *proportional*.
 
+**The prior used to apply to both, and that was the one real design mistake here.** Every graded field
+counts as one `asked`, so with a name-only round a country just answered **correctly** painted at
+**50%**, and reaching the green 90% band took **nine consecutive correct answers on that one country** —
+unreachable across 193 countries, so the map sat permanently orange however well anyone played. The
+error was conceptual: **the prior conflated "you are mediocre at this" with "we have not asked you
+much".** The map already says the second with its grey band, so the colour never has to hedge; the
+sampler has no such band, which is exactly why the hedge belongs there and only there. **If you ever
+hand `pickWeakSpots` the display scores, one lucky guess retires a country** — `practicePool.test.ts`
+pins the ordering.
+
+`masteryOf` validates its counters and returns `null` rather than `NaN` for anything non-finite.
+`asked: Infinity` is the instructive case: it divides to a finite `0`, painting a country as "always
+wrong" on the strength of a corrupt counter.
+
+### `recordResult` does not notify — and that is the whole design
+
+**`/quiz/play` is pushed over `MapScreen`, so the explore map's surface stays mounted underneath for the
+entire round.** Notifying on every answer would re-fold the outlines and re-upload 1.6 MB of geometry to
+a backgrounded GL surface up to 193 times.
+
+So the store splits: `recordResult` updates the table and schedules a write, silently; `publishMastery`
+recomputes scores, bumps a version, flushes the write and notifies. `play.tsx` calls the first from
+`check()` and the second **once, on unmount** — the single event covering finishing, End quiz, Discard
+and leave, and a plain back-out.
+
+**Recording happens in `check()`, not `next()`.** `check()` is guarded by `if (!question || result)
+return`, so it fires once per question — and recording in `next()` would lose the last checked answer
+whenever a player checks the final question and backs out. *Discarding a round throws away the score,
+not what you learned.*
+
+### This is the first thing to change `<GeoJSONSource data>` after mount
+
+`worldGeoJson` is a module constant precisely so MapLibre never re-uploads geometry. Mastery is dynamic,
+so it cannot be folded in at module load. Three things keep the churn down, all pinned by tests:
+
+- **`withMastery` returns the same collection object when the table is empty**, so a player who has
+  never done a quiz is byte-identical to before.
+- **The fold runs unconditionally in `MapScreen`, not only in mastery mode.** Folding on demand would
+  change the identity on every switch *into and out of* the mode — two re-uploads per visit.
+  Unconditional makes the identity a pure function of the mastery version.
+- **Geometry is passed by reference**, exactly as `withChoroplethValues` does.
+
+`WorldMap.web.tsx` needed a `setData` effect, because it adds the source inside `map.once('load')` —
+plus a ref so a table landing before the style loads is not dropped. Native needs neither: `data` is a
+prop and React pushes it.
+
+**If this ever hitches or blanks on a device**, the escape hatch is to move mastery into the paint
+expression instead — `['match', ['get','iso3'], 'FRA', 62, …]`, at most 193 pairs, rebuilt per publish.
+That re-uploads nothing, because a paint-property change is the code path a fill-mode switch already
+uses. The cost is that `fillColor` stops being a module constant for that ramp.
+
+### The mastery ramp is the first LINEAR one
+
+`logRampFillColor` could not be reused: **a mastery score has a legitimate zero** — one question,
+answered wrong — and `log10(0)` is the `-Infinity` the population ramp spends four paragraphs avoiding.
+`linearRampFillColor` sits beside it with the same `['has', property]` split and no logarithm. That
+broke a `describe.each` in `choropleth.test.ts` asserting decade spacing for *every* ramp; it is now
+split into shared invariants over all three and log-only tests over the two that are logarithmic.
+
+Seven stops, matching the other ramps — **that count is load-bearing**, because the legend is one
+always-mounted view whose swatches are swapped by prop. Stops are in **percent**, so the legend's labels
+are free. Palette is ColorBrewer RdYlGn, echoing the quiz's red-wrong/green-right language. **Known
+trade: RdYlGn is not colourblind-safe**; the drop-in swap is RdYlBu-7.
+
+`ChoroplethRamp` gained an optional **`noDataLabel`** so mastery's grey band reads *"not asked yet"* —
+the grey countries are exactly the ones worth practising, which is most of the mode's value. It swaps
+the text of a mounted row, so it inserts no view.
+
+### Practice is a `QuizConfig` flag, not a fourth `QuizMode`
+
+It is orthogonal: it decides *who* is asked, not *how*. `practice × facts|locate|flag` are all coherent.
+It crosses the URL as `'1'|'0'`, always emitted, absent meaning false.
+
+`pickWeakSpots` is weighted sampling **without replacement**, seeded and pure:
+
+```
+weight = PRACTICE_FLOOR + (1 - mastery) ** PRACTICE_EXPONENT   // 0.15, 2
+```
+
+**A never-asked country weighs exactly as much as one always answered wrong.** Unseen is maximally weak,
+which is what makes practice work on a fresh install and lets it double as a way through the whole
+world. Nothing has weight zero, so consecutive rounds differ and a fully-mastered pool still yields a
+full round; the spread is about 7:1.
+
+The pool handed in is `countriesIn(config.subregions)`, so "practise my weak spots in Africa" works for
+free. **Practice and the region picker INTERSECT, and the setup screen has to say so** — they are
+orthogonal questions (*who* versus *where from*), which is why they are two sections rather than one
+exclusive list. The first version shipped with the region note still saying *"all 193 UN member
+states"*, which is wrong the moment practice is on; the note is now practice-aware
+(`quiz-setup-scope-note`) and pinned by a test. If revisited: making them exclusive by *hiding* the
+region picker is the worst option — the selection appears to vanish; disable it with a reason instead.
+
+`PRACTICE_ROUND_SIZE` is **10**, the app's first round-length bound of any kind: a normal round is still
+the whole filtered pool, 193 questions for the world.
+
+### Storage
+
+One AsyncStorage key holding one versioned JSON blob, positional tuples `[asked, correct, lastCorrect]`.
+**Measured worst case — 193 countries × 6 fields — is 39 KB**, asserted in `masteryCodec.test.ts`. One
+key rather than 193 because the choropleth needs the whole table on the first frame.
+
+`decodeMastery` **never throws**, and validates **per field**: one corrupt entry costs one entry, not a
+player's history. An unknown ISO-3 is kept rather than rejected — validating it would mean importing
+geometry into a pure module — and simply never matches a feature. `saveMastery` swallows its rejection:
+this is a cache the player can regenerate by playing, and a failed write must never cost them a round.
+
+Writes are debounced 2 s with an explicit flush on publish. **That `setTimeout` is not a clock** —
+nothing time-dependent enters what is stored or scored.
+
+**`masteryStorage.web.ts` is not optional.** AsyncStorage 2.2.0's web path reaches straight for
+`window.localStorage` with no guard, and `web.output: "static"` renders every route in Node, where there
+is no window. It is a file-extension split, not a `Platform.OS` check.
+
+### Resetting — the third door into the store
+
+The bottom of `/quiz` carries a **Reset mastery** button behind the same `ConfirmDialog`. Its wording
+lives in `quiz/resetPrompt.ts`, and it **names the count**, because "your progress" is an abstraction
+and "37 countries" is the thing a player would actually miss.
+
+`resetMastery()` behaves like neither sibling, and all three differences are load-bearing:
+
+- **It notifies unconditionally.** `publishMastery` is guarded by `dirty`, and a reset records nothing,
+  so routing through it would be a silent no-op with the map still painting deleted scores.
+- **It writes immediately.** `flushPersist()` cancels the pending 2 s debounce first, so the write from
+  the round just played cannot land a second later and resurrect what was deleted.
+- **A `cleared` flag guards the import-time read.** The module fires `loadMastery()` at import and
+  merges with `mergeTables(stored, table)`, which returns `stored` verbatim when memory is empty — so a
+  reset landing before that read resolves would be undone by it. Reachable only via a deep link straight
+  onto `/quiz`, and one line to make impossible.
+
+**`__resetMasteryStore` is not this**: it clears the listener set (dropping `MapScreen`'s subscription
+for the life of the process), rewinds `version` to 0, and writes nothing. It stays the test-only rewind.
+
+Nothing new was needed in either storage module: `encodeMastery({})` is a well-formed empty payload, so
+`saveMastery({})` is a correct clear on both platforms — no `clearMastery`, and no second place that
+knows the key.
+
+The button is **disabled when nothing has been asked**, and the note says so rather than leaving a live
+control that does nothing. That is the only reason the setup screen subscribes to the store at all; it
+subscribes **inline**, not through a hook, for the `reactCompiler` reason below.
+
+### What Jest cannot see here
+
+- That a linear `interpolate` inside a `case`/`has` wrapper **parses in the native renderer**.
+- That **replacing `<GeoJSONSource data>` on a live map redraws** rather than blanking or hitching.
+  Nothing in the app had ever done it. **This is the riskiest unproven part.**
+- That **AsyncStorage survives a cold start** — persistence across process death *is* the feature. Same
+  in reverse for a reset.
+- That the map redraws when handed back its **original** collection, which is what a reset does.
+- Whether the ramp is legible, and readable by a red-green colourblind player.
+
+`.maestro/mastery.yaml` covers the parse and the swap structurally, but **cannot assert which countries
+a practice round picked** — the pool is a function of device state, not the seed. That is a permanent
+reduction in what E2E can prove here, unlike `quiz.yaml`, which pins a seed precisely so it can.
 
 ## Localization
 
-The app ships in English and Russian, and "fully" means the data too: every country name,
-capital, language, currency and region has a Russian value, and the quiz grades Russian
-answers with Russian rules.
+English and Russian, and "fully" means the data too: every country name, capital, language, currency and
+region has a Russian value, and the quiz grades Russian answers with Russian rules.
 
 ### `useTranslator`, and why `t` alone is a trap
 
-**This is the part to read before touching anything here.**
+**Read this before touching anything here.** A component gets its strings from
+`const t = useTranslator()`, **never** from a module-level `t(key)` import. The module-level `t` still
+exists and is still correct — `labelGeoJson` and `formatters` use it — but calling it *inside a
+component* does not work, and the way it fails is invisible in every test.
 
-A component gets its strings from `const t = useTranslator()`, never from a module-level
-`t(key)` import. The module-level `t` still exists and is still correct - it is what
-`labelGeoJson` and `formatters` use - but calling it *inside a component* does not work,
-and the way it fails is invisible in every test.
+`reactCompiler: true`. A call like `t('quiz.open.label')` takes a constant and reads a module singleton
+the compiler cannot see, so it has **no reactive inputs at all** and the compiler is entitled to compute
+it once and reuse the result forever. It does.
 
-`app.json` sets `reactCompiler: true`. A call like `t('quiz.open.label')` takes a constant
-and reads a module singleton the compiler cannot see, so it has **no reactive inputs at
-all** and the compiler is entitled to compute it once and reuse the result forever. It
-does.
+The symptom, found on a device and not by 997 passing tests: switching language updated the toggle and
+the map labels and left the three pills beside them in English — until the next tap on a pill
+invalidated that memo. A subscription in the parent does not help: the child's props are unchanged, so
+the compiler skips it entirely.
 
-The symptom, found on a device and not by 997 passing tests: switching language updated the
-language toggle and the map's labels, and left the three pills beside them saying "Flat",
-"Labels" and "Quiz" - until the next tap on a pill changed `fillMode`, invalidated that
-memo, and the words snapped into Russian a moment too late. A subscription in the parent
-screen does not help: the child's props are unchanged, so the compiler skips it entirely.
+`useTranslator()` returns the translator for the active locale, and `translatorFor` is memoised per
+locale — so its **identity** changes exactly when the language does, and every `t(...)` now depends on
+something the compiler tracks.
 
-`useTranslator()` returns the translator for the active locale, and `translatorFor` is
-memoised per locale - so its **identity** changes exactly when the language does, and every
-`t(...)` in the component now depends on something the compiler tracks.
-
-- This is not the hook CLAUDE.md warns about elsewhere. That warning was about extracting
-  `useWindowDimensions()` and getting a *stale* value; the lesson was that a subscription
-  has to stay somewhere the compiler can see it invalidate a render, which is exactly what
-  this does. Reading the singleton directly is the shape that goes stale.
-- Pure modules take a `Translator` as an argument instead - `buildExitPrompt`,
-  `buildResetPrompt`. That keeps the decision they encode legible to Jest, which is the
-  whole reason those modules exist.
+- Pure modules take a `Translator` as an argument instead — `buildExitPrompt`, `buildResetPrompt` — which
+  keeps the decision they encode legible to Jest.
 - Non-component code passes an explicit locale: `formatCompactNumber(n, locale)`,
   `getCountryFacts(iso3, locale)`, `labelTextFor(field, facts, locale)`.
+- This is the same lesson as the `useWindowDimensions` trap under *The web target*: **a subscription has
+  to stay somewhere the compiler can see it invalidate a render.** Reading the singleton directly is the
+  shape that goes stale.
 
 ### The locale itself
 
-`src/i18n/locale.ts` is a module singleton with subscribe/notify, modelled on
-`masteryStore.ts` - no context, no provider, so the screens stay renderable bare in Jest.
-Two deliberate differences: no write debounce (this fires once per tap, not 193 times a
-round), and **the startup storage read notifies only when it disagrees** with the device
-default, because the common case is agreement and a spurious notify one frame after mount
+`src/i18n/locale.ts` is a module singleton with subscribe/notify, modelled on `masteryStore.ts` — no
+context, no provider, so screens stay renderable bare in Jest. Two deliberate differences: no write
+debounce (once per tap, not 193 times a round), and **the startup storage read notifies only when it
+disagrees** with the device default, because the common case is agreement and a spurious notify
 re-renders the map's layers for nothing.
 
-The initial value is the device's own language via
-`Intl.DateTimeFormat().resolvedOptions().locale` - **not `expo-localization`**, which would
-be a native dependency and therefore an `app.json` edit, an `expo prebuild` and a full
-rebuild for one string Hermes already has.
+The initial value is `Intl.DateTimeFormat().resolvedOptions().locale` — **not `expo-localization`**,
+which would be a native dependency, an `app.json` edit, an `expo prebuild` and a full rebuild for one
+string Hermes already has.
 
-`locale.web.ts` is the sibling. On the web the language is a property of the deployment
-rather than state: `setLocale` is a document navigation to the other tree and
-`subscribeToLocale` never fires. Every call site is written against the native signature
-and none of them knows the difference, so there are **still zero `Platform.OS` checks in
-`src/`**.
+`locale.web.ts` is the sibling: on the web the language is a property of the deployment, so `setLocale`
+is a document navigation and `subscribeToLocale` never fires. Every call site is written against the
+native signature, so there are **still zero `Platform.OS` checks in `src/`**.
 
 ### The catalogues
 
-`en.ts` is the schema: `MessageKey` is `keyof typeof en`, and `ru.ts` is typed
-`Record<MessageKey, string>`, so a missing or extra key is a **compile error**.
-`catalogue.test.ts` covers only what a type cannot see - an empty value, a placeholder
-dropped in translation, a string left in English.
+`en.ts` is the schema — `MessageKey` is `keyof typeof en`, `ru.ts` is `Record<MessageKey, string>`, so a
+missing or extra key is a **compile error**. `catalogue.test.ts` covers only what a type cannot see: an
+empty value, a dropped placeholder, a string left in English.
 
-Counted messages are separate (`en.plurals.ts` / `ru.plurals.ts`) because English needs two
-forms and **Russian needs three**. `pluralCategory` is hand-rolled rather than
-`Intl.PluralRules`, the same call `normalizeText.ts` makes about its combining-mark range:
-Hermes delegates `Intl` to Android's ICU, a different implementation from the Node the tests
-run on. The 11-14 exception is checked first, or you get "11 страна".
+Counted messages are separate (`en.plurals.ts` / `ru.plurals.ts`) because English needs two forms and
+**Russian needs three**. `pluralCategory` is hand-rolled rather than `Intl.PluralRules`, the same call
+`normalizeText.ts` makes about its combining-mark range: Hermes delegates `Intl` to Android's ICU, a
+different implementation from the Node the tests run on. The 11–14 exception is checked first, or you
+get "11 страна".
 
-**Every leftover English table is a bug of the same shape**, and one shipped: `FieldPicker`
-kept a local `FIELD_HINTS` map, so a Russian round showed "Страна" over "Name the
-highlighted country". If you add a picker, its words go in the catalogue.
+**Every leftover English table is a bug of the same shape**, and two shipped: `FieldPicker` kept a local
+`FIELD_HINTS` map, and `AnswerField` passed its own `'Your answer'` / `'e.g. 12,000,000 or 12m'` literals
+to `TextInput` while `quiz.placeholder.*` sat in both catalogues, correct and **entirely unreferenced** —
+which a type cannot see, since `ru.ts` is complete either way. Words go in the catalogue AND get read
+back out of it.
 
 ### The data
 
-`countryFacts.json` gained `translations.ru` per record, plus `languageCodes` - mledoze
-keys languages by ISO-639-3 and the record kept only the English names, and the Russian
-dictionary joins on the code.
+`countryFacts.json` gained `translations.ru` per record, plus `languageCodes` — mledoze keys languages by
+ISO-639-3 and the record kept only English names, and the Russian dictionary joins on the code.
 
 | Source | What it gives |
 |---|---|
@@ -1419,976 +1191,374 @@ dictionary joins on the code.
 | `src/data/ru/places.json` | 6 regions + 24 subregions |
 | `src/data/ru/countries.json` | per-country overrides and extra aliases (Голландия, Бирма, США) |
 
-Hand-authored, keyed on **codes rather than positions** so a mis-join is impossible, and
-**regenerated with `npm run enrich:data`** - offline, geometry untouched. A missing entry
-fails the build (`russianIntegrityProblems`), checked over all 250 records rather than the
-193 quiz countries, because the info sheet can reach any country with geometry.
+Hand-authored, keyed on **codes rather than positions** so a mis-join is impossible, and regenerated with
+`npm run enrich:data`. A missing entry fails the build (`russianIntegrityProblems`), checked over all 250
+records rather than the 193 quiz countries, because the info sheet can reach any country with geometry.
 
-`COUNTRY_FACTS` builds both locales' tables **eagerly at module load**, so each one's object
-identity is permanently stable - the property every derived structure downstream depends on.
-The cost is ~250 small objects; `worldGeoJson` is not involved at all, because it reads only
-`population` and `area`, neither of which is a word. That is why the 1.6 MB outline source
-is locale-invariant and stays a true module constant.
+`COUNTRY_FACTS` builds both locales' tables **eagerly at module load**, so each one's object identity is
+permanently stable — the property every derived structure depends on. `worldGeoJson` is not involved at
+all, because it reads only `population` and `area`, neither of which is a word. That is why the 1.6 MB
+outline source is locale-invariant and stays a true module constant.
 
-**Subregion and region identifiers stay English.** They are the `?subregions=` URL param,
-the key `countriesIn` filters on, and what Maestro types; only the display label is
-translated, through `placeNames.ts`. Same trade `FieldId` and `QuizMode` already make.
-`QUIZ_COUNTRIES_BY_LOCALE` keeps **both arrays in the English sort order** for a related
-reason: `buildQuiz` shuffles that array with a seed, so re-sorting the Russian pool would
-make one seed give two different rounds. A pool order is not a display order - the search
-index, which a person actually reads, *is* re-sorted per language.
-
-### Corrections to world-countries
-
-`scripts/countryOverrides.mjs` exists because of a bug this work uncovered rather than
-caused: **`enrich-country-facts.mjs` rebuilds every record from the pinned dataset**, so any
-hand-edit to `countryFacts.json` is silently reverted the next time it runs - with no error,
-into a minified single-line file nobody diffs. Three capitals corrected in August were one
-`npm run enrich:data` away from disappearing.
-
-They are now stated in code, where the build asserts them, exactly as `NE_TO_ISO3` and
-`ISO3_TO_WORLD_BANK` are. An override that has *stopped* differing from upstream also fails
-the build, so a fix upstream tells you to delete a line instead of rotting.
+**Subregion and region identifiers stay English.** They are the `?subregions=` URL param, the key
+`countriesIn` filters on, and what Maestro types; only the display label is translated. Same trade
+`FieldId` and `QuizMode` make. `QUIZ_COUNTRIES_BY_LOCALE` keeps **both arrays in the English sort order**
+for a related reason: `buildQuiz` shuffles that array with a seed, so re-sorting the Russian pool would
+make one seed give two different rounds. A pool order is not a display order — the search index, which a
+person reads, *is* re-sorted per language.
 
 ### Grading in Russian
 
 Four things needed real work; everything else was already language-neutral.
 
-- **`NAME_INDEX` is per locale**, and this is the load-bearing one. `австрия` is two edits
-  from `австралия` on a nine-letter target - inside the typo budget - so without a Russian
-  index the confusable guard is blind and the round awards Austria's point for Australia.
-  `gradingRu.test.ts` sweeps all 193x193 pairs, mirroring the English suite.
-- **The head-noun rule is not the same rule.** English puts the head last ("South African
-  rand"); Russian puts it either side - `российский рубль` but `фунт стерлингов` and
-  `доллар США`. So Russian offers both ends, minus anything that looks adjectival
-  (`российский`) or is an abbreviation (`США`), and the existing ambiguity check discards
-  the rest. Offering both ends in English would accept "south" for the rand.
-- **Inflection.** `рублей` is two edits from `рубль` on a five-letter target, so the typo
-  budget cannot reach it. `russianStem` crudely trims one ending, applied **to both sides**
-  and **only to the set fields** - never to country names, where a near miss means a
-  different country and the guard is doing safety work. It runs on already-normalized text,
-  where `й` has become `и`, so the ending list carries both spellings.
-- **`parsePopulation` accepts `млн`, `млрд`, `тыс`** as well as the English words. The comma
-  is still stripped rather than read as a decimal point: `1,400` is ambiguous between the
-  two conventions, and the tie is broken the way that keeps `68,000,000` working.
+- **`NAME_INDEX` is per locale**, and this is the load-bearing one. `австрия` is two edits from
+  `австралия` on a nine-letter target — inside the budget — so without a Russian index the confusable
+  guard is blind and the round awards Austria's point for Australia. `gradingRu.test.ts` sweeps 193×193.
+- **The head-noun rule is not the same rule.** English puts the head last ("South African rand"); Russian
+  puts it either side — `российский рубль` but `фунт стерлингов`, `доллар США`. So Russian offers both
+  ends, minus anything adjectival (`российский`) or an abbreviation (`США`), and the existing ambiguity
+  check discards the rest. Offering both ends in English would accept "south" for the rand.
+- **Inflection.** `рублей` is two edits from `рубль` on a five-letter target, outside the budget.
+  `russianStem` crudely trims one ending, applied **to both sides** and **only to the set fields** —
+  never to country names, where a near miss means a different country and the guard is doing safety work.
+  It runs on already-normalized text, where `й` has become `и`, so the ending list carries both spellings.
+- **`parsePopulation` accepts `млн`, `млрд`, `тыс`**, the bare `т`/`м` a number keypad makes easy, and the
+  English `k`/`m`/`b`. Spaces of every width are stripped, so the app's own Russian formatting — which
+  groups with a thin space — parses back as typed.
+- **The comma is the decimal point in Russian, so the parser is told which language it is reading.** It
+  used to be stripped in both and `1,4 млрд` graded as fourteen billion — ten times the answer, marked
+  wrong, with the panel echoing back a figure nobody typed. `parsePopulation` and `gradeNumeric` take a
+  `locale` the way `formatPopulation` always has, threaded from `gradeField`; that also closes a latent
+  mismatch where `gradeNumeric` formatted its reveal with the *ambient* locale while the round graded
+  with the passed one. **Several commas are grouping in both languages**, because a decimal has one
+  point — which keeps `68,000,000` working in a Russian round. One shape stays ambiguous, a lone comma
+  with three digits after it: `1,400` is 1.4 in Russian and 1400 in English, settled per language rather
+  than guessed at per number. Both separators at once (`1.000,5`) is rejected, not guessed.
 
-A Russian round also accepts the **English** names, deliberately: a bilingual player typing
-"Russia" has not got the question wrong, and a superset makes the confusable guard stricter
-rather than looser, because more strings are claimed by some country.
+A Russian round also accepts the **English** names, deliberately: a bilingual player typing "Russia" has
+not got it wrong, and a superset makes the confusable guard *stricter*, because more strings are claimed
+by some country.
 
-`normalizeText` needed no structural change. Its NFD pass already folds `ё` to `е`, which
-is exactly the tolerance Russian users expect - an accident worth the test that pins it.
+`normalizeText` needed no structural change — its NFD pass already folds `ё` to `е`, which is exactly the
+tolerance Russian users expect. An accident worth the test that pins it.
 
 ### Map labels carry both languages
 
-`textPropertyFor(field, locale)` returns `tName` for English (**unsuffixed**, so nothing
-existing moved) and `tNameRu` for Russian, and `labelGeoJson` writes both onto the same
-features in one pass.
+`textPropertyFor(field, locale)` returns `tName` for English (**unsuffixed**, so nothing existing moved)
+and `tNameRu` for Russian, and `labelGeoJson` writes both onto the same features in one pass.
 
-That is the whole safety argument. CLAUDE.md calls replacing `<GeoJSONSource data>` on a
-live map the riskiest unproven operation in the app; a settings toggle must not be on that
-path. Baking both languages onto one source means a switch changes only `text-field` and
-`filter` - a layout-property change, no re-upload. The cost is ~10 extra small properties on
-240 features. `MapScreen.test.tsx` asserts both sources come back `toBe`-identical across a
-language change.
+That is the whole safety argument: replacing `<GeoJSONSource data>` on a live map is the riskiest
+operation in the app, and a settings toggle must not be on that path. Baking both languages onto one
+source means a switch changes only `text-field` and `filter` — a layout-property change, no re-upload.
+The cost is ~10 extra small properties on 240 features. `MapScreen.test.tsx` asserts both sources come
+back `toBe`-identical across a language change.
 
-The **fit threshold is genuinely per-locale**, not merely suffixed: Russian names are longer
-and Cyrillic is measured a little wider (`CYRILLIC_GLYPH_RATIO` 0.60 against 0.55, and
-**English stays at exactly 0.55** so no English label moves). It is not monotone, though -
-`Чехия` is shorter than `Czechia` - so 41 of 240 thresholds go the other way and the test
-asserts the ordering rather than a rule.
-
-The bundled Noto Sans already covers the **entire** Cyrillic block plus `№`, so none of this
-needed a font change, an `app.json` edit or a rebuild. Verified by parsing its cmap.
-
-### The chrome width budget
-
-CLAUDE.md's old figure was stale: the top-right row is ~113 dp, not ~187, because
-`SearchLaunchButton` is a glyph button now. Measured with the project's own estimator
-against the 379 dp available at 411 dp:
-
-| | left row | right row | total |
-|---|---|---|---|
-| English | 186 | 147 | 333 |
-| Russian | 204 | 151 | **355** |
-
-24 dp of slack in Russian, and only because the language toggle is a **compact two-letter
-pill** (10 dp padding, not 14) and the quiz button says **`Тест`, not `Викторина`** - which
-alone would overflow the row. `chromeWidth.test.ts` sweeps every fill mode by label field by
-locale against the budget, so the overlap CLAUDE.md records actually shipping once is now a
-red test rather than a device discovery.
+The **fit threshold is genuinely per-locale**: Russian names are longer and Cyrillic measures wider
+(`CYRILLIC_GLYPH_RATIO` 0.60 against 0.55, and **English stays at exactly 0.55** so no English label
+moves). It is not monotone — `Чехия` is shorter than `Czechia` — so 41 of 240 thresholds go the other
+way, and the test asserts the ordering rather than a rule.
 
 ### The web ships twice
 
-`app.config.js` layers over `app.json` and sets `experiments.baseUrl` from
-`EXPO_PUBLIC_LOCALE`. **With that variable unset it resolves to exactly the config
-`app.json` already described**, so every native build is unchanged - do not export it in
-your shell.
+`app.config.js` layers over `app.json` and sets `experiments.baseUrl` from `EXPO_PUBLIC_LOCALE`. **With
+that variable unset it resolves to exactly what `app.json` already described**, so every native build is
+unchanged — **do not export it in your shell**, or a native build gets a `/ru` base URL and every bundled
+asset resolves to a path that does not exist in an APK.
 
-`npm run build:web` now runs two exports and generates two service workers. Three things
-about it are load-bearing:
+`npm run build:web` runs two exports and generates two service workers. Three load-bearing things:
 
 - **English exports FIRST.** `expo export` calls `removeAsync(outputDir)` before writing, so
   `--output-dir dist` running second would delete `dist/ru` with it.
-- **Each tree is self-contained** - its own flags, icons, MapLibre worker and manifest,
-  because **a service worker cannot intercept requests outside its own scope**. A page at
-  `/ru/` reaching for `/flags/ru.svg` at the root works online and fails offline, which is
-  the one requirement this project has. `withBaseUrl` covers the four hand-written absolute
-  URLs (the MapLibre worker, the flag SVGs, the 249 map-flag PNGs, and the links in
-  `+html.tsx`). ~3.4 MB of duplication buys that; `dist` goes from 9 MB to 20.
-- **`navigateFallbackDenylist` needs a `(/|$)` alternation, not a trailing slash.**
-  `vercel.json` sets `trailingSlash: false`, so the canonical Russian URL is `/ru` with no
-  slash - and a pattern anchored on `/ru/` does not match it. The root worker then served its
-  own `/index.html` there, the English bundle booted at a Russian URL, and expo-router
-  rendered "Unmatched Route". It looked like a routing bug and was a one-character regex bug.
+- **Each tree is self-contained** — its own flags, icons, MapLibre worker and manifest, because **a
+  service worker cannot intercept requests outside its own scope**. A page at `/ru/` reaching for
+  `/flags/ru.svg` works online and fails offline, which is the one requirement this project has.
+  `withBaseUrl` covers the four hand-written absolute URLs. ~3.4 MB of duplication; `dist` goes 9 → 20 MB.
+- **`navigateFallbackDenylist` needs a `(/|$)` alternation, not a trailing slash.** `vercel.json` sets
+  `trailingSlash: false`, so the canonical Russian URL is `/ru` with no slash, and a pattern anchored on
+  `/ru/` does not match it. The root worker then served its own `/index.html` there, the English bundle
+  booted at a Russian URL, and expo-router rendered "Unmatched Route". It looked like a routing bug and
+  was a one-character regex bug.
 
-The build asserts per tree: bundle size under the precache limit, `<html lang>` correct, the
-right worker registered, and the pre-rendered markup in the right language. That last check
-reads the **HTML, not the JS bundle** - both bundles contain both catalogues, and Metro
-escapes non-ASCII in minified output, so `Обычная` is literal text in neither.
+The build asserts per tree: bundle size under the precache limit, `<html lang>` correct, the right worker
+registered, and the pre-rendered markup in the right language. That last check reads the **HTML, not the
+JS bundle** — both bundles contain both catalogues, and Metro escapes non-ASCII in minified output.
 
-`EXPO_PUBLIC_LOCALE` is a build input to `app.config.js` **and nothing else**: `baseUrl` is
-part of Metro's transform cache key and `EXPO_PUBLIC_*` is not, so app code reads the locale
-from `EXPO_BASE_URL` instead. Otherwise the second export could reuse the first's cached
-transform and ship the wrong language, successfully and silently.
+`EXPO_PUBLIC_LOCALE` is a build input to `app.config.js` **and nothing else**: `baseUrl` is part of
+Metro's transform cache key and `EXPO_PUBLIC_*` is not, so app code reads the locale from `EXPO_BASE_URL`
+instead. Otherwise the second export could reuse the first's cached transform and ship the wrong
+language, successfully and silently.
 
-### What the tests pin, and what they cannot
+### What the tests pin here
 
-`jest.setup.ts` pins the locale to English **twice** - once at setup load, once per test.
-Both are needed, and this is not boilerplate: the singleton seeds from the machine's own
-locale, which on a Russian-locale Windows box is `ru-RU`, and a `describe` body that builds a
-fixture with `getCountryFacts('FRA')` reads it long before any `beforeEach` fires. Without
-the top-level pin that fixture came back as Франция and the failures looked nothing like the
-cause.
+`jest.setup.ts` pins the locale to English **twice** — once at setup load, once per test. Both are
+needed: the singleton seeds from the machine's own locale, which on a Russian-locale Windows box is
+`ru-RU`, and a `describe` body building a fixture with `getCountryFacts('FRA')` reads it long before any
+`beforeEach` fires. Without the top-level pin that fixture came back as Франция and the failures looked
+nothing like the cause.
 
-Not covered, and worth knowing:
+**No Maestro flow for Russian.** When one is written, note that persisting the locale makes the suite
+order-dependent: a `locale.yaml` sorts before `map-labels.yaml`, `mastery.yaml` and `quiz.yaml`, so a
+mid-run abort would leave Russian selected and fail all three on English strings. **`clearState: true` on
+every `launchApp` becomes mandatory.**
 
-- **No Maestro flow for Russian.** When one is written, note that persisting the locale
-  makes the suite order-dependent: a `locale.yaml` sorts before `map-labels.yaml`,
-  `mastery.yaml` and `quiz.yaml`, so a mid-run abort would leave Russian selected and fail
-  all three on English strings. `clearState: true` on every `launchApp` becomes mandatory.
-- **Nothing has run on Android**, and the **offline acceptance test has not been re-run**.
-  Nothing here adds a network call - the dictionaries are bundled - but the web half changed
-  how resources resolve, which is exactly the class of change that gate exists for.
-- **Whether Russian map labels are legible**, and how much sparser they are. That is a
-  screenshot; Maestro cannot see inside the GL surface.
+## The web target
 
-## Country search
+The same app runs in a browser — phone and desktop — as an installable PWA that works offline. Metro
+picks the platform by file extension, so the split is a set of `.web.tsx` siblings rather than
+`Platform.OS` branches. There are still **zero** `Platform.OS` checks in `src/`.
 
-A pill in the top-right row opens `/search`. Type a name, pick a result, and the map behind it
-highlights that country exactly as a tap would — same `selectedIso3`, same filtered layer, same info
-sheet — and flies the camera to frame it in the part of the map the sheet does not cover.
-
-### It is a route, not a dropdown
-
-**This is the structural answer to the paint bug, not a styling preference.** A results list that
-appears as you type is precisely "a view inserted over the MapLibre surface after the initial mount",
-which lays out perfectly and never paints. `/search` has no map on it, so the bug is unreachable rather
-than worked around — the same reasoning that made the quiz panel a flex sibling.
-
-Which means the **opposite** rule applies on that screen: ordinary conditional rendering is correct
-there. The always-mounted slots in `ChipInput`, the `display: 'none'` rows in `AnswerField` and the
-parked `ChoroplethLegend` exist only because those views share a window with the map surface. Copying
-that discipline into `/search` would mount 237 rows forever for nothing. The file says so in its own
-docstring, because someone will otherwise "fix" it.
-
-### The handover is a subscription, not a params round-trip
-
-`/search` is **pushed** over `MapScreen`, so the map stays mounted underneath the whole time and only
-needs telling what was picked. `src/search/pendingCountry.ts` is a module singleton with
-`selectCountry` / `subscribeToCountrySelection`; the screen announces, then calls `router.back()`.
-
-Three alternatives were rejected, each for a concrete reason:
-
-- `router.back()` cannot carry params.
-- `router.replace('/', { params })` would mount a **second `MapScreen`** and with it a second MapLibre
-  surface — an expensive teardown to deliver one ISO-3 code.
-- `useFocusEffect`, the obvious read-on-arrival shape, calls `useNavigation()` and so needs navigator
-  context at render time. `QuizLaunchButton` documents that the map's chrome deliberately uses the
-  imperative `router` singleton **so `MapScreen.test.tsx` can keep rendering the screen bare, with no
-  router mock at all**. A subscription keeps that true — and it fires while the search screen is still
-  sliding away, so the fly has already started by the time the map is uncovered.
-
-`SearchLaunchButton` uses the imperative `router.push('/search')` for the same reason.
-
-### Matching — forgiving in the opposite direction to grading
-
-`src/search/countrySearch.ts` reuses `normalizeText`, `nameAliases` and `editDistance`/`allowedEdits`
-from the quiz. **The duty is inverted, which is worth knowing before "fixing" it**: grading must
-*reject* a near-miss, because "Gambia" for Zambia would award a point nobody earned; search must
-*offer* one, because not knowing the spelling is why the box is open. So there is no confusable guard
-here, and partial input — which grading refuses outright — is the normal case.
-
-Ranked in tiers, best first, ties broken alphabetically (the index is pre-sorted and `sort` is stable):
-exact name, exact alias, name prefix, alias prefix, name word-start, alias word-start, name substring,
-alias substring, fuzzy. Ordinal rather than scored, because the tiers really are ordinal — and because
-`editDistance(a, b, max)` returns `max + 1` once the budget blows, so it may only be compared against a
-threshold, never used as a ranking score.
-
-- **Both the spaced and the space-free forms are compared.** `normalizeText` *deletes* hyphens and
-  apostrophes rather than replacing them with a space, so "Guinea-Bissau" indexes as `guineabissau`
-  while a player types `guinea bissau`. Squashing both sides closes that, and covers "timor leste" and
-  "bosnia herzegovina" too.
-- **Fuzzy is skipped below 4 characters.** `allowedEdits` returns 0 under 5, so a short fuzzy pass is a
-  pure no-op that only costs time — over 237 countries, on every keystroke.
-- **An empty query lists all 237 alphabetically**, uncapped; a real query caps at 50. The screen is a
-  browsable index of the world before a key is pressed, which costs nothing and is why the Maestro flow
-  can assert on `country-result-AFG`.
-
-The pool is **237**: every ISO-3 in *both* `countries.geo.json` and `countryFacts.json`. Deliberately
-wider than the quiz's 193 UN members — the map draws Greenland, Puerto Rico and Western Sahara, so
-search has to find them. The three excluded are exactly the geometry-only `FACTLESS_ALLOWLIST` entries
-(`SOL`, `CYN`, `KAS`), which would open an empty info sheet.
-
-`matchedAs` carries the alias that matched so the row can show it. Offering "Netherlands" for
-"holland" with no explanation reads like a bug, and that line is the only place alias support is
-discoverable at all.
-
-### Framing around the info sheet
-
-`getCountryCameraStop` centres a bbox in the **whole** viewport. That is right for the quiz, whose
-panel is a flex sibling, and wrong here, where the sheet is a genuine absolute overlay: the map is
-full-screen while only part of it is visible. So `quizCamera.ts` gained **`getFocusedCameraStop`** —
-the same arithmetic plus a focus rect. `getCountryCameraStop` is untouched so quiz framing cannot
-regress, and a test asserts the two agree exactly when the focus rect *is* the whole viewport.
-
-The camera always points at the viewport's centre, so putting a country somewhere else means pointing
-the camera **away** from it by the offset between the two centres. Zoom is fitted to the focus rect,
-then the centre is shifted by `dx / worldPx` and `dy / worldPx` at that zoom.
-
-**Both axes shift with the same sign, and the missing negation is deliberate.** `mercatorY` is 0 at the
-north pole and grows southward; screen y also grows downward. The two conventions cancel.
-
-`getMapFocusRect` (in `infoSheetLayout.ts`) says which band that is:
-
-| | Portrait | Landscape |
+| | native | web |
 |---|---|---|
-| Top | `safeArea.top + MAP_CHROME_HEIGHT` | same |
-| Bottom | the top of the sheet, 55% down | the foot of the window |
-| Width | full | `width − panelWidth` |
+| Map | `@maplibre/maplibre-react-native` | `maplibre-gl` |
+| Style | `OFFLINE_STYLE` (`font-faces` + `asset://`) | `WEB_OFFLINE_STYLE` (no `font-faces`, no `glyphs`) |
+| Escape / keyboard play | no-ops | `useDismissKey.web.ts`, `keyboardPlay.web.ts` |
+| Window size | `useWindowDimensions` | `useWindowSize.web.ts` — DOM truth, hydration-safe |
+| Storage | AsyncStorage | `masteryStorage.web.ts`, `localeStorage.web.ts` |
 
-- **It uses the sheet's MAXIMUM height, not its measured one.** The card is content-height and only
-  knows its extent after an `onLayout` pass; threading that up would change the camera's inputs once
-  per country and fire the fly **twice per search**. `PORTRAIT_MAX_HEIGHT_FRACTION` is the one literal,
-  and `CountryInfoSheet`'s `maxHeight` derives from it so the two cannot drift.
-- **`MAP_CHROME_HEIGHT` is why the band does not start at the top of the window.** Without it a country
-  is centred in the whole area above the sheet and its northern edge lands under the toggle —
-  Liechtenstein's tip disappeared behind it. An estimate mirroring `MapControls`' own spacing rather
-  than a measurement, for the same re-fire reason.
+`worldMapProps.ts` holds the props and camera constants both implementations share. Everything above the
+renderer — `worldGeoJson`, `labelGeoJson`, the ramps, `labelFilter`, `getWorldFitZoom`, `pickCountry`,
+all of `quizCamera.ts` — is used unmodified. **The style spec is the portability layer**, which is why
+this port is small.
 
-### The pole clamp — load-bearing, and found by prototyping
+### Traps, each of which cost real time
 
-Without it, **searching Russia in portrait sends the camera to latitude −54** and Russia leaves the top
-of the screen entirely. Its fit zoom is already at the floor, so the world is barely taller than the
-screen and the 232 dp the offset wants is ~45% of the whole globe.
+- **MapLibre invents a viewport rather than waiting for one.** Given a zero-sized container it does not
+  warn — it falls back to a **400x300** canvas, so every camera stop afterwards is arithmetic against a
+  viewport that does not exist. Resizing "fixes" it because that finally tells the transform the truth.
+  `WorldMap.web.tsx` waits for a measured container before creating the map, ignores zero sizes from its
+  `ResizeObserver` (a navigator reports one while `/search` sits over the map), re-syncs the transform
+  before every stop, and holds a stop that arrives too early rather than dropping it.
+- **React keeps the server's `className` on a hydration mismatch.** `web.output: "static"` renders every
+  route in Node, where there is no window, so responsive branches take their smallest path — and the
+  corrected classes computed on the client never reach the DOM. Nothing throws. Anything responsive in a
+  FIRST render must use `useWindowSize`. Diagnose by comparing `element.className` against
+  `__reactProps$*.className`.
+- **`reactCompiler: true` punishes extracting a subscription into a hook.** Moving `useWindowDimensions()`
+  out of a component body changed what the compiler memoises; the quiz then kept a stale layout through a
+  rotation and `.maestro/quiz.yaml` failed 0/3 against master's 3/3. `quizScreenBox.ts` is a PURE function
+  taking the window for exactly this reason — **keep the subscription inline.**
+- **A redeploy takes two visits to appear** unless the page reloads on `controllerchange`: the open page
+  keeps its worker's assets. Every conclusion drawn from that first load describes the previous build. Bit
+  us twice.
+- **Workbox's 2 MB default silently skips the bundle**, which is ~5 MB. The worker then registers,
+  activates, looks perfect and fails offline. `scripts/build-web.mjs` asserts the bundle is under the
+  limit rather than trusting the summary line.
+- **Windows ships no country flag emoji at all** — Segoe UI Emoji has none. Not fixable in CSS; this is
+  part of why flags are SVGs everywhere now.
 
-```ts
-const half = viewport.height / 2 / worldPx;
-const camY = half >= 0.5 ? 0.5 : Math.max(half, Math.min(1 - half, wanted));
-```
+### Framing is tested end to end, on purpose
 
-Exactly five countries reach it on today's geometry — `USA`, `RUS`, `GRL`, `CAN`, `ATA` — and the list
-is pinned in `focusedCamera.test.ts`. A sixth appearing there means the geometry moved, not the maths.
+`searchFraming.test.ts` asserts a searched country is centred in, and fits inside, the band a person can
+actually see — across five real viewports and five awkward countries.
 
-Its companion is **`getViewportFitZoom`** in `cameraFit.ts`: the lowest zoom at which one world covers
-*both* axes. `getWorldFitZoom` only answers for the width, which is all the launch camera needs because
-MapLibre clamps the height itself. A stop fitted to *part* of the screen is different — asking for a
-zoom MapLibre will override means the offset was computed against a scale the map never used. This is a
-floor for the computed **stop** only; do not raise `Camera`'s `minZoom`, which is the pinch limit.
+It derives that band from **independently measured facts about the UI, never from the code under test.**
+That is the whole point: every earlier check asked "did it land at the centre of `getMapFocusRect(...)`",
+which agrees with that function however wrong it is — and is why framing measured perfect while a phone
+was visibly wrong. Reintroducing the original bug fails 28 of its 55 cases.
 
-### The rest of the wiring
+Two things it must keep doing, both of which fooled its own first draft: measure the country **as drawn**
+(Mercator is not linear, so a tall country's latitude midpoint is not its visual centre), and via
+projected corners (New Zealand's bbox crosses the antimeridian, so `(west + east) / 2` lands in the
+Atlantic).
 
-- `MapScreen` holds `focus: { iso3, nonce }`, set **only by a search**, never by a tap. The **nonce is
-  required**: keying on the iso3 alone yields an identical stop when the same country is searched
-  twice, and an identical stop is not a change, so the map would simply not move.
-- **The stop is state, not a memo, and is never withdrawn.** `WorldMap` spreads `{...(camera ?? {})}`,
-  so handing back `undefined` after a stop would take the native `stop` prop from
-  `{center, zoom, duration, easing}` to `{}` — a real prop change pushed into a renderer Jest replaces
-  with a stub. Clearing `focus` stops the recompute and leaves the last stop in place.
-- **A map press clears `focus`**, so a later rotation re-fits the map rather than yanking the camera
-  back to a country the user stopped looking at several gestures ago. Rotation *while* focused does
-  re-frame, which is correct and matches quiz mode.
-- **Explore `maxZoom` is 10**, matching the quiz. At 8 a 400 dp screen spans ~1.1° of longitude and
-  Monaco is a 22 dp dot — framed correctly and useless. It bounds interaction, not the launch camera,
-  so no Maestro coordinate tap depends on it.
+### Deploying
 
-### `disableFullscreenUI` is not optional
+`vercel.json` pins the build to `npm run build:web` and the output to `dist/`. The headers are not
+decoration: **`sw.js` must not be cached** or a deploy never reaches anyone, and the MapLibre worker needs
+a JavaScript content type. `cleanUrls` serves `/search` and `/quiz/play` from the per-route HTML the
+static export emits. Assets under `_expo/static/` and `assets/` are content-hashed and immutable;
+everything else the worker precaches carries a Workbox revision, so it updates despite the HTTP cache.
 
-Found on the emulator, not in a test: **in landscape Android decides the field has too little vertical
-room and replaces the entire screen with its own IME "extract" editor** — a white full-screen box and a
-SEARCH button, with the app's screen and its results nowhere to be seen. `disableFullscreenUI` prevents
-it. `SearchScreen.test.tsx` asserts the prop, which is as close as Jest can get.
-
-The quiz's own `TextInput`s (`AnswerField`, `ChipInput`) do **not** set it and are likely to have the
-same problem in landscape — unverified, because `.maestro/quiz.yaml` only types in portrait.
-
-### Where the chrome actually is
-
-Search and quiz share **one row** in the top-right, at the same height, so the chrome does not grow
-downward into the portrait Greenland tap at `19%,13%`. Growing that row leftward is free — the nearest
-coordinate tap is Russia at `81%,20%`, some 80 dp below it. **Keep any future control the same height,
-and never put it on a second line.**
-
-One correction to an older claim in this file: top-right is *not* free in both orientations. With the
-card open in landscape it docks to the right edge full-height and **covers both pills**. That is
-pre-existing behaviour rather than something search introduced, and it only bites while the card is
-open — but do not assume the pills are reachable in landscape.
-
-## Which country a press selects — `pickCountry.ts`
-
-`GeoJSONSource.onPress` returns **every feature the hitbox touches**, not the one under the finger, and
-in an arbitrary order. Taking `features[0]` is wrong and was a real, user-visible bug: "sometimes the
-country above or below my fingertip gets selected".
-
-Measured on the device, a press on **Paris** returned
-`["GBR","ITA","NLD","BEL","LUX","CHE","DEU","FRA"]` — France **last** of eight, so the old code selected
-Great Britain. Berlin returned Czechia first, Rome returned Bosnia first.
-
-The fix is two-part and both halves matter:
-
-1. **`hitbox` is tightened to 10 dp** (from MapLibre's 44 dp default). At zoom 0 the default spans ~30°
-   of longitude and drags half a continent into every press. The tighter box also means open water
-   yields *no* candidates, which is what lets `Map.onPress` deselect.
-2. **`pickCountry`** resolves candidates against the pressed coordinate: prefer the country whose
-   polygon actually **contains** the point (`@turf/boolean-point-in-polygon`), and fall back to the
-   nearest candidate only when none does. The fallback keeps small islands and thin coastal states
-   reachable — and correctly handles presses into the Caspian, which is inside no country.
-
-Verified on hardware: 6/6 European capitals select correctly, plus a Sahara sweep at 7/8 exact
-containment (the 8th was a press into the Caspian Sea, resolved by the fallback).
-
-**Containment is what makes microstates usable.** Their polygons existing is not enough — at any zoom
-where Liechtenstein is visible, the 10 dp hitbox still returns Switzerland and Austria alongside it, and
-Dominica competes with France (Natural Earth draws Guadeloupe and Martinique as part of FRA). Both cases
-are pinned in `__tests__/pickCountry.test.ts`.
-
-**A sharper border can change the right answer.** The recorded Sahara press at `10.0E, 25.29N` used to
-be inside Libya and is now inside Algeria — 110m smoothed that stretch of border eastward, and 50m and
-10m both put the point in Algeria, as does the real border near Ghat. The test expectation moved with
-it; the property under test did not (LBY is still first in the candidate list, so `features[0]` still
-fails). If a `pickCountry` expectation flips after a data change, check the geometry before the code.
-
-## Camera
-
-`INITIAL_CENTER = [10, 20]`. The zoom is **not** a constant: both `initialViewState.zoom` and `minZoom`
-come from `getWorldFitZoom(windowWidth)` in `src/map/cameraFit.ts`.
-
-**Do not switch back to `bounds`.** Fitting `[-180,-60,180,85]` on a tall phone fills the screen height
-with the latitude range and crops most of the longitude range — half the world ends up off-screen.
-
-**Zoom 0 is a request, not a guarantee.** MapLibre clamps the camera so the world covers the viewport,
-so on a tall phone the effective zoom is higher than asked — measured at ~0.61 on the S25, where the
-world's full height maps exactly onto the 2340 px screen and only ~46% of the longitude range is
-visible. Don't be surprised when a projection calculation assuming zoom 0 disagrees with reality;
-derive the mapping empirically instead.
-
-**Why the zoom floor is derived, not pinned.** That upward clamp only saves you in portrait. The world is
-512 dp wide at zoom 0, and a landscape window is *wider* than that — 914 dp on the emulator — so
-MapLibre tiles the world horizontally instead: a cold launch into landscape rendered ~1.8 copies with a
-seam through the Pacific. `getWorldFitZoom` returns `max(0, log2(width / 512))`, which is **exactly 0 in
-portrait** (so the portrait tap points are untouched) and 0.836 in landscape. Keep the `max(0, …)`: it is
-what makes portrait a no-op, and `log2(0)` would otherwise send `-Infinity` to the native camera.
-
-**A cold launch and a rotation do not settle at the same camera.** Rotating a running app keeps the
-zoom it already had; launching fresh into landscape starts from the fit zoom. The two projections differ
-by enough to change which country a percentage tap hits — 32%,56% is Brazil after a rotation but Guyana
-on a cold launch. Derive Maestro points from a cold launch in the orientation the flow pins.
-
-## Local toolchain (verified 2026-08-16)
+## Toolchain
 
 | | |
 |---|---|
 | JDK | Temurin **17.0.20** at `C:\Program Files\Eclipse Adoptium\jdk-17.0.20.8-hotspot` |
 | `JAVA_HOME` / `ANDROID_HOME` | set at **User** scope |
-| Android SDK | `%LOCALAPPDATA%\Android\Sdk` — platforms **36** + 37.0, build-tools 36.0.0, cmdline-tools/latest |
-| Emulator | AVD **`Medium_Phone`** — API 33, x86_64, Play Store image, 4096 MB RAM, GPU auto |
+| Android SDK | `%LOCALAPPDATA%\Android\Sdk` — platforms 36 + 37.0, build-tools 36.0.0, cmdline-tools/latest |
+| Emulator | AVD **`Medium_Phone`** — API 33, x86_64, Play Store image, 4096 MB RAM |
 | Node / npm | 24.13.1 / 11.8.0 |
+| Maestro | `C:\Users\Boris\maestro\maestro\bin\maestro.bat`, **not on PATH**; runs natively on Windows |
 
-- Oracle **Java 8 JRE is still installed**; Temurin 17's `bin` sits ahead of it in the machine PATH.
-  Don't remove the Oracle entries.
-- Android PATH entries are **literal absolute paths**, not `%ANDROID_HOME%\...` — the user `Path`
-  registry value is `REG_SZ`, so `%VAR%` would never expand.
-- `sdkmanager` works but warns it is deprecated; `android sdk` is the replacement CLI.
+- Oracle Java 8 JRE is still installed; Temurin 17's `bin` sits ahead of it. Don't remove the Oracle
+  entries.
+- Android PATH entries are **literal absolute paths** — the user `Path` registry value is `REG_SZ`, so
+  `%VAR%` would never expand.
 
 ## Commands
 
 ```bash
-emulator -avd Medium_Phone
-npx expo start                     # leave running; r = reload, j = debugger, m = dev menu
-                                   # do NOT set CI=1 - it disables watch mode
+emulator -avd Medium_Phone         # launch DETACHED (PowerShell Start-Process)
+npx expo start                     # r = reload, j = debugger, m = dev menu
+                                   # do NOT set CI=1 — it disables watch mode
+adb reverse tcp:8081 tcp:8081
+adb shell am start -a android.intent.action.VIEW \
+  -d "geographyapp://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"
 
-# native build — only when native deps or app.json change
-npx expo run:android
+npx expo run:android               # native build — only when native deps or app.json change
 npx expo run:android --variant release
+cd android && ORG_GRADLE_PROJECT_reactNativeArchitectures=arm64-v8a ./gradlew.bat assembleRelease
 
-# tests
-npm test                           # jest, runs on the PC, no emulator needed
+npm test                           # jest, no emulator needed
 npm run typecheck
-npm run test:e2e                   # maestro, needs a running emulator/device
+npm run test:e2e                   # maestro, needs a running device
 npm run build:data                 # one-off, needs network; rewrites BOTH json files
-npm run enrich:data                # offline; rewrites countryFacts.json only
-npm run flags:data                 # offline; the flag SVGs, the PNG map rasters and 3 require
-                                   # maps. Rasterising 498 PNGs takes a couple of minutes.
+npm run enrich:data                # offline; countryFacts.json only
+npm run labels:data                # offline; polylabel anchors
+npm run flags:data                 # offline; SVGs + 498 PNGs + 3 require maps (~2 min)
 
-# web
 npm run web                        # expo start --web (dev; no service worker)
-npm run build:web                  # assets + icons + TWO exports + two service workers.
-                                   # English -> dist/, Russian -> dist/ru/. ~20 MB total.
-npm run serve:web                  # serve an existing dist/ on :4173
+npm run build:web                  # TWO exports + two workers. English -> dist/, Russian -> dist/ru/
+npm run serve:web                  # serve dist/ on :4173
 npm run web:phone                  # build and serve for a phone on the LAN
 # A service worker needs a SECURE context, so a LAN IP shows the app but never the PWA.
 # `adb reverse tcp:4173 tcp:4173` makes the phone treat it as localhost, which counts.
 # Load any route with `?debug` to get the live map on `window.__geoMap`.
 ```
 
+**The dev loop:** the dev APK is a shell containing native code plus a Metro client; JS edits hot-reload
+in about a second. Rebuild only when adding/removing a native dependency, editing `app.json`, or
+upgrading the SDK.
+
 ### A release build can package a stale JS bundle — `.json` is not a Gradle input
 
 **This bites precisely because the app's data lives in JSON.** `createBundleReleaseJsAndAssets`
-(`BundleHermesCTask`, the task that runs `expo export:embed`) declares its inputs as a file tree of
-**`**/*.js`, `.jsx`, `.ts` and `.tsx` only** — see
-`node_modules/@react-native/gradle-plugin/.../tasks/BundleHermesCTask.kt`. Editing
-`countryFacts.json`, `countries.geo.json` or `labelPoints.json` therefore does **not** invalidate it.
-Gradle marks the task `UP-TO-DATE`, `assembleRelease` reuses whatever bundle is sitting in
-`android/app/build/generated/assets/react/release/`, and the APK ships old data **with no warning at
-all** — the build succeeds and looks completely normal.
+(`BundleHermesCTask`) declares its inputs as a file tree of **`.js`, `.jsx`, `.ts`, `.tsx` only**.
+Editing `countryFacts.json`, `countries.geo.json` or `labelPoints.json` does **not** invalidate it. Gradle
+marks the task UP-TO-DATE, `assembleRelease` reuses whatever bundle is on disk, and the APK ships old data
+**with no warning at all**.
 
-`npx expo run:android` hides it entirely: debug is a debuggable variant, so the bundle task never runs
-and Metro serves the fresh file. So the symptom is "the emulator is right and the release APK is
-wrong", which reads like a bundling or minification bug and is not one.
+`npx expo run:android` hides it entirely: debug never runs the bundle task. So the symptom is "the
+emulator is right and the release APK is wrong", which reads like a minification bug and is not one. It
+found us on 2026-08-24: three corrected capitals, and the release APK showed only one.
 
-It found us on 2026-08-24. Three capitals were corrected — Eswatini, Equatorial Guinea, Sri Lanka —
-and the release APK showed only Eswatini's. The bundle on disk was dated two days before the commit,
-from a build made after the Eswatini edit but before the other two; every `assembleRelease` since had
-skipped the task.
+**The fix is `plugins/withJsonBundleInputs.js`**, registered in `app.json`, which widens that file tree
+with `**/*.json` and `assets/**/*.png` (excluding `.expo/`). It has to be a config plugin, because
+**`android/` is gitignored and regenerated by `expo prebuild`**.
 
-**The fix is `plugins/withJsonBundleInputs.js`**, registered in `app.json`, which widens that file
-tree with `sources.include("**/*.json")` (and excludes `.expo/`, whose generated JSON is volatile and
-would re-bundle for nothing). It has to be a config plugin and not a hand-edit to
-`android/app/build.gradle`, because **`android/` is gitignored and regenerated by `expo prebuild`** —
-the same reason the font goes in through `expo-font`'s plugin.
-
-Diagnosing a suspected recurrence takes one command — grep the built bundle for the string you expect:
+Diagnosing a recurrence takes one command:
 
 ```bash
 grep -c "Ciudad de la Paz" android/app/build/generated/assets/react/release/index.android.bundle
-ls -la android/app/build/generated/assets/react/release/index.android.bundle   # is it older than your edit?
+ls -la android/app/build/generated/assets/react/release/index.android.bundle   # older than your edit?
 ```
 
-An escape hatch if it ever happens again without touching the plugin: delete that generated directory,
-which makes the task's outputs missing and forces it to rerun. `--rerun-tasks` also works and rebuilds
-far more than you want.
-
+Escape hatch: delete that generated directory, which makes the task's outputs missing and forces a rerun.
 
 ### Architectures — this bites every time
 
-`ORG_GRADLE_PROJECT_reactNativeArchitectures` controls which ABIs get built. An x86_64-only APK **will
-not install on a phone** (`INSTALL_FAILED_NO_MATCHING_ABIS`), and an arm-only APK will not install on
-the emulator.
+`ORG_GRADLE_PROJECT_reactNativeArchitectures` controls which ABIs are built. An x86_64-only APK **will not
+install on a phone** (`INSTALL_FAILED_NO_MATCHING_ABIS`), and an arm-only APK will not install on the
+emulator.
 
-- emulator only, fastest: `x86_64`
-- phone only: `arm64-v8a`
-- both (current debug APK): `arm64-v8a,x86_64` — 157 MB debug, ~3.5 min incremental
+- emulator only, fastest: `x86_64` · phone only: `arm64-v8a` · both: `arm64-v8a,x86_64` (157 MB debug)
 - omit entirely for a store build, so all four ABIs are produced
 
 ### Testing on the physical phone
 
 ```bash
-adb devices                          # phone must show `device`, not `unauthorized`
-adb -s <serial> reverse tcp:8081 tcp:8081    # REQUIRED: lets the phone reach Metro over USB
+adb devices                                  # must show `device`, not `unauthorized`
+adb -s <serial> reverse tcp:8081 tcp:8081    # REQUIRED — re-run after every unplug
 npx expo run:android --device
 maestro --device <serial> test .maestro/tap-country.yaml
 ```
 
-`adb reverse` is the step people forget — without it the app opens to a blank or red screen because it
-cannot find the bundler. Re-run it after every unplug. With two targets attached, every `adb` command
-needs `-s <serial>` or it fails with "more than one device/emulator".
-
-### The dev loop
-
-The dev build APK is a shell containing the native code plus a Metro client; your JS is served from the
-PC at runtime. **JS/TS edits hot-reload in about a second** — you do *not* rebuild the APK per change.
-Rebuild only when adding/removing a native dependency, editing `app.json`, or upgrading the Expo SDK.
+Without `adb reverse` the app opens to a blank or red screen. With two targets attached, every `adb`
+command needs `-s <serial>`.
 
 ## Testing
 
-**Jest** (`jest-expo` preset, `@/` mapped to `src/`) — the fast inner loop, no device involved. The
-native map is replaced by `__mocks__/@maplibre/maplibre-react-native.tsx`, because Fabric views cannot
-render under Jest; what the tests exercise is our own wiring, not MapLibre.
+**Jest** (`jest-expo` preset, `@/` → `src/`) — the fast inner loop. The native map is replaced by
+`__mocks__/@maplibre/maplibre-react-native.tsx`, because Fabric views cannot render under Jest; what the
+tests exercise is our own wiring, not MapLibre.
 
-React Native Testing Library **v14 made `render` and `fireEvent` async** — they must be awaited or
-`screen` is never populated and every query fails with "render function has not been called".
-`tsconfig.json` needs `"types": ["jest"]` or the test globals don't typecheck.
+The mock has been taught, one bug at a time, to forward **`paint`**, **`layout`**, **`filter`** and
+**`data`** — it stripped each in turn, and each time no test could see the thing that mattered (fill
+colour, `text-field`, one re-upload per round versus one per answer). Its `GeoJSONSource` testID is
+`source-<id>`; it was hardcoded to `countries-source`, which threw "found multiple elements" once a second
+source existed.
 
-**Maestro** (`.maestro/`) drives the installed app; it does not rebuild. Maestro runs **natively on
-Windows** (no WSL) and needs JDK 17, which is already set up. It is installed at
-`C:\Users\Boris\maestro\maestro\bin\maestro.bat` and is **not on PATH** — either add it or call it by
-full path. `npm run test:e2e` assumes `maestro` is on PATH.
+RNTL **v14 made `render` and `fireEvent` async** — they must be awaited or every query fails with "render
+function has not been called". `tsconfig.json` needs `"types": ["jest"]`.
 
-There are **six flows**, and each pins its own orientation with `setOrientation` — the app rotates
-freely now, so none can assume it:
+**Maestro** (`.maestro/`) drives the installed app; it does not rebuild. Seven flows, each pinning its own
+orientation with `setOrientation`:
 
 | Flow | Orientation | Journey |
 |---|---|---|
-| `.maestro/tap-country.yaml` | `PORTRAIT` | Russia → Greenland → close → ocean-deselect |
-| `.maestro/landscape-info-panel.yaml` | `LANDSCAPE_LEFT` | Brazil → Mali → close → ocean-deselect → rotate to portrait with the card open |
-| `.maestro/choropleth-modes.yaml` | `PORTRAIT` | toggle on → legend → Russia still selects → close → toggle off |
-| `.maestro/map-labels.yaml` | `PORTRAIT` | each label field in turn, flags included → map and selection still work |
-| `.maestro/search-country.yaml` | `PORTRAIT` | open search → browse → type → pick → the map highlights and flies |
-| `.maestro/quiz.yaml` | `PORTRAIT` + rotate | Quiz → pick a subregion and fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score |
+| `tap-country.yaml` | PORTRAIT | Russia → Greenland → close → ocean-deselect |
+| `landscape-info-panel.yaml` | LANDSCAPE_LEFT | Brazil → Mali → close → deselect → rotate with the card open |
+| `choropleth-modes.yaml` | PORTRAIT | toggle on → legend → Russia still selects → toggle off |
+| `map-labels.yaml` | PORTRAIT | each label field in turn, flags included → map and selection still work |
+| `search-country.yaml` | PORTRAIT | open search → browse → type → pick → map highlights and flies |
+| `mastery.yaml` | PORTRAIT | mastery fill mode → practice round → reset → structure only |
+| `quiz.yaml` | PORTRAIT + rotate | pick subregion/fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score |
 
-**There is no flow for the quiz's `locate` mode**, which is the current gap — see *What is not
-covered* under *Locate mode*. **There is no flow for Russian either**; see *What the
-tests pin, and what they cannot* under *Localization*, which also explains why adding one
-makes `clearState: true` mandatory on every other flow.
+**No flow for locate mode, flag mode, or Russian** — the current gaps. Several flows exist purely as a
+**proof-of-parse** for expressions the native renderer would otherwise reject silently, which is the only
+automated defence against a malformed paint/layout expression. **Maestro cannot see the labels themselves**
+— they are drawn inside the GL surface, so no `assertVisible: 'Paris'` will ever match. Confirming text
+actually appears is a manual screenshot.
 
-Coordinate taps are only deterministic because `INITIAL_CENTER` and the derived zoom floor
-(`cameraFit.ts`) pin the camera on launch — **change either and you must re-derive every tap point in
-the three explore flows.**
+Coordinate taps are only deterministic because `INITIAL_CENTER` and the derived zoom floor pin the launch
+camera — **change either and re-derive every tap point in the explore flows.** `quiz.yaml` is the exception
+and contains **no coordinate taps at all**, which makes it the one flow immune to a camera change; it needs
+`scrollUntilVisible` to reach a subregion row, and uses the smallest subregion (*Australia and New
+Zealand*, 2 countries) so the round is short and answerable without pinning a seed.
 
-`quiz.yaml` is the exception and contains **no coordinate taps at all**: the quiz camera moves on every
-question, so a screen percentage means nothing there. It is entirely testID-driven, which also makes it
-the one flow immune to a camera change. Two things it needs that the others do not: `scrollUntilVisible`
-to reach a subregion row (Oceania is the last region in a long list), and the smallest subregion —
-*Australia and New Zealand*, 2 countries — so the round is short and "Australia" is a knowable answer
-without pinning the shuffle seed.
+Picking tap points:
 
-Things to know when picking tap points:
+- **The card occupies a different edge per orientation.** Portrait: follow-up taps go above it. Landscape:
+  the **left 60%**.
+- **Derive points from a cold launch in the flow's orientation**, not by rotating a running app.
+- MapLibre's default hitbox is 44 dp: `33%,47%` looked like mid-ocean and reliably selected **Gambia**. The
+  ocean-deselect steps use `17%,44%` portrait and `16%,83%` landscape, both wide of every coastline.
+- Aim at a **verified interior**, never a border — a first draft aimed at "Algeria" and got Mali.
 
-- **The card occupies a different edge per orientation.** Portrait: it covers roughly the bottom half, so
-  follow-up taps go above it. Landscape: it covers the right ~40%, so they go in the **left 60%**.
-- **Derive points from a cold launch in the flow's orientation**, not by rotating a running app — the two
-  settle at different cameras. `32%,56%` is Brazil after a rotation and Guyana on a cold launch.
-- MapLibre's default hitbox is **44 dp**, which is generous at this zoom. A point that looks like open sea
-  can still select a country — `33%,47%` looked like mid-ocean and reliably selected **Gambia**. The
-  ocean-deselect steps use `17%,44%` in portrait (mid-Atlantic) and `16%,83%` in landscape (South
-  Pacific, ~96 dp clear of Chile), both of which clear every coastline by a wide margin.
-- Aim at a **verified interior**, never a border. Both flows' points are point-in-polygon hits confirmed
-  by screenshot; a first draft of the landscape flow aimed at "Algeria" and got Mali.
-
-**Offline acceptance test** — the one that actually proves the requirement:
+**Offline acceptance test** — the one that proves the requirement:
 
 ```bash
 npx expo run:android --variant release       # JS bundle embedded; Metro not involved
-adb shell svc wifi disable
-adb shell svc data disable
-# cold start, pan/zoom, tap countries on several continents
+adb shell svc wifi disable && adb shell svc data disable
+# cold start, pan/zoom, tap countries on several continents, switch every label field
 adb logcat | grep -i "http\|network"          # should show nothing from the app
 adb exec-out screencap -p > proof.png
 adb shell svc wifi enable
 ```
 
-## The web target
-
-The same app runs in a browser - phone and desktop - as an installable PWA that works
-offline. `feat/web` added it; **Android is unchanged in behaviour throughout.**
-
-Metro picks the platform by file extension, so the split is a set of `.web.tsx` siblings
-rather than `Platform.OS` branches. There are still **zero** `Platform.OS` checks in
-`src/`.
-
-| | native | web |
-|---|---|---|
-| Map | `WorldMap.tsx` - `@maplibre/maplibre-react-native` | `WorldMap.web.tsx` - `maplibre-gl` |
-| Style | `OFFLINE_STYLE` (`font-faces` + `asset://`) | `WEB_OFFLINE_STYLE` (no `font-faces`, no `glyphs`) |
-| Flags | emoji | `CountryFlag.web.tsx` - real SVGs where the platform has no flag glyphs |
-| Escape / keyboard play | no-ops | `useDismissKey.web.ts`, `keyboardPlay.web.ts` |
-| Window size | `useWindowDimensions` | `useWindowSize.web.ts` - DOM truth, hydration-safe |
-
-`worldMapProps.ts` holds the props and camera constants both implementations share, so
-the two cannot drift. Everything above the renderer - `worldGeoJson`, `labelGeoJson`,
-`CHOROPLETH_RAMPS`, `labelFilter`, `getWorldFitZoom`, `pickCountry`, all of
-`quizCamera.ts` - is used unmodified. **The style spec is the portability layer**, which
-is why this port is small.
-
-### Text still needs no network
-
-`font-faces` is MapLibre **Native** only, and the tempting conclusion - "so the web needs
-a glyph server" - is wrong and would break the whole point of this project. From
-maplibre-gl's `glyph_manager.ts`:
-
-```js
-if (!this.url || this._charUsesLocalIdeographFontFamily(id)) {
-    glyph = entry.glyphs[id] = await this._drawGlyph(entry, stack, id);
-```
-
-With **no `glyphs` key at all**, every glyph is rasterised locally through canvas/TinySDF
-using the `text-font` name as a CSS family. So `text-font: [LABEL_FONT]` carries over
-unchanged and `expo-font`'s runtime hook registers the family. Verified with the origin
-dead: zero glyph requests, zero external origins.
-
-### Traps, each of which cost real time
-
-- **MapLibre invents a viewport rather than waiting for one.** Given a zero-sized
-  container it does not warn - it falls back to a **400x300** canvas and carries on, so
-  every camera stop afterwards is arithmetic against a viewport that does not exist and
-  the country lands off screen. Resizing "fixes" it because that finally tells the
-  transform the truth. `WorldMap.web.tsx` therefore waits for a measured container before
-  creating the map, ignores zero sizes from its `ResizeObserver` (a navigator reports one
-  while `/search` sits over the map), re-syncs the transform before every stop, and holds
-  a stop that arrives too early rather than dropping it.
-- **React keeps the server's `className` on a hydration mismatch.** `web.output: "static"`
-  renders every route in Node, where there is no window, so responsive branches take their
-  smallest path - and the corrected classes computed on the client never reach the DOM.
-  Nothing throws. Anything responsive in a FIRST render must use `useWindowSize`, not
-  `useWindowDimensions`. Diagnose by comparing `element.className` against
-  `__reactProps$*.className`.
-- **`reactCompiler: true` punishes extracting a subscription into a hook.** Moving
-  `useWindowDimensions()` out of a component body changes what the compiler memoises;
-  the quiz then kept a stale layout through a rotation and `.maestro/quiz.yaml` failed
-  0/3 against master's 3/3. `quizScreenBox.ts` is a PURE function taking the window for
-  exactly this reason - keep the subscription inline.
-- **A redeploy takes two visits to appear** unless the page reloads on
-  `controllerchange`: the open page keeps its worker's assets and the new one only serves
-  the visit after. Every conclusion drawn from that first load describes the previous
-  build. Bit us twice.
-- **Workbox's 2 MB default silently skips the bundle**, which is ~5 MB. The worker then
-  registers, activates, looks perfect and fails offline. `scripts/build-web.mjs` asserts
-  the bundle is under the limit rather than trusting the summary line.
-- **Windows ships no country flag emoji at all.** Segoe UI Emoji has none, so a regional
-  indicator pair renders as two letters. Not fixable in CSS; `public/flags/` carries real
-  SVGs, fetched same-origin only where the platform needs them.
-
-### Framing is tested end to end, on purpose
-
-`searchFraming.test.ts` asserts a searched country is centred in, and fits inside, the
-band a person can actually see - across five real viewports and five awkward countries.
-
-It derives that band from **independently measured facts about the UI**, never from the
-code under test. That is the whole point: every earlier check asked "did it land at the
-centre of `getMapFocusRect(...)`", which agrees with that function however wrong it is,
-and is why framing measured perfect while a phone was visibly wrong. Reintroducing the
-original bug fails 28 of its 55 cases.
-
-Two things it must keep doing, both of which fooled its own first draft: measure the
-country **as drawn** (Mercator is not linear, so a tall country's latitude midpoint is
-not its visual centre), and via projected corners (New Zealand's bbox crosses the
-antimeridian, so `(west + east) / 2` lands in the Atlantic).
-
-### Deploying
-
-`vercel.json` pins the build to `npm run build:web` and the output to `dist/`. The
-headers there are not decoration: **`sw.js` must not be cached** or a deploy never
-reaches anyone, and the MapLibre worker needs a JavaScript content type. `cleanUrls`
-serves `/search` and `/quiz/play` from the per-route HTML the static export emits.
-
-Assets under `_expo/static/` and `assets/` are content-hashed and marked immutable;
-everything else the worker precaches carries a Workbox revision, so it updates despite
-the HTTP cache.
-
-## Per-country mastery
-
-The app remembers how you answer each country, colours the world map by what you know, and can
-build a practice round out of your weak spots. It is the first thing in the project that
-**persists anything at all**.
-
-### The model is a weakness score, and there is deliberately no clock
-
-Per `(iso3, GradedField)` — the same six fields a `FieldGrade` can be about, `location`
-included — the table keeps `asked`, `correct` and `lastCorrect`. Nothing else. No dates, no
-due times, no spaced repetition, and **`Date.now()` still appears nowhere in `src/`**.
-
-```
-recency  = 1 - RECENCY_WEIGHT * (lastWrong / fields)   // weight = 0.4
-
-display  = (correct / asked)                * recency   // what the map paints,  [0, 1]
-practice = (correct / (asked + PRIOR))      * recency   // what the sampler weighs, prior = 1
-```
-
-**Two scores, one formula, one parameter apart** — `scoreWith(record, prior)`. They disagree
-on purpose, and the reason is the most useful thing in this section.
-
-Four properties, each load-bearing:
-
-- **Never asked is `null`, never `0`.** A country you have not seen and one you always get
-  wrong are different things, and the map must say which. The null becomes an *absent*
-  feature property, which `['has','mastery']` splits into the grey band — the same
-  absence-all-the-way-down discipline `densityOf` already runs for the World Bank's gaps.
-- **The displayed score carries NO prior, and 100% is reachable.** Everything you have been
-  asked about a country, answered right, is 100% — however few times that was.
-- **The prior survives only in the practice score**, so a country proven once (0.5, weight
-  ~0.40) still resurfaces far more often than one proven nine times (0.9, weight ~0.16).
-  One lucky guess must not retire a country forever, and that is the *only* thing the prior
-  was ever really buying.
-- **Fields are pooled, not averaged as per-field rates**, so the score is weighted by how
-  often you were actually asked. The recency discount is *proportional*: missing the
-  capital of a country you also answer the name and currency for costs `0.4 × 1/3`.
-
-### The prior used to apply to both, and that was the one real design mistake here
-
-It shipped that way, and it was wrong in a way worth keeping written down. Every graded
-*field* counts as one `asked`, so with the default name-only round a country you had just
-answered **correctly** painted at **50%** — dead centre of the ramp — and reaching the green
-90% band took **nine consecutive correct answers on that one country**. Across 193 countries
-in 10-question rounds that is unreachable, so the map sat permanently orange-to-yellow
-however well anyone played.
-
-The error was conceptual rather than arithmetic: **the prior conflated "you are mediocre at
-this" with "we have not asked you much".** Those are different, and the map already says the
-second one with the grey `not asked yet` band — so the colour never has to hedge on its
-behalf. The sampler has no such band, which is exactly why the hedge belongs there and only
-there.
-
-The split cost almost nothing because `pickWeakSpots` already took *a score map*: it simply
-receives `practiceScores` instead of `scores`, and its logic is untouched. **If you ever hand
-it the display scores, one lucky guess retires a country** — `practicePool.test.ts` pins the
-ordering that prevents it.
-
-`masteryOf` validates its counters and returns `null` rather than `NaN` for anything
-non-finite. `asked: Infinity` is the instructive case: it divides to a finite `0`, which
-would paint a country as "always wrong" on the strength of a corrupt counter.
-
-### `recordResult` does not notify — and that is the whole design
-
-**`/quiz/play` is pushed over `MapScreen`, so the explore map's MapLibre surface stays
-mounted underneath for the entire round.** Notifying subscribers on every answer would
-re-fold the outlines and re-upload 1.6 MB of geometry to a backgrounded GL surface up to
-193 times in one round.
-
-So the store splits the two: `recordResult` updates the table and schedules a write,
-silently; `publishMastery` recomputes the scores, bumps a version, flushes the write and
-notifies. `play.tsx` calls the first from `check()` and the second **once, on unmount** —
-the single event that covers finishing, End quiz, *Discard and leave* and a plain back-out.
-
-`masteryStore.test.ts` asserts the asymmetry directly, and `MapScreen.test.tsx` asserts the
-consequence: the source's `data` is unchanged after 20 records and changes exactly once
-after a publish.
-
-**Recording happens in `check()`, not `next()`.** `check()` is guarded by
-`if (!question || result) return`, so it fires once per question — and recording in `next()`
-would lose the last checked answer whenever a player checks the final question and then
-backs out. *Discarding a round throws away the score, not what you learned.*
-
-### This is the first thing to change `<GeoJSONSource data>` after mount
-
-`worldGeoJson` is a module constant precisely so MapLibre never re-uploads the geometry, and
-`worldGeoJson.test.ts` exists to protect that. Mastery is dynamic, so it cannot be folded in
-at module load like `population` and `density`.
-
-Three things keep the churn down, and all three are pinned by tests:
-
-- **`withMastery` returns the same collection object when the table is empty**, so a player
-  who has never done a quiz is byte-identical to before.
-- **The fold runs unconditionally in `MapScreen`, not only in mastery mode.** Folding on
-  demand would change the identity on every switch *into and out of* the mode — two
-  re-uploads per visit. Unconditional makes the identity a pure function of the mastery
-  version, so switching fill modes never touches the source at all.
-- **Geometry is passed by reference**, exactly as `withChoroplethValues` does: ~240 tiny
-  allocations, not a copy of 1.6 MB.
-
-`WorldMap.web.tsx` needed a `setData` effect, because it adds the source once inside
-`map.once('load')` — plus a ref so a table that lands before the style loads is not dropped.
-The native side needs neither: `data` is a prop and React pushes it.
-
-**If this ever hitches or blanks on a device**, the escape hatch is to move mastery into the
-paint expression instead — `['match', ['get','iso3'], 'FRA', 62, …]`, at most 193 pairs,
-rebuilt per publish. That re-uploads nothing, because a paint-property change is the same
-code path a fill-mode switch already uses. The cost is that `fillColor` stops being a module
-constant for that one ramp.
-
-### The mastery ramp is the first LINEAR one
-
-`logRampFillColor` could not be reused. **A mastery score has a legitimate zero** — one
-question, answered wrong — and `log10(0)` is the `-Infinity` that `worldGeoJson.ts` spends
-four paragraphs keeping away from the population ramp. `linearRampFillColor` sits beside it
-with the same `['has', property]` split and no logarithm.
-
-That broke an assumption in `choropleth.test.ts`, whose `describe.each` asserted decade
-spacing and a `['log10', …]` wrapper for *every* ramp. It is now split into shared invariants
-over all three and log-only tests over the two that are logarithmic.
-
-Seven stops, matching the other ramps — **that count is load-bearing**, because the legend is
-one always-mounted view whose swatches are swapped by prop. Stops are in **percent**, so the
-legend's labels are free and the feature carries a small integer. Palette is ColorBrewer
-RdYlGn, echoing the quiz's existing red-wrong/green-right language. **Known trade: RdYlGn is
-not colourblind-safe**; the drop-in swap is RdYlBu-7, at the cost of "blue means you know it"
-reading oddly and edging toward density's BuPu.
-
-`ChoroplethRamp` gained an optional **`noDataLabel`**, so mastery's grey band reads *"not
-asked yet"* rather than *"no data"* — the grey countries are exactly the ones worth
-practising, which is most of the mode's value. It swaps the text of a row that is already
-mounted, so it inserts no view.
-
-### Practice is a `QuizConfig` flag, not a fourth `QuizMode`
-
-`MODE_USES_MAP` and `MODE_ASKS_FIELDS` are exhaustive records precisely so a new mode fails
-to **compile** until someone answers "does it show a map?". Practice has no answer, because
-it is orthogonal: it decides *who* is asked, not *how*. `practice × facts|locate|flag` are
-all coherent rounds. It crosses the URL as `'1'|'0'`, always emitted, absent meaning false.
-
-`pickWeakSpots` is weighted sampling **without replacement**, seeded and pure:
-
-```
-weight = PRACTICE_FLOOR + (1 - mastery) ** PRACTICE_EXPONENT   // 0.15, 2
-```
-
-**A never-asked country weighs exactly as much as one always answered wrong.** Unseen is
-maximally weak, which is what makes practice work on a fresh install and lets it double as a
-way through the whole world. Nothing has weight zero, so consecutive rounds differ and a
-fully-mastered pool still yields a full round; the spread is about 7:1.
-
-**`buildQuiz` needed no change**, exactly as flag mode needed none — its second parameter is
-already an injectable pool. The pool handed in is `countriesIn(config.subregions)`, so
-"practise my weak spots in Africa" works for free.
-
-**Practice and the region picker INTERSECT, and the setup screen has to say so.** The regions
-choose the candidate pool; the weak-spot weighting then draws ten out of that. They are
-orthogonal questions — *who* gets asked versus *where from* — which is why they are two
-sections rather than one mutually-exclusive list. The first version shipped that behaviour
-with no explanation and it read as a bug: the region note still said *"all 193 UN member
-states"*, which is wrong the moment practice is on, because it is ten drawn from 193. The
-note is now practice-aware (`quiz-setup-scope-note`) and pinned by a test. If this is ever
-revisited, note that making them exclusive by *hiding* the region picker is the worst of the
-options — the selection appears to vanish on toggle; disable it with a reason instead.
-
-`PRACTICE_ROUND_SIZE` is **10**, and it is the app's first round-length bound of any kind: a
-normal round is still the whole filtered pool, which for the world is 193 questions.
-
-**A practice round is the one config the seed does not pin.** Selection reads the device's
-mastery table, so "Play again" re-selects against the updated table and gives a different
-ten. That is right for practice, and it is a real break from the rule every other round
-obeys.
-
-### Storage
-
-One AsyncStorage key holding one versioned JSON blob, positional tuples
-`[asked, correct, lastCorrect]`. **Measured worst case — all 193 countries × all 6 fields —
-is 39 KB**, asserted in `masteryCodec.test.ts` rather than left as a comment. One key rather
-than 193 because the choropleth needs the whole table on the first frame.
-
-`decodeMastery` **never throws**, and validates **per field**: one corrupt entry costs one
-entry, not a player's whole history. An unknown ISO-3 is kept rather than rejected —
-validating it would mean importing the geometry into a pure module — and simply never
-matches a feature. `saveMastery` swallows its rejection: this is a cache the player can
-regenerate by playing, and a failed write must never cost them a round.
-
-Writes are debounced 2 s with an explicit flush on publish. **That `setTimeout` is not a
-clock** — nothing time-dependent enters what is stored or scored.
-
-**`masteryStorage.web.ts` is not optional.** AsyncStorage 2.2.0's web path reaches straight
-for `window.localStorage` with no guard (verified in `lib/module/AsyncStorage.js` — the
-IndexedDB backend is a later major), and `web.output: "static"` renders every route in Node,
-where there is no window. The split keeps the native module out of the web bundle entirely.
-It is a file-extension split, not a `Platform.OS` check; there are still zero of those.
-
-### Resetting — the third door into the store
-
-The bottom of `/quiz`, past every setting, carries a **Reset mastery** button behind the same
-`ConfirmDialog` the leave-mid-round prompt uses. Its wording lives in `quiz/resetPrompt.ts`, pure and
-unit-tested, exactly as `exitPrompt.ts` does — and it names the count, because "your progress" is an
-abstraction and "37 countries" is the thing a player would actually miss.
-
-`resetMastery()` behaves like neither `recordResult` nor `publishMastery`, and all three differences
-are load-bearing:
-
-- **It notifies unconditionally.** `publishMastery` is guarded by `dirty`, and a reset records
-  nothing, so routing it through there would be a silent no-op with the map still painting deleted
-  scores. `notify()` bumps the version, `MapScreen` re-folds, and `withMastery` returns
-  `worldGeoJson` itself for an empty table — so the source goes back to the identity it had before
-  the player's first round.
-- **It writes immediately.** `flushPersist()` cancels the pending 2 s debounce first, so the write
-  from the round just played cannot land a second later and resurrect what was just deleted.
-- **A `cleared` flag guards the import-time read.** The module fires `loadMastery()` at import and
-  merges with `mergeTables(stored, table)`, which returns `stored` verbatim when memory is empty — so
-  a reset landing before that read resolves would be undone by it. Reachable only via a deep link
-  straight onto `/quiz`, and one line to make impossible.
-
-**`__resetMasteryStore` is not this**, and its comment used to say there was no user-facing reset at
-all. It clears the listener set (dropping `MapScreen`'s subscription for the life of the process),
-rewinds `version` to 0 (which is what the map's `useMemo` folds on) and writes nothing, so the old
-table returns on the next cold start. It stays what it was: the test-only rewind.
-
-Nothing new was needed in either storage module. `encodeMastery({})` is a well-formed empty payload
-that `decodeMastery` reads back as `{}`, so `saveMastery({})` is a correct clear on native and web
-alike — no `clearMastery`, and no second place that knows the key.
-
-The button is **disabled when nothing has been asked**, and the note above it says so rather than
-leaving a live control that does nothing. That is the only reason the setup screen subscribes to the
-store at all; it subscribes **inline**, not through a hook, for the `reactCompiler` reason
-`MapScreen` records.
-
-### What Jest cannot see here
-
-- **That a linear `interpolate` inside a `case`/`has` wrapper parses in the native
-  renderer.** A malformed paint expression blanks the fill layer with no exception anywhere.
-  `.maestro/mastery.yaml` is the cover, using the same proof-of-parse trick as
-  `choropleth-modes.yaml`.
-- **That replacing `<GeoJSONSource data>` on a live map redraws** rather than blanking or
-  hitching. Nothing in the app had ever done it. This is the riskiest unproven part.
-- **That AsyncStorage survives a cold start** — persistence across process death *is* the
-  feature, and Jest sees an in-memory shim. The same applies in reverse to a **reset**: that
-  the cleared table really reached storage is only visible by killing the app and launching
-  it again.
-- **That the map redraws when the source is handed back its ORIGINAL collection**, which is
-  what a reset does and which nothing else in the app does. `.maestro/mastery.yaml` covers
-  the swap; that the countries actually went grey is still a screenshot.
-- **That `expo prebuild` links the module and the app still launches.** `icon-padding: 2`
-  shipped perfectly on web and killed the app fatally on Android; a native dependency is the
-  same class of risk.
-- **Whether the ramp is legible**, and whether a red-green colourblind player can read it.
-
-The mock now forwards **`data`** as well as `paint`, `layout` and `filter`. It used to strip
-it, which meant no test could tell one re-upload per round from one per answer.
-
-`.maestro/mastery.yaml` **cannot assert which countries a practice round picked** — the pool
-is a function of device state, not the seed — so it asserts structure only. That is a
-permanent reduction in what E2E can prove about this path, unlike `quiz.yaml`, which pins a
-seed precisely so it *can* assert on a real answer.
-
 ## Open risks
 
-- **The Russian build has never run on Android**, and the offline acceptance test has not
-  been re-run since it landed. The web half changed how resources resolve — two service
-  workers, each scoped to its own subtree — and that is exactly what the gate is for.
-- **`app.json` is now layered by `app.config.js`.** Anything reading the config sees the
-  merged result. With `EXPO_PUBLIC_LOCALE` unset it is identical to before, so native is
-  unaffected — but **do not export that variable in your shell**, or a native build gets a
-  `/ru` base URL and every bundled asset resolves to a path that does not exist in an APK.
-- **The Russian dictionaries are ~590 hand-authored strings.** The build proves they are
-  complete and that no English leaked in; it cannot prove they are *right*. A native-speaker
-  read is still owed.
-
-- **MapLibre vs RN 0.86** — the library is developed against RN 0.85.3 and declares `>= 0.80`. Nothing
-  has broken in practice, but we are a version ahead of what upstream tests.
-- **Release APK is x86_64 only** right now, because every build so far used
-  `ORG_GRADLE_PROJECT_reactNativeArchitectures=x86_64`. It will not install on a physical phone —
-  drop that variable for a real-device or store build.
-- **The release APK is debug-signed** (Expo's default). A proper upload key is needed before
-  distribution.
-- **Emulator GPU** — if the map ever renders as a black rectangle, that's the emulator's graphics mode,
-  not a code bug. Switch the AVD to *Hardware — GLES 2.0*.
-- **Two MapLibre surfaces are alive during a quiz.** `/quiz/play` is `push`ed, so the explore map stays
-  mounted behind it. It behaves on the emulator and has **not** been measured on the S25 — check
-  `adb shell dumpsys meminfo com.boris.geographyapp` before and after, and watch for a black quiz map,
-  which is what GL-context exhaustion looks like. If it bites, the fix is one word: `push` → `replace`
-  in `QuizLaunchButton`, at the cost of the back gesture.
-- **`.expo/types/router.d.ts` goes stale, and looks like a compile error.** With `typedRoutes: true`,
-  adding a route fails `npm run typecheck` until Metro regenerates that file — and it can regenerate
-  *wrong*, listing every module under `src/` as a route. Deleting `.expo/types` and restarting
-  `npx expo start --clear` fixes it. This is not a bug in your code.
+- **The Russian build has never run on Android**, and the offline acceptance test has not been re-run
+  since it — or since flag labels or mastery — landed.
+- **The Russian dictionaries are ~590 hand-authored strings.** The build proves they are complete and that
+  no English leaked in; it cannot prove they are *right*. A native-speaker read is owed.
+- **`app.json` is layered by `app.config.js`.** Anything reading the config sees the merged result. Do not
+  export `EXPO_PUBLIC_LOCALE` in your shell.
+- **Replacing `<GeoJSONSource data>` on a live map** (mastery) is the riskiest unproven operation.
+- **MapLibre vs RN 0.86** — the library is developed against 0.85.3 and declares `>= 0.80`.
+- **Release APK is x86_64 only** as built so far, and **debug-signed** (Expo's default). A proper upload
+  key is needed before distribution.
+- **Two MapLibre surfaces are alive during a quiz** (`/quiz/play` is pushed). Fine on the emulator, not
+  measured on the S25 — check `adb shell dumpsys meminfo com.boris.geographyapp`, and watch for a black
+  quiz map, which is what GL-context exhaustion looks like. The fix is one word: `push` → `replace` in
+  `QuizLaunchButton`, at the cost of the back gesture.
+- **Emulator GPU** — a black rectangle instead of a map is the emulator's graphics mode, not a code bug.
+  Switch the AVD to *Hardware — GLES 2.0*.
+- **`.expo/types/router.d.ts` goes stale and looks like a compile error.** With `typedRoutes: true`,
+  adding a route fails `npm run typecheck` until Metro regenerates it — and it can regenerate *wrong*,
+  listing every module under `src/` as a route. Delete `.expo/types` and restart `npx expo start --clear`.
 
 Two emulator failure modes that look like app bugs but aren't:
 
-- **Never force-kill `qemu-system-x86_64`.** It corrupts the AVD's quick-boot snapshot, and the next
-  launch hangs with `sys.boot_completed=1` but only ~50 services registered and the boot animation still
-  spinning — `system_server` never starts, `adb shell settings` reports *"Can't find service: settings"*,
-  and `screencap` hangs. Shut down with `adb emu kill` and wait for the process to exit; recover a wedged
-  AVD with `emulator -avd Medium_Phone -no-snapshot-load` (a cold boot, which keeps installed apps).
-  `-gpu angle_indirect` does **not** help — it hangs the same way.
-- **Launch the emulator detached**, e.g. PowerShell `Start-Process`. Started as a child of a shell that
-  the tooling later reaps, it has segfaulted (exit 139) seconds after a clean boot, taking the device
-  offline mid-session.
+- **Never force-kill `qemu-system-x86_64`.** It corrupts the quick-boot snapshot, and the next launch
+  hangs with `sys.boot_completed=1` but `system_server` never starting — `adb shell settings` reports
+  *"Can't find service: settings"* and `screencap` hangs. Shut down with `adb emu kill`; recover with
+  `emulator -avd Medium_Phone -no-snapshot-load` (a cold boot, which keeps installed apps).
+  `-gpu angle_indirect` does **not** help.
+- **Launch the emulator detached.** Started as a child of a shell the tooling later reaps, it has
+  segfaulted seconds after a clean boot, taking the device offline mid-session.
 
 ## Attribution
 
-Natural Earth is public domain. `world-countries`/mledoze is ODbL and World Bank data is CC BY 4.0 —
-both require credit. All three belong in an About screen.
-
-## Build APK commands
-cd android && ORG_GRADLE_PROJECT_reactNativeArchitectures=arm64-v8a ./gradlew.bat assembleRelease
-
-## Launching the app on AVD
-emulator -avd Medium_Phone
-npx expo run:android
-
-## Launch web-dev server
-npx expo start --web
+Natural Earth is public domain. `world-countries`/mledoze is ODbL, World Bank data is CC BY 4.0, and Noto
+Sans is SIL OFL — all require credit, and all belong in an About screen.

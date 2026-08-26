@@ -333,9 +333,40 @@ describe('parsePopulation', () => {
     expect(parsePopulation(input)).toBe(expected);
   });
 
-  it.each(['', '  ', 'lots', '12 people', '5%', 'abc'])('rejects %p', (input) => {
-    expect(parsePopulation(input)).toBeNull();
+  // English reads a comma as a thousands separator, and only English does. See the
+  // Russian suite in `gradingRu.test.ts` for the other half of this decision.
+  it.each([
+    ['1,4', 14],
+    ['1,4 billion', 14_000_000_000],
+  ])('reads the comma as grouping, not as a decimal point: %p', (input, expected) => {
+    expect(parsePopulation(input)).toBe(expected);
   });
+
+  // The Russian shorthands, including the bare letters a number keypad makes easy.
+  // Accepted in an English round too, for the same reason the alias lists are supersets.
+  it.each([
+    ['68 млн', 68_000_000],
+    ['68м', 68_000_000],
+    ['68 м', 68_000_000],
+    ['1.4 млрд', 1_400_000_000],
+    ['500т', 500_000],
+    ['500 тыс', 500_000],
+    ['500 тыс.', 500_000],
+    // Every kind of space is stripped, so a figure copied out of the app's own Russian
+    // formatting - which groups with a thin space - parses as typed.
+    ['12 000 000', 12_000_000],
+    ['12\u00a0000\u00a0000', 12_000_000],
+    ['12\u2009000\u2009000', 12_000_000],
+  ])('reads %p as %p', (input, expected) => {
+    expect(parsePopulation(input)).toBe(expected);
+  });
+
+  it.each(['', '  ', 'lots', '12 people', '5%', 'abc', '12 человек', '12 к'])(
+    'rejects %p',
+    (input) => {
+      expect(parsePopulation(input)).toBeNull();
+    },
+  );
 });
 
 describe('population - the tolerance band', () => {

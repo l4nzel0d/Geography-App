@@ -167,7 +167,7 @@ export const ru: Record<MessageKey, string> = {
   'quiz.detail.youSaid': 'Вы ответили {given}',
   'quiz.placeholder.population': 'например, 12 000 000 или 12 млн',
   'quiz.placeholder.answer': 'Ваш ответ',
-  'quiz.chip.placeholder': 'Введите ответ, нажмите ввод, чтобы добавить ещё',
+  'quiz.chip.placeholder': 'Введите ответ, нажмите ввод, чтобы добавить',
   'quiz.chip.remove': 'Убрать {chip}',
   'quiz.flag.a11y': 'Флаг страны',
 

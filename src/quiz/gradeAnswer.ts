@@ -275,10 +275,15 @@ export function gradeSet(
  *
  * The Russian abbreviations are matched WITHOUT their full stops, because the `.` is
  * stripped along with the spaces below - "1,4 млрд." and "1.4 млрд" are the same answer.
+ *
+ * The bare letters `т` and `м` are in for the same reason `k` and `m` are: they are what
+ * someone reaches for on a number keypad. `м` is a prefix of `млн` and `т` of `тыс`, which
+ * costs nothing - every pattern is anchored, so the alternation is an exact match and
+ * never a prefix one. There is no single-letter form for billions: `м` is spent.
  */
 const MAGNITUDES: readonly [RegExp, number][] = [
-  [/^(?:k|тыс|тысяч|тысячи|тысяча)$/, 1e3],
-  [/^(?:m|mn|mil|million|млн|миллион|миллиона|миллионов)$/, 1e6],
+  [/^(?:k|т|тыс|тысяч|тысячи|тысяча)$/, 1e3],
+  [/^(?:m|mn|mil|million|м|млн|миллион|миллиона|миллионов)$/, 1e6],
   [/^(?:b|bn|billion|млрд|миллиард|миллиарда|миллиардов)$/, 1e9],
 ];
 
@@ -289,16 +294,42 @@ const MAGNITUDES: readonly [RegExp, number][] = [
  * "1.4bn", "68 млн", "1,4 млрд" - and rejecting any of them would be marking presentation,
  * not knowledge.
  *
- * **The comma is stripped rather than read as a decimal point**, which is a real decision
- * for Russian, where "1,4" means one point four. It is unresolvable in general - "1,400"
- * is fourteen hundred in one convention and 1.4 in the other - and the population band is
- * +/-20% wide, so the tie is broken the way that keeps "68,000,000" working. Anyone
- * meaning 1.4 billion can write "1.4 млрд" or "1400 млн", and both parse.
+ * **What a comma means is decided by the round's language, and nothing else.** In English
+ * it groups thousands; in Russian it is the decimal point, and "1,4 млрд" is how a Russian
+ * speaker writes 1.4 billion. Reading it the English way turned that answer into fourteen
+ * billion - ten times the right figure, marked wrong, with the panel echoing back a number
+ * the player never typed.
+ *
+ * The one shape that survives both readings is a number with SEVERAL commas: "68,000,000"
+ * cannot be a decimal, because a decimal has one point. So Russian treats a lone comma as
+ * the decimal separator and any further one as grouping, which keeps an English-habit
+ * answer working in a Russian round without costing the native one.
+ *
+ * What that leaves ambiguous is exactly one case - a single comma with a full group of
+ * three digits after it and no magnitude word, "1,400". Russian reads it as 1.4, which is
+ * what a Russian speaker means by it; anyone meaning fourteen hundred can write "1400" or
+ * "1 400", and both parse. It is unresolvable in general, so it is settled per language
+ * rather than guessed at per number.
+ *
+ * The full stop stays a decimal point in both, because it is not ambiguous in either: no
+ * one writing Russian groups thousands with it, and "1.4 млрд" is a shape players type.
  */
-export function parsePopulation(input: string | undefined): number | null {
+export function parsePopulation(
+  input: string | undefined,
+  locale: Locale = getLocale(),
+): number | null {
   if (!input) return null;
 
-  const text = input.toLowerCase().replace(/[,\s _.]+$/g, '').replace(/[,\s _]/g, '');
+  // Trailing separators go first, so "1 400," is a whole number rather than a lone comma,
+  // and "68 млрд." keeps the abbreviation the MAGNITUDES patterns expect.
+  const trimmed = input.toLowerCase().replace(/[,\s _.]+$/g, '');
+
+  const decimalComma = locale === 'ru' && (trimmed.match(/,/g)?.length ?? 0) === 1;
+  const text = (decimalComma ? trimmed.replace(',', '.') : trimmed.replace(/,/g, '')).replace(
+    /[\s _]/g,
+    '',
+  );
+
   const match = text.match(/^(\d+(?:\.\d+)?)\s*([a-zа-я]*)\.?$/);
   if (!match) return null;
 
@@ -319,12 +350,17 @@ export function gradeNumeric(
   input: string | undefined,
   expected: number,
   tolerance = POPULATION_TOLERANCE,
+  locale: Locale = getLocale(),
 ): FieldGrade {
   // Both figures go straight onto the answer panel, so they follow the app's language -
   // Russian groups with a thin space, not a comma. `formatPopulation` is the same
   // formatter the info sheet uses, so a population never reads two ways in one session.
-  const expectedLabel = formatPopulation(expected);
-  const value = parsePopulation(input);
+  //
+  // The locale is threaded rather than left ambient because it decides how the ANSWER is
+  // read as well as how it is written back: the two must agree, or the panel echoes a
+  // figure the player did not type.
+  const expectedLabel = formatPopulation(expected, locale);
+  const value = parsePopulation(input, locale);
 
   if (value == null) {
     return {
@@ -411,7 +447,7 @@ export function gradeField(
       );
 
     case 'population':
-      return gradeNumeric(field, asString, facts.population ?? 0);
+      return gradeNumeric(field, asString, facts.population ?? 0, POPULATION_TOLERANCE, locale);
   }
 }
 

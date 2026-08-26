@@ -1,7 +1,12 @@
 import { getCountryFacts } from '@/data/countryFacts';
 import { normalizeText, russianStem } from '@/quiz/normalizeText';
 import { nameAliases, NAME_INDEX_BY_LOCALE } from '@/quiz/answerAliases';
-import { gradeField, gradeQuestion, matchesText } from '@/quiz/gradeAnswer';
+import {
+  gradeField,
+  gradeQuestion,
+  matchesText,
+  parsePopulation,
+} from '@/quiz/gradeAnswer';
 import { QUIZ_COUNTRIES_BY_LOCALE } from '@/quiz/quizCountries';
 
 /**
@@ -208,5 +213,66 @@ describe('a whole Russian question', () => {
       'ru',
     );
     expect(result.grades[0].expected).toBe('Париж');
+  });
+});
+
+describe('a Russian population', () => {
+  const ruPop = (input: string) => parsePopulation(input, 'ru');
+
+  /**
+   * The comma is the decimal point in Russian, and reading it the English way was the
+   * bug: "1,4 млрд" became fourteen billion - ten times the answer, marked wrong, with
+   * the panel echoing back a figure the player never typed.
+   */
+  it('reads a lone comma as the decimal point', () => {
+    expect(ruPop('1,4 млрд')).toBe(1_400_000_000);
+    expect(ruPop('1,4 миллиарда')).toBe(1_400_000_000);
+    expect(ruPop('67,8 млн')).toBe(67_800_000);
+    expect(ruPop('1,5м')).toBe(1_500_000);
+  });
+
+  /**
+   * And several commas as grouping, because that shape cannot be a decimal - a decimal
+   * has one point. It is what keeps an English-habit answer working in a Russian round
+   * without costing the native one anything.
+   */
+  it('still reads several commas as thousands grouping', () => {
+    expect(ruPop('68,000,000')).toBe(68_000_000);
+    expect(ruPop('1,400,000')).toBe(1_400_000);
+  });
+
+  it('leaves the full stop a decimal point in both languages', () => {
+    expect(ruPop('1.4 млрд')).toBe(1_400_000_000);
+    expect(parsePopulation('1.4 млрд', 'en')).toBe(1_400_000_000);
+  });
+
+  // The one genuinely ambiguous shape, settled per language rather than guessed at per
+  // number: three digits after a lone comma. Anyone meaning fourteen hundred writes
+  // "1400" or "1 400", and both parse in either language.
+  it('settles "1,400" by the round|s language, and says so both ways', () => {
+    expect(ruPop('1,400')).toBe(1.4);
+    expect(parsePopulation('1,400', 'en')).toBe(1_400);
+    expect(ruPop('1 400')).toBe(1_400);
+  });
+
+  it('is unbothered by a trailing comma, which separates nothing', () => {
+    expect(ruPop('1 400,')).toBe(1_400);
+  });
+
+  it('rejects a number carrying both separators rather than guessing', () => {
+    // "1.000,5" is a third convention again. Refusing it costs a player nothing they
+    // cannot rewrite, where a guess would silently mark a right answer wrong.
+    expect(ruPop('1.000,5')).toBeNull();
+  });
+
+  it('grades a Russian round through the same locale it was asked in', () => {
+    // The end-to-end shape: `gradeQuestion` threads its locale down to the parser, so a
+    // player who writes 1.4 billion the Russian way is marked right.
+    const result = gradeQuestion(
+      { iso3: 'IND', facts: ru('IND'), fields: ['population'] },
+      { population: '1,45 млрд' },
+      'ru',
+    );
+    expect(result.grades[0].correct).toBe(true);
   });
 });

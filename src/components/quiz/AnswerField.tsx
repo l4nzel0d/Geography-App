@@ -144,7 +144,9 @@ export const AnswerField = forwardRef<TextInput, AnswerFieldProps>(function Answ
           value={value}
           onChangeText={onChangeText}
           editable={editable}
-          placeholder={field === 'population' ? 'e.g. 12,000,000 or 12m' : 'Your answer'}
+          placeholder={t(
+            field === 'population' ? 'quiz.placeholder.population' : 'quiz.placeholder.answer',
+          )}
           placeholderTextColor={quizColors.textFaint}
           keyboardType={field === 'population' ? 'numbers-and-punctuation' : 'default'}
           autoCorrect={false}
