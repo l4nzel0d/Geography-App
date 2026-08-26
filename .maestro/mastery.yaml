@@ -148,6 +148,64 @@ appId: com.boris.geographyapp
 - tapOn:
     id: 'close-info-sheet'
 
+# --- clearing it again --------------------------------------------------------------
+# The reset button is the SECOND thing in the app to swap `<GeoJSONSource data>` on a live
+# map, and the only one that hands the source back the ORIGINAL collection identity -
+# `withMastery` returns `worldGeoJson` itself once the table is empty. That swap, on a map
+# that is already mounted and painted, is what these steps are really covering.
+#
+# What they cannot cover: the legend's 'not asked yet' row is static text per ramp, so
+# asserting it says nothing whatever about the data behind the fill. Only a screenshot can
+# tell you the countries actually went grey.
+- tapOn:
+    id: 'open-quiz'
+- assertVisible:
+    id: 'quiz-setup'
+
+# Past every setting, which is where a destructive action belongs.
+- scrollUntilVisible:
+    element:
+      id: 'quiz-reset'
+    direction: DOWN
+
+# Nothing is cleared without a confirmation, and cancelling really does nothing.
+- tapOn:
+    id: 'quiz-reset'
+- assertVisible:
+    id: 'quiz-reset-confirm'
+- assertVisible: 'Reset mastery?'
+- tapOn:
+    id: 'quiz-reset-confirm-cancel'
+- assertNotVisible:
+    id: 'quiz-reset-confirm'
+
+- tapOn:
+    id: 'quiz-reset'
+- tapOn:
+    id: 'quiz-reset-confirm-reset'
+- assertNotVisible:
+    id: 'quiz-reset-confirm'
+
+# The note follows the store without a remount - the same notification the map behind this
+# screen is relying on.
+- assertVisible: 'No quiz history yet'
+
+- tapOn:
+    id: 'quiz-setup-close'
+
+# The map survived having its source replaced a second time, and still takes a press.
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'choropleth-legend'
+- tapOn:
+    point: '81%,20%'
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Russia'
+- tapOn:
+    id: 'close-info-sheet'
+
 # Back to the flat basemap.
 - tapOn:
     id: 'toggle-fill-mode'

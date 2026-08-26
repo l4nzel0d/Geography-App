@@ -1,9 +1,16 @@
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { goBack } from "@/navigation/goBack";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import {
+  getMasterySnapshot,
+  resetMastery,
+  subscribeToMastery,
+} from "@/mastery/masteryStore";
+import { buildResetPrompt, type ResetAction } from "@/quiz/resetPrompt";
 import { FieldPicker } from "@/components/quiz/FieldPicker";
 import { ModePicker } from "@/components/quiz/ModePicker";
 import { PracticePicker } from "@/components/quiz/PracticePicker";
@@ -46,6 +53,22 @@ export default function QuizSetupScreen() {
   const [subregions, setSubregions] = useState<string[]>([]);
   const [fields, setFields] = useState<FieldId[]>(["name"]);
   const [practice, setPractice] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+
+  /**
+   * How much history there is to clear.
+   *
+   * Subscribed INLINE rather than through a `useMastery()` hook, for the reason
+   * `MapScreen` records: with `reactCompiler: true`, moving a subscription out of a
+   * component body changes what gets memoised, and the quiz has already been bitten by
+   * that once.
+   *
+   * The screen needs this only for the reset row - nothing else here reads it - but the
+   * store is the only thing that knows whether the button has anything to do.
+   */
+  const [mastery, setMastery] = useState(getMasterySnapshot);
+  useEffect(() => subscribeToMastery(setMastery), []);
+  const tracked = Object.keys(mastery.scores).length;
 
   const poolCount = countriesIn(subregions).length;
   // A practice round is capped; a normal one is still the whole filtered pool. `min`
@@ -60,6 +83,11 @@ export default function QuizSetupScreen() {
   // the country's name.
   const needsFields = MODE_ASKS_FIELDS[mode];
   const canStart = (!needsFields || fields.length > 0) && poolCount > 0;
+
+  const resolveReset = (action: ResetAction) => {
+    setConfirmingReset(false);
+    if (action === "reset") resetMastery();
+  };
 
   const start = () => {
     if (!canStart) return;
@@ -136,6 +164,34 @@ export default function QuizSetupScreen() {
             : "Leave everything unselected to play the whole world — all 193 UN member states."}
         </Text>
         <SubregionPicker selected={subregions} onChange={setSubregions} />
+
+        {/*
+          The one irreversible thing in the app, so it sits at the very end of the scroll -
+          past every setting, and nowhere near the Start button in the pinned footer, which
+          is the control people actually reach for. The rule above it is what separates a
+          destructive action from the settings it is not part of.
+        */}
+        <View style={styles.dangerZone}>
+          <Text style={styles.section}>Your progress</Text>
+          <Text testID="quiz-reset-note" style={styles.sectionNote}>
+            {tracked > 0
+              ? `Quizzes have taught the map about ${tracked} ${tracked === 1 ? "country" : "countries"}. Resetting clears that for every country.`
+              : "No quiz history yet — play a round and the map will start colouring itself in."}
+          </Text>
+          <Pressable
+            testID="quiz-reset"
+            onPress={() => setConfirmingReset(true)}
+            // Nothing to clear is not a no-op worth offering: a live button that does
+            // nothing reads as broken, and the note above already says why it is inert.
+            disabled={tracked === 0}
+            style={[styles.reset, tracked === 0 && styles.startDisabled]}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: tracked === 0 }}
+            accessibilityLabel="Reset mastery for every country"
+          >
+            <Text style={styles.resetText}>Reset mastery</Text>
+          </Pressable>
+        </View>
       </ScrollView>
 
       {/*
@@ -163,6 +219,19 @@ export default function QuizSetupScreen() {
           </Pressable>
         </View>
       </View>
+
+      {/*
+        A `Modal`, like the leave-mid-round prompt - and here it is simply the shared
+        component rather than a workaround: this route has no MapLibre surface on it, so
+        the paint bug that forced `Modal` on `/quiz/play` is not in play at all.
+      */}
+      <ConfirmDialog
+        testID="quiz-reset-confirm"
+        visible={confirmingReset}
+        {...buildResetPrompt({ tracked })}
+        onDismiss={() => setConfirmingReset(false)}
+        onPress={resolveReset}
+      />
     </View>
   );
 }
@@ -192,6 +261,23 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   sectionNote: { color: quizColors.textFaint, fontSize: 12, marginBottom: 2 },
+  dangerZone: {
+    marginTop: 24,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: quizColors.border,
+    gap: 10,
+  },
+  /** The same outlined shape as `ConfirmDialog`'s destructive button, deliberately. */
+  reset: {
+    marginTop: 4,
+    borderRadius: quizRadii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: quizColors.wrong,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  resetText: { color: quizColors.wrong, fontSize: 15, fontWeight: "600" },
   footer: {
     position: "absolute",
     left: 0,

@@ -1977,6 +1977,42 @@ IndexedDB backend is a later major), and `web.output: "static"` renders every ro
 where there is no window. The split keeps the native module out of the web bundle entirely.
 It is a file-extension split, not a `Platform.OS` check; there are still zero of those.
 
+### Resetting — the third door into the store
+
+The bottom of `/quiz`, past every setting, carries a **Reset mastery** button behind the same
+`ConfirmDialog` the leave-mid-round prompt uses. Its wording lives in `quiz/resetPrompt.ts`, pure and
+unit-tested, exactly as `exitPrompt.ts` does — and it names the count, because "your progress" is an
+abstraction and "37 countries" is the thing a player would actually miss.
+
+`resetMastery()` behaves like neither `recordResult` nor `publishMastery`, and all three differences
+are load-bearing:
+
+- **It notifies unconditionally.** `publishMastery` is guarded by `dirty`, and a reset records
+  nothing, so routing it through there would be a silent no-op with the map still painting deleted
+  scores. `notify()` bumps the version, `MapScreen` re-folds, and `withMastery` returns
+  `worldGeoJson` itself for an empty table — so the source goes back to the identity it had before
+  the player's first round.
+- **It writes immediately.** `flushPersist()` cancels the pending 2 s debounce first, so the write
+  from the round just played cannot land a second later and resurrect what was just deleted.
+- **A `cleared` flag guards the import-time read.** The module fires `loadMastery()` at import and
+  merges with `mergeTables(stored, table)`, which returns `stored` verbatim when memory is empty — so
+  a reset landing before that read resolves would be undone by it. Reachable only via a deep link
+  straight onto `/quiz`, and one line to make impossible.
+
+**`__resetMasteryStore` is not this**, and its comment used to say there was no user-facing reset at
+all. It clears the listener set (dropping `MapScreen`'s subscription for the life of the process),
+rewinds `version` to 0 (which is what the map's `useMemo` folds on) and writes nothing, so the old
+table returns on the next cold start. It stays what it was: the test-only rewind.
+
+Nothing new was needed in either storage module. `encodeMastery({})` is a well-formed empty payload
+that `decodeMastery` reads back as `{}`, so `saveMastery({})` is a correct clear on native and web
+alike — no `clearMastery`, and no second place that knows the key.
+
+The button is **disabled when nothing has been asked**, and the note above it says so rather than
+leaving a live control that does nothing. That is the only reason the setup screen subscribes to the
+store at all; it subscribes **inline**, not through a hook, for the `reactCompiler` reason
+`MapScreen` records.
+
 ### What Jest cannot see here
 
 - **That a linear `interpolate` inside a `case`/`has` wrapper parses in the native
@@ -1986,7 +2022,12 @@ It is a file-extension split, not a `Platform.OS` check; there are still zero of
 - **That replacing `<GeoJSONSource data>` on a live map redraws** rather than blanking or
   hitching. Nothing in the app had ever done it. This is the riskiest unproven part.
 - **That AsyncStorage survives a cold start** — persistence across process death *is* the
-  feature, and Jest sees an in-memory shim.
+  feature, and Jest sees an in-memory shim. The same applies in reverse to a **reset**: that
+  the cleared table really reached storage is only visible by killing the app and launching
+  it again.
+- **That the map redraws when the source is handed back its ORIGINAL collection**, which is
+  what a reset does and which nothing else in the app does. `.maestro/mastery.yaml` covers
+  the swap; that the countries actually went grey is still a screenshot.
 - **That `expo prebuild` links the module and the app still launches.** `icon-padding: 2`
   shipped perfectly on web and killed the app fatally on Android; a native dependency is the
   same class of risk.

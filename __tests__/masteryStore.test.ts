@@ -227,3 +227,78 @@ describe('persistence', () => {
     expect(store.getMasterySnapshot().scores).toEqual({});
   });
 });
+
+describe('resetting', () => {
+  it('clears every country, in memory and on disk', async () => {
+    const { store, mock } = await freshStore(
+      seeded({
+        FRA: { name: { asked: 4, correct: 4, lastCorrect: true } },
+        DEU: { capital: { asked: 2, correct: 0, lastCorrect: false } },
+      }),
+    );
+    expect(Object.keys(store.getMasterySnapshot().scores)).toHaveLength(2);
+
+    store.resetMastery();
+
+    expect(store.getMasterySnapshot().scores).toEqual({});
+    expect(store.getMasterySnapshot().practiceScores).toEqual({});
+    expect(JSON.parse(mock.__raw(MASTERY_KEY) as string).c).toEqual({});
+  });
+
+  it('notifies even though nothing was recorded, which publish would not', async () => {
+    // The trap: `publishMastery` returns early when nothing is dirty, and a reset records
+    // nothing. Without an unconditional notify the map keeps painting deleted scores.
+    const { store } = await freshStore(
+      seeded({ FRA: { name: { asked: 4, correct: 4, lastCorrect: true } } }),
+    );
+    const seen: number[] = [];
+    store.subscribeToMastery((s) => seen.push(s.version));
+
+    store.publishMastery();
+    expect(seen).toHaveLength(0);
+
+    const before = store.getMasterySnapshot().version;
+    store.resetMastery();
+
+    expect(seen).toHaveLength(1);
+    expect(store.getMasterySnapshot().version).toBe(before + 1);
+  });
+
+  it('keeps listeners subscribed, unlike the test-only reset', async () => {
+    const { store } = await freshStore();
+    const seen: number[] = [];
+    store.subscribeToMastery((s) => seen.push(s.version));
+
+    store.resetMastery();
+    store.recordResult(result('FRA', 'name', true));
+    store.publishMastery();
+
+    expect(seen).toHaveLength(2);
+    expect(store.getMasterySnapshot().scores.FRA).toBeGreaterThan(0);
+  });
+
+  it('writes immediately, so a pending round write cannot resurrect the table', async () => {
+    const { store, mock } = await freshStore();
+    jest.useFakeTimers();
+
+    store.recordResult(result('FRA', 'name', true));
+    store.resetMastery();
+    expect(JSON.parse(mock.__raw(MASTERY_KEY) as string).c).toEqual({});
+
+    // The debounce from the record above must have been cancelled, not merely outrun.
+    jest.runOnlyPendingTimers();
+    expect(JSON.parse(mock.__raw(MASTERY_KEY) as string).c).toEqual({});
+    expect(mock.__writes()).toBe(1);
+  });
+
+  it('is not undone by a cold-start read that had not landed yet', async () => {
+    const { store } = isolate(
+      seeded({ FRA: { name: { asked: 3, correct: 3, lastCorrect: true } } }),
+    );
+
+    store.resetMastery();
+    await settle();
+
+    expect(store.getMasterySnapshot().scores).toEqual({});
+  });
+});

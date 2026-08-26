@@ -59,6 +59,14 @@ let snapshot: MasterySnapshot = { scores: {}, practiceScores: {}, version: 0 };
 /** Set by `recordResult`, cleared by a publish or a flush. */
 let dirty = false;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Set by `resetMastery`, and read by the import-time load below.
+ *
+ * The read is async and the reset is not. `mergeTables(stored, {})` returns `stored`
+ * verbatim, so a reset that lands before the read resolves would be silently undone by it -
+ * the player's history would come back on the next frame having just been deleted.
+ */
+let cleared = false;
 
 type Listener = (snapshot: MasterySnapshot) => void;
 const listeners = new Set<Listener>();
@@ -146,12 +154,45 @@ export function publishMastery(): void {
 }
 
 /**
+ * Wipe the table for every country, on the player's say-so.
+ *
+ * The third door into this module, and it behaves like neither of the other two.
+ *
+ * - **It notifies unconditionally.** `publishMastery` is guarded by `dirty` and would
+ *   no-op here, because a reset records nothing. The version has to move regardless:
+ *   `MapScreen` keys its fold on the snapshot's identity, so without the bump the map
+ *   would keep painting scores that no longer exist.
+ * - **It writes immediately** rather than scheduling. `flushPersist` cancels the pending
+ *   debounce first, so the write from the round just played cannot land on top of the
+ *   reset a second later and resurrect it.
+ * - **It is not `__resetMasteryStore`.** That one clears the listener set and rewinds the
+ *   version to zero, which would drop `MapScreen`'s subscription for the life of the
+ *   process, and it never touches storage - so the old table would be back on the next
+ *   cold start.
+ */
+export function resetMastery(): void {
+  table = {};
+  dirty = false;
+  cleared = true;
+
+  // `saveMastery({})` rather than removing the key: `encodeMastery({})` is a well-formed
+  // empty payload that `decodeMastery` reads back as `{}`, so this needs nothing new from
+  // either storage module - including the `.web.ts` sibling.
+  flushPersist();
+  notify();
+}
+
+/**
  * Kicked off at module import, so the read starts on the app's first frame.
  *
  * `mergeTables`, not assignment: the read is async and an answer could land first. The map
  * renders against an empty table and re-folds once when this resolves.
  */
 void loadMastery().then((stored) => {
+  // The player deleted their history while this was in flight. Merging now would hand it
+  // straight back; there is nothing on disk any more either way.
+  if (cleared) return;
+
   const merged = mergeTables(stored, table);
   const hadMemory = dirty;
   table = merged;
@@ -171,12 +212,18 @@ void loadMastery().then((stored) => {
   notify();
 });
 
-/** Tests only. There is no user-facing reset yet. */
+/**
+ * Tests only, and deliberately NOT what the Reset button calls - use `resetMastery` for
+ * that. This rewinds the module to its just-imported state: it drops every listener and
+ * sends the version back to zero, neither of which a running app can survive, and it writes
+ * nothing, so what is on disk is untouched.
+ */
 export function __resetMasteryStore(): void {
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = null;
   table = {};
   snapshot = { scores: {}, practiceScores: {}, version: 0 };
   dirty = false;
+  cleared = false;
   listeners.clear();
 }

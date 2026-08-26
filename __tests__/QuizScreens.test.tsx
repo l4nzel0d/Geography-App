@@ -7,7 +7,13 @@
  *
  * RNTL v14 made `render` and `fireEvent` async; they must be awaited.
  */
-import { act, fireEvent, render as rtlRender, screen } from '@testing-library/react-native';
+import {
+  act,
+  fireEvent,
+  render as rtlRender,
+  screen,
+  within,
+} from '@testing-library/react-native';
 import { BackHandler } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
@@ -26,6 +32,7 @@ import {
   __resetMasteryStore,
   getMasterySnapshot,
   publishMastery,
+  recordResult,
 } from '@/mastery/masteryStore';
 import { PRACTICE_ROUND_SIZE } from '@/quiz/practicePool';
 
@@ -321,6 +328,112 @@ describe('the setup screen', () => {
           params: expect.objectContaining({ mode: 'locate', practice: '1' }),
         });
       });
+    });
+  });
+
+  /**
+   * The one irreversible thing in the app.
+   *
+   * What is checked here is our wiring - that the button reflects the store, that nothing
+   * is cleared without a confirmation, and that confirming really does empty the table.
+   * That the card PAINTS is `Modal`'s business and `.maestro/mastery.yaml`'s to prove.
+   */
+  describe('resetting mastery', () => {
+    const dialog = () => screen.queryByTestId('quiz-reset-confirm');
+
+    /** Two countries with history, published so the screen's first snapshot has them. */
+    const seedHistory = () => {
+      for (const iso3 of ['FRA', 'DEU']) {
+        recordResult({
+          iso3,
+          grades: [
+            { field: 'name', correct: true, how: 'exact', given: 'x', expected: 'x' },
+          ],
+          allCorrect: true,
+        });
+      }
+      publishMastery();
+    };
+
+    beforeEach(() => {
+      __resetMasteryStore();
+    });
+
+    afterEach(() => {
+      __resetMasteryStore();
+    });
+
+    it('is inert, and says why, when there is nothing to clear', async () => {
+      await render(<QuizSetupScreen />);
+
+      expect(screen.getByTestId('quiz-reset').props.accessibilityState.disabled).toBe(true);
+      expect(screen.getByTestId('quiz-reset-note').props.children).toContain(
+        'No quiz history yet',
+      );
+    });
+
+    it('counts what a round taught the map', async () => {
+      seedHistory();
+      await render(<QuizSetupScreen />);
+
+      expect(screen.getByTestId('quiz-reset').props.accessibilityState.disabled).toBe(false);
+      expect(screen.getByTestId('quiz-reset-note').props.children).toContain('2 countries');
+    });
+
+    it('asks before clearing anything', async () => {
+      seedHistory();
+      await render(<QuizSetupScreen />);
+      expect(dialog()).toBeNull();
+
+      await fireEvent.press(screen.getByTestId('quiz-reset'));
+
+      expect(await screen.findByTestId('quiz-reset-confirm')).toBeTruthy();
+      expect(screen.getByText('Reset mastery?')).toBeTruthy();
+      // Naming the count is the whole reason the screen subscribes to the store. Scoped
+      // to the card, because the note behind it says the same number.
+      expect(
+        within(screen.getByTestId('quiz-reset-confirm')).getByText(/2 countries/),
+      ).toBeTruthy();
+      expect(getMasterySnapshot().scores).toHaveProperty('FRA');
+    });
+
+    it('keeps the history when the dialog is cancelled', async () => {
+      seedHistory();
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('quiz-reset'));
+
+      await fireEvent.press(await screen.findByTestId('quiz-reset-confirm-cancel'));
+
+      expect(dialog()).toBeNull();
+      expect(Object.keys(getMasterySnapshot().scores)).toHaveLength(2);
+    });
+
+    it('keeps the history when the scrim behind the card is tapped', async () => {
+      seedHistory();
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('quiz-reset'));
+
+      await fireEvent.press(await screen.findByTestId('quiz-reset-confirm-scrim'));
+
+      expect(dialog()).toBeNull();
+      expect(Object.keys(getMasterySnapshot().scores)).toHaveLength(2);
+    });
+
+    it('clears every country when it is confirmed, and says so on the spot', async () => {
+      seedHistory();
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('quiz-reset'));
+
+      await fireEvent.press(await screen.findByTestId('quiz-reset-confirm-reset'));
+
+      expect(dialog()).toBeNull();
+      expect(getMasterySnapshot().scores).toEqual({});
+      // The screen subscribes, so the note and the button follow without a remount - which
+      // is the same notification the map behind this screen is relying on.
+      expect(screen.getByTestId('quiz-reset-note').props.children).toContain(
+        'No quiz history yet',
+      );
+      expect(screen.getByTestId('quiz-reset').props.accessibilityState.disabled).toBe(true);
     });
   });
 });
