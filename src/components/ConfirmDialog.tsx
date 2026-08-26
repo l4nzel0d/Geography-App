@@ -71,14 +71,17 @@ export function ConfirmDialog<Id extends string>({
       {/*
         The scrim is the dismiss target. `Pressable` rather than a bare View so a tap
         outside the card means cancel, which is what a dimmed backdrop looks like it does.
+
+        **It must NOT carry `accessibilityRole="button"`.** react-native-web maps that role
+        onto a real `<button>` element (`propsToAccessibilityComponent`), and the card's own
+        action buttons are descendants of this one - so the role produced nested `<button>`s,
+        which is invalid HTML that React reports as an error and a browser is free to
+        restructure around. The role bought nothing on native either: every prompt carries an
+        explicit `cancel` button, and Android's back key reaches `onRequestClose`, so there
+        are two labelled ways out without turning the whole backdrop into a control a screen
+        reader announces.
       */}
-      <Pressable
-        testID={`${testID}-scrim`}
-        style={styles.scrim}
-        accessibilityRole="button"
-        accessibilityLabel="Dismiss"
-        onPress={onDismiss}
-      >
+      <Pressable testID={`${testID}-scrim`} style={styles.scrim} onPress={onDismiss}>
         {/*
           Swallows the press so a tap on the card itself does not dismiss it. `onPress`
           with an empty body is the whole point; there is nothing missing here.

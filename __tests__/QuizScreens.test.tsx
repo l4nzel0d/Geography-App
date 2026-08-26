@@ -419,6 +419,24 @@ describe('the setup screen', () => {
       expect(Object.keys(getMasterySnapshot().scores)).toHaveLength(2);
     });
 
+    it('never gives the scrim a button role, which nests buttons on the web', async () => {
+      // react-native-web maps accessibilityRole="button" onto a real <button>, and the
+      // card's own actions are descendants of the scrim - so the role produced nested
+      // buttons, invalid HTML that React reports as an error. Guards `ConfirmDialog` for
+      // every screen that uses it, not just this one.
+      seedHistory();
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('quiz-reset'));
+
+      const scrim = await screen.findByTestId('quiz-reset-confirm-scrim');
+      expect(scrim.props.accessibilityRole).toBeUndefined();
+      expect(scrim.props.role).toBeUndefined();
+      // The buttons inside it keep theirs; that is the pair that cannot both be a button.
+      expect(screen.getByTestId('quiz-reset-confirm-reset').props.accessibilityRole).toBe(
+        'button',
+      );
+    });
+
     it('clears every country when it is confirmed, and says so on the spot', async () => {
       seedHistory();
       await render(<QuizSetupScreen />);
