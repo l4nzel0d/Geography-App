@@ -687,8 +687,8 @@ unverified, because `.maestro/quiz.yaml` only types in portrait.
 Three routes, none of which touch `src/app/index.tsx`: `/quiz` (setup, no map), `/quiz/play` (the
 round), `/quiz/results` (score and review, no map).
 
-Config crosses `/quiz → /quiz/play` as **router params** (`mode`, `subregions`, `fields`, `seed`,
-`practice`), which makes a round deep-linkable and pinnable from a test. The finished round crosses to
+Config crosses `/quiz → /quiz/play` as **router params** (`mode`, `subregions`, `fields`, `only`,
+`seed`, `practice`), which makes a round deep-linkable and pinnable from a test. The finished round crosses to
 results through **`quizResultStore.ts`**, a one-slot singleton — 193 × 5 graded fields will not fit in a
 URL, and results are reached with `router.replace`, which tears down the second MapLibre surface. The
 store **clears on read**, so a back gesture cannot resurrect a stale score.
@@ -857,6 +857,60 @@ deep link can smuggle `fields=location` into a facts round.
 **`buildQuiz` skips its completeness filter for locate**: that filter drops a country that cannot answer
 any *chosen fact*, and a locate round asks something every country can answer — a config carrying
 `fields: ['currency']` over from a previous round must not silently drop Micronesia.
+
+### Retrying what you got wrong
+
+`/quiz/results` renders a full per-question review, and the button under it starts a round asking
+**only the countries that were not fully correct, and only the fields each of them actually got
+wrong**. Miss France's currency and Germany's capital in a five-field round and the retry asks France
+its currency and Germany its capital — nothing else, and neither country the other's miss.
+
+`buildRetryConfig` (`src/quiz/retryRound.ts`, pure, type-only imports) is the whole decision;
+`results.tsx` supplies `newSeed()` so that module stays pure, the split "Play again" already makes.
+
+**`QuizConfig` gained one field, `only: RetryTarget[]`** — `{ iso3, fields }` per country, crossing
+the URL as `only=FRA:capital.currency,JPN:name`. A comma between countries, a colon before the field
+list, a dot between fields; **dots rather than `+`, which a form-encoded query string reads as a
+space**. A bare `FRA` with no colon is legal and means "the round's own fields", which is what a
+hand-typed link says and what a `locate` retry emits (`location` is not a `FieldId`, so there is
+nothing to name). Params rather than a store, for the reason `quizConfig.ts` already gives: a store
+would also break "Play again" on a retry round, which replays the config through the URL.
+
+Four rules, each of which cost a decision:
+
+- **`only` REPLACES the subregion filter, it does not intersect it.** `?only=FRA&subregions=Eastern
+  Africa` is two individually sensible params that intersect to an empty round. `subregions` is still
+  carried untouched, because "Change settings" pops back to a setup screen that shows it ticked — the
+  same reason `fields` is carried through a locate round.
+- **`only` beats `practice`**, and `buildRetryConfig` sets `practice: false` so a real config never
+  says both. The precedence rule only ever decides a hand-typed link.
+- **The round's `fields` stays the UNION of every target's**, and that is load-bearing: `QuizPanel`
+  mounts one row per configured field **once for the whole round** and hides the ones the current
+  country is not being asked (`askable = new Set(question.fields)`). A `fields` narrower than some
+  target's would mount no row for that field and the question would silently lose it. Per-country
+  targets feed machinery that already existed for a country missing a fact.
+- **It never narrows `fields` to empty.** `fields: []` round-trips through `parseQuizParams` into
+  `DEFAULT_FIELDS`, so emitting one would rewrite a locate round's carried currency selection into a
+  name round.
+
+`only` is read in **two** places, which is the one wrinkle. *Who* is asked is honoured at the call
+site — `play.tsx` injects `countriesWithCodes(...)` as the pool, so a bare `buildQuiz(config)` ignores
+it exactly as it ignores `practice`. *Which fields* each is asked is honoured **inside `buildQuiz`**,
+because that is already where per-question fields are computed and there is nowhere else they could
+come from. This is the first feature that did not fit through the injectable-pool seam alone.
+
+**Ended early is correct by construction**: `missedCountries`/`missedTargets` read `run.results` and
+never `run.total`, and `finish` is handed only the questions actually checked — so a country never
+reached cannot be retried. `total` sits right there in `QuizRun` and is the obvious wrong thing to
+reach for, which is why a test says so.
+
+Chaining converges: a retry's own misses are a subset on both axes, and a perfect retry yields `null`
+and no button. Mastery needed nothing — `recordResult` fires per checked question regardless of how
+the pool was chosen, so a chain of retries tightens the score on exactly the weak field.
+
+The label counts (`results.retryMissed`, in the **plural** catalogues — Russian needs three forms).
+The count is in the button and not left to the review heading because the footer is pinned while that
+list scrolls, and 3 versus 87 is the one fact worth having before committing.
 
 ### Flag mode specifics
 
@@ -1492,7 +1546,7 @@ orientation with `setOrientation`:
 | `map-labels.yaml` | PORTRAIT | each label field in turn, flags included → map and selection still work |
 | `search-country.yaml` | PORTRAIT | open search → browse → type → pick → map highlights and flies |
 | `mastery.yaml` | PORTRAIT | mastery fill mode → practice round → reset → structure only |
-| `quiz.yaml` | PORTRAIT + rotate | pick subregion/fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score |
+| `quiz.yaml` | PORTRAIT + rotate | pick subregion/fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score → **retry the miss** |
 
 **No flow for locate mode, flag mode, or Russian** — the current gaps. Several flows exist purely as a
 **proof-of-parse** for expressions the native renderer would otherwise reject silently, which is the only

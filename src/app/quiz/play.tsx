@@ -27,7 +27,7 @@ import { gradeQuestion, type QuestionResult, toAnswerInput } from '@/quiz/gradeA
 import { gradeLocation } from '@/quiz/gradeLocation';
 import { buildQuiz, makeRng } from '@/quiz/quizBuilder';
 import { pickWeakSpots, PRACTICE_ROUND_SIZE } from '@/quiz/practicePool';
-import { countriesIn } from '@/quiz/quizCountries';
+import { countriesIn, countriesWithCodes } from '@/quiz/quizCountries';
 import { type FieldId, MODE_USES_MAP, parseQuizParams } from '@/quiz/quizConfig';
 import { getQuizPanelLayout } from '@/quiz/quizPanelLayout';
 import { getMasterySnapshot, publishMastery, recordResult } from '@/mastery/masteryStore';
@@ -105,9 +105,15 @@ export default function QuizPlayScreen() {
   /**
    * The round, built once.
    *
-   * `buildQuiz` needed no change for practice, exactly as it needed none for flag mode:
-   * its second parameter is already an injectable pool, and `undefined` falls through to
-   * the whole filtered one.
+   * `buildQuiz` needed no change for practice, exactly as it needed none for flag mode -
+   * nor for a retry round, which is the third feature through the same seam: its second
+   * parameter is already an injectable pool, and `undefined` falls through to the whole
+   * filtered one.
+   *
+   * The three-way ternary is ordered, not arbitrary. `only` names its countries outright,
+   * so it beats a heuristic selection of them - and it draws from the WHOLE pool rather
+   * than `countriesIn(config.subregions)`, because it replaces the subregion filter rather
+   * than intersecting it. See `QuizConfig.only` for why that is the safe direction.
    *
    * The scores are read once here, in the same initialiser, following `config`'s
    * parsed-once discipline. A cold-start deep link straight onto this route could get in
@@ -121,7 +127,9 @@ export default function QuizPlayScreen() {
   const [questions] = useState(() =>
     buildQuiz(
       config,
-      config.practice
+      config.only.length
+        ? countriesWithCodes(config.only.map((target) => target.iso3))
+        : config.practice
         ? pickWeakSpots(
             countriesIn(config.subregions),
             // The PRACTICE scores, not the map's: a country answered right once reads

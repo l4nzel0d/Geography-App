@@ -81,4 +81,11 @@ export const ruPlurals: Record<PluralKey, Required<PluralForms>> = {
     many: 'Разбор — {count} ошибок',
     other: 'Разбор — {count} ошибок',
   },
+  // Винительный падеж после «повторить»: страну / страны / стран.
+  'results.retryMissed': {
+    one: 'Повторить {count} страну с ошибкой',
+    few: 'Повторить {count} страны с ошибками',
+    many: 'Повторить {count} стран с ошибками',
+    other: 'Повторить {count} стран с ошибками',
+  },
 };

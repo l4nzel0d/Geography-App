@@ -180,6 +180,37 @@ appId: com.boris.geographyapp
 - assertNotVisible:
     id: 'world-map'
 
+# The retry round crosses a REAL route boundary as `?only=`, which no unit test can see:
+# Jest mocks `useLocalSearchParams` wholesale, so every claim about that param stops at
+# the edge of `parseQuizParams`. This is the only thing that proves it survives
+# expo-router's own encoding - and the colons and dots in `FRA:capital.currency` are new
+# shapes for a param in this app, where `subregions` had only ever carried spaces.
+#
+# It is deterministic without pinning the seed. The capital was deliberately left blank on
+# question 1, and question 2 was never checked, so the round scored exactly one country and
+# missed it: the retry is one question whatever order the shuffle produced.
+- assertVisible:
+    id: 'quiz-retry-missed'
+- tapOn:
+    id: 'quiz-retry-missed'
+
+- assertVisible:
+    id: 'quiz-panel'
+- assertVisible: '1 / 1'
+
+# Whether the typed name was right depends on the seed, so the name row may or may not be
+# here - but the blank capital was wrong for certain, so its row must be.
+- assertVisible:
+    id: 'quiz-input-capital'
+
+- tapOn:
+    id: 'quiz-end'
+- assertVisible:
+    id: 'quiz-results'
+# Nothing was checked in the retry, so there is nothing to retry again.
+- assertNotVisible:
+    id: 'quiz-retry-missed'
+
 - tapOn:
     id: 'quiz-back-to-map'
 - assertVisible:

@@ -63,11 +63,29 @@ export function buildQuiz(
    */
   const locate = config.mode === 'locate';
 
+  /**
+   * Which fields each country is asked, when the config names them per country.
+   *
+   * This is the one thing `only` cannot delegate to the injected pool: the pool answers
+   * WHO is asked, and per-question fields are computed here and nowhere else. A target
+   * with an empty field list falls through to the round's own `config.fields`, which is
+   * what a hand-typed `?only=FRA` means.
+   *
+   * `config.fields` is still the union of every target's, so `QuizPanel` mounts a row per
+   * field once for the whole round and hides the ones this country is not being asked -
+   * the machinery that already existed for a country missing a fact.
+   */
+  const askOnly = new Map(
+    config.only.filter((target) => target.fields.length).map((target) => [target.iso3, target.fields]),
+  );
+
   const questions = pool
     .map((country) => ({
       iso3: country.iso3,
       facts: country.facts,
-      fields: locate ? [] : answerableFields(country.facts, config.fields),
+      fields: locate
+        ? []
+        : answerableFields(country.facts, askOnly.get(country.iso3) ?? config.fields),
     }))
     // A country with nothing askable would be a question with no inputs. Only reachable
     // when the config asks for a single field that this country lacks - currency and

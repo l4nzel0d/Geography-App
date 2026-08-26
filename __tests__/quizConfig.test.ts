@@ -10,6 +10,7 @@ import {
   DEFAULT_FIELDS,
   newSeed,
   parseQuizParams,
+  type FieldId,
   toQuizParams,
   type QuizConfig,
 } from '@/quiz/quizConfig';
@@ -43,6 +44,8 @@ describe('parseQuizParams', () => {
       mode: 'facts',
       subregions: ['Western Europe'],
       fields: ['name', 'capital'],
+      // Absent `only` is no restriction, for the same reason as `mode` and `practice`.
+      only: [],
       seed: 42,
       // Absent `practice` is a normal round, for the same reason as `mode`.
       practice: false,
@@ -66,7 +69,13 @@ describe('parseQuizParams', () => {
     });
 
     it('round-trips through toQuizParams in both states', () => {
-      const base = { mode: 'facts' as const, subregions: [], fields: ['name' as const], seed: 7 };
+      const base = {
+        mode: 'facts' as const,
+        subregions: [],
+        fields: ['name' as const],
+        only: [],
+        seed: 7,
+      };
 
       for (const practice of [true, false]) {
         const params = toQuizParams({ ...base, practice });
@@ -74,6 +83,93 @@ describe('parseQuizParams', () => {
         expect(params.practice).toBe(practice ? '1' : '0');
         expect(parseQuizParams(params, seed).practice).toBe(practice);
       }
+    });
+  });
+
+  describe('only', () => {
+    const BASE_CONFIG = {
+      mode: 'facts' as const,
+      subregions: [],
+      fields: ['name' as const],
+      only: [],
+      seed: 7,
+      practice: false,
+    };
+
+    const target = (iso3: string, fields: FieldId[] = []) => ({ iso3, fields });
+
+    it.each([[undefined], ['']])('reads %p as no restriction', (raw) => {
+      expect(parseQuizParams({ only: raw }, seed).only).toEqual([]);
+    });
+
+    it('reads a bare code as "ask this country the round’s own fields"', () => {
+      // Which is what a hand-typed `?only=FRA` means, and what a locate retry emits -
+      // `location` is not a `FieldId`, so there is nothing to name.
+      expect(parseQuizParams({ only: 'FRA' }, seed).only).toEqual([target('FRA')]);
+    });
+
+    it('reads a per-country field list, which is the whole point of the encoding', () => {
+      // France is re-asked its currency and Japan its name; neither is asked the other's.
+      expect(parseQuizParams({ only: 'FRA:capital.currency,JPN:name' }, seed).only).toEqual([
+        target('FRA', ['capital', 'currency']),
+        target('JPN', ['name']),
+      ]);
+    });
+
+    it('accepts the param repeated as an array', () => {
+      expect(parseQuizParams({ only: ['FRA:name', 'JPN'] }, seed).only).toEqual([
+        target('FRA', ['name']),
+        target('JPN'),
+      ]);
+    });
+
+    it('uppercases, because ISO-3 is uppercase everywhere it is compared', () => {
+      // The geometry's `iso3` property and the keys of `COUNTRY_FACTS`. A hand-typed
+      // `?only=fra` that matched nobody would be the failure that most looks like it
+      // worked - an empty round with no error.
+      expect(parseQuizParams({ only: 'fra:name' }, seed).only).toEqual([target('FRA', ['name'])]);
+    });
+
+    it('drops a field it does not recognise rather than trusting it', () => {
+      expect(parseQuizParams({ only: 'FRA:capital.flavour' }, seed).only).toEqual([
+        target('FRA', ['capital']),
+      ]);
+    });
+
+    it('merges a country named twice rather than asking it twice', () => {
+      expect(parseQuizParams({ only: 'FRA:capital,FRA:currency' }, seed).only).toEqual([
+        target('FRA', ['capital', 'currency']),
+      ]);
+    });
+
+    it('keeps an unrecognised code, letting the pool filter decide', () => {
+      // Same rule as an unknown subregion: `quizCountries` owns the catalogue, and
+      // importing it here would pull the geometry into a module that only coerces strings.
+      expect(parseQuizParams({ only: 'XXX' }, seed).only).toEqual([target('XXX')]);
+    });
+
+    it('is always emitted, and empty when unrestricted', () => {
+      // Nothing depends on how expo-router treats an absent versus an empty param.
+      expect(toQuizParams({ ...BASE_CONFIG, only: [] }).only).toBe('');
+      expect(
+        toQuizParams({
+          ...BASE_CONFIG,
+          only: [target('FRA', ['capital', 'currency']), target('JPN')],
+        }).only,
+      ).toBe('FRA:capital.currency,JPN');
+    });
+
+    it('round-trips the worst case a real round can produce', () => {
+      // 193 countries, every one of them wrong on every field. The pathological bound, and
+      // the reason to know it: naming fields per country is what makes this param long, so
+      // the size claim belongs next to the encoding rather than in someone's head.
+      const every = Array.from({ length: 193 }, (_, i) =>
+        target(`C${String(i).padStart(2, '0')}`, [...ANSWERABLE_FIELDS]),
+      );
+      const params = toQuizParams({ ...BASE_CONFIG, only: every });
+
+      expect(params.only.length).toBeLessThan(10_000);
+      expect(parseQuizParams(params, seed).only).toEqual(every);
     });
   });
 
@@ -160,6 +256,7 @@ describe('toQuizParams', () => {
     mode: 'facts',
     subregions: ['Western Europe', 'Polynesia'],
     fields: ['name', 'population'],
+    only: [],
     seed: 99,
     practice: false,
   };

@@ -28,6 +28,7 @@ import { mapColors } from '@/map/offlineStyle';
 import { CURRENCIES_REQUIRED } from '@/quiz/gradeAnswer';
 import { buildQuiz } from '@/quiz/quizBuilder';
 import { parseQuizParams } from '@/quiz/quizConfig';
+import { countriesWithCodes } from '@/quiz/quizCountries';
 import { setQuizResult } from '@/quiz/quizResultStore';
 import {
   __resetMasteryStore,
@@ -630,6 +631,43 @@ describe('the play screen', () => {
 
       expect(getMasterySnapshot().scores).toHaveProperty(questions[0].iso3);
     });
+  });
+
+  it('asks exactly the countries named by `only`, ignoring the subregion', async () => {
+    // The claim the whole retry feature rests on: `only` REPLACES the subregion filter.
+    // Neither France nor Japan is in Australia and New Zealand, so an intersection would
+    // make this an empty round - which is exactly how the feature would silently ship
+    // broken.
+    mockSearchParams = {
+      only: 'FRA,JPN',
+      subregions: 'Australia and New Zealand',
+      fields: 'name',
+      seed: '1',
+    };
+    await render(<QuizPlayScreen />);
+
+    expect(screen.getByTestId('quiz-progress')).toHaveTextContent(/1 \/ 2/);
+    const asked = buildQuiz(
+      parseQuizParams(mockSearchParams),
+      countriesWithCodes(['FRA', 'JPN']),
+    ).map((q) => q.iso3);
+    expect(asked.sort()).toEqual(['FRA', 'JPN']);
+  });
+
+  it('lets `only` beat practice, which would otherwise pick its own ten', async () => {
+    mockSearchParams = { only: 'FRA', practice: '1', fields: 'name', seed: '1' };
+    await render(<QuizPlayScreen />);
+
+    expect(screen.getByTestId('quiz-progress')).toHaveTextContent(/1 \/ 1/);
+  });
+
+  it('lands on the empty screen when `only` matches nobody', async () => {
+    // Reachable only by a hand-typed link. `quiz.empty` already says the right thing, and
+    // the back handler stands down when there is no question, so nobody is trapped.
+    mockSearchParams = { only: 'XXX', fields: 'name', seed: '1' };
+    await render(<QuizPlayScreen />);
+
+    expect(screen.getByTestId('quiz-empty')).toBeTruthy();
   });
 
   it('shows the map, the panel and the progress from the first frame', async () => {
@@ -1327,6 +1365,7 @@ describe('the results screen', () => {
       mode: 'facts' as const,
       subregions: [],
       fields: ['name' as const],
+      only: [],
       seed: 1,
       practice: false,
     },
@@ -1396,6 +1435,56 @@ describe('the results screen', () => {
       pathname: '/quiz/play',
       params: expect.objectContaining({ fields: 'name' }),
     });
+  });
+
+  it('offers a retry naming how many countries were missed', async () => {
+    setQuizResult(run);
+    await render(<QuizResultsScreen />);
+
+    expect(screen.getByTestId('quiz-retry-missed')).toHaveTextContent(
+      /Retry 1 country I got wrong/,
+    );
+  });
+
+  it('retries only the countries that were missed', async () => {
+    setQuizResult(run);
+    await render(<QuizResultsScreen />);
+    await fireEvent.press(screen.getByTestId('quiz-retry-missed'));
+
+    expect(mockReplace).toHaveBeenCalledWith({
+      pathname: '/quiz/play',
+      // France was right and is not in it; the round is never a practice round.
+      // `JPN:name` - the country AND the one field it got wrong, so a retry never makes
+      // the player retype a fact they already proved.
+      params: expect.objectContaining({ only: 'JPN:name', practice: '0', fields: 'name' }),
+    });
+  });
+
+  it('offers no retry when the round was perfect', async () => {
+    // A plain `queryByTestId`, with no `includeHiddenElements`: this route has no map, so
+    // ordinary conditional rendering is correct here and the button is genuinely absent.
+    setQuizResult({ ...run, results: [run.results[0]] });
+    await render(<QuizResultsScreen />);
+
+    expect(screen.queryByTestId('quiz-retry-missed')).toBeNull();
+  });
+
+  it('counts the retry in Russian, where one form is not enough', async () => {
+    setLocale('ru');
+    setQuizResult({
+      ...run,
+      results: [
+        { ...run.results[1], iso3: 'JPN' },
+        { ...run.results[1], iso3: 'PER' },
+        { ...run.results[1], iso3: 'CHN' },
+      ],
+    });
+    await render(<QuizResultsScreen />);
+
+    expect(screen.getByTestId('quiz-retry-missed')).toHaveTextContent(
+      /Повторить 3 страны с ошибками/,
+    );
+    __resetLocale();
   });
 
   it('returns to the map', async () => {

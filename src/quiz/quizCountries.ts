@@ -113,6 +113,27 @@ export function countriesIn(
 }
 
 /**
+ * The pool restricted to a set of ISO-3 codes - `QuizConfig.only`.
+ *
+ * Filters the pool rather than mapping over `codes`, and that is the load-bearing half:
+ * it makes the round a pure function of the code SET, so the order the codes happen to be
+ * listed in - for a retry, the order the player was asked - cannot change which questions
+ * a seed produces. `QUIZ_COUNTRIES_BY_LOCALE` keeps both languages in one order for the
+ * same reason.
+ *
+ * An unknown code contributes nothing, exactly as an unknown subregion does: this module
+ * owns the catalogue, so `parseQuizParams` does not validate against it.
+ */
+export function countriesWithCodes(
+  codes: readonly string[],
+  locale: Locale = getLocale(),
+): QuizCountry[] {
+  const wanted = new Set(codes);
+  const pool = QUIZ_COUNTRIES_BY_LOCALE[locale] ?? QUIZ_COUNTRIES;
+  return pool.filter((country) => wanted.has(country.iso3));
+}
+
+/**
  * Which of the requested fields this country actually has an answer for.
  *
  * The pool is deliberately not filtered by data completeness - a country is still asked,

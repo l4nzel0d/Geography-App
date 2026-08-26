@@ -61,4 +61,18 @@ export const enPlurals = {
     one: 'Review — {count} missed',
     other: 'Review — {count} missed',
   },
+  /**
+   * The count is in the label deliberately, and not left to the review heading above it.
+   * The footer is pinned while that list scrolls, so the heading is usually off screen by
+   * the time this button is pressed - and 3 versus 87 is the one fact worth having before
+   * committing to another round. `quiz.setup.start` names its length for the same reason.
+   *
+   * The tempting English `one` form is "Retry the one I got wrong", with no `{count}` at
+   * all. Do not: Russian's `one` covers 1, 21, 31 and 101, so a countless `one` is simply
+   * wrong there, and the pair would be structurally different for nothing.
+   */
+  'results.retryMissed': {
+    one: 'Retry {count} country I got wrong',
+    other: 'Retry {count} countries I got wrong',
+  },
 } as const satisfies Record<string, PluralForms>;

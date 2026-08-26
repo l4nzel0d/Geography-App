@@ -13,8 +13,8 @@ import { useWindowSize } from "@/components/useWindowSize";
 import { getCountryFacts } from "@/data/countryFacts";
 import { FIELD_LABEL_KEYS, newSeed, toQuizParams } from "@/quiz/quizConfig";
 import { takeQuizResult } from "@/quiz/quizResultStore";
+import { buildRetryConfig, missedCountries } from "@/quiz/retryRound";
 import { summarize } from "@/quiz/quizScore";
-import { getLocale } from "@/i18n/locale";
 import { useTranslator } from "@/i18n/useTranslator";
 
 /**
@@ -86,7 +86,9 @@ export default function QuizResultsScreen() {
   }
 
   const summary = summarize(run);
-  const wrongOnly = run.results.filter((result) => !result.allCorrect);
+  // One source of truth for the number, now that both the review heading and the retry
+  // button name it - they cannot disagree.
+  const missed = missedCountries(run);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 16 }]}>
@@ -140,9 +142,9 @@ export default function QuizResultsScreen() {
             misses - seeing the ones you got is half the point of a review. So the
             heading has to say so, or "1 to look at again" reads as a list of one. */}
         <Text testID="quiz-review-heading" style={styles.section}>
-          {wrongOnly.length === 0
+          {missed.length === 0
             ? t("results.review.allCorrect", { count: summary.countriesAsked })
-            : t.plural("results.review.missed", wrongOnly.length)}
+            : t.plural("results.review.missed", missed.length)}
         </Text>
 
         {run.results.map((result, position) => {
@@ -197,6 +199,33 @@ export default function QuizResultsScreen() {
       {/* Full-bleed bar, capped content - matching the setup screen. */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
         <View style={[styles.footerInner, centred]}>
+          {/* Ordinary conditional rendering, which is correct here and would not be over
+              the map: this route has no MapLibre surface to insert a view above. See
+              CLAUDE.md on the paint bug, escape 3, and its corollary.
+
+              It takes the accent slot and pushes "Play again" down to a quiet full-width
+              button, because after a round with misses retrying is the more useful of the
+              two and should be where the thumb already is. With nothing missed the row is
+              absent and the footer is exactly what it was. */}
+          {missed.length > 0 ? (
+            <Pressable
+              testID="quiz-retry-missed"
+              onPress={() => {
+                // `newSeed()` here rather than inside `buildRetryConfig`, which keeps that
+                // module pure - the same split "Play again" below already makes.
+                const retry = buildRetryConfig(run, newSeed());
+                if (retry) {
+                  router.replace({ pathname: "/quiz/play", params: toQuizParams(retry) });
+                }
+              }}
+              style={styles.primary}
+              accessibilityRole="button"
+            >
+              <Text style={styles.primaryText}>
+                {t.plural("results.retryMissed", missed.length)}
+              </Text>
+            </Pressable>
+          ) : null}
           <Pressable
             testID="quiz-play-again"
             onPress={() =>
@@ -205,10 +234,12 @@ export default function QuizResultsScreen() {
                 params: toQuizParams({ ...run.config, seed: newSeed() }),
               })
             }
-            style={styles.primary}
+            style={missed.length > 0 ? styles.wide : styles.primary}
             accessibilityRole="button"
           >
-            <Text style={styles.primaryText}>{t("results.playAgain")}</Text>
+            <Text style={missed.length > 0 ? styles.wideText : styles.primaryText}>
+              {t("results.playAgain")}
+            </Text>
           </Pressable>
           <View style={styles.footerRow}>
             <Pressable
@@ -333,6 +364,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
+  /**
+   * Full-width and quiet: "Play again" once retry has taken the accent.
+   *
+   * Not `secondary`, which carries `flex: 1` because it lives in `footerRow`, a row.
+   * `footerInner` is a column, and RN's `flex: 1` also sets `flexBasis: 0` - the same trap
+   * that collapses `LocatePanel` when it is given `flex` instead of `flexGrow`.
+   */
+  wide: {
+    borderRadius: quizRadii.pill,
+    paddingVertical: 12,
+    alignItems: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: quizColors.border,
+  },
+  wideText: { color: quizColors.textMuted, fontSize: 14, fontWeight: "600" },
   secondary: {
     flex: 1,
     borderRadius: quizRadii.pill,

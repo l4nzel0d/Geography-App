@@ -120,12 +120,55 @@ export const FIELD_LABEL_KEYS: Record<GradedField, MessageKey> = {
   location: 'quiz.field.location.label',
 };
 
+/**
+ * One country a restricted round re-asks, and which of its fields.
+ *
+ * `fields` empty means "whatever the round is configured to ask", which is what a
+ * hand-typed `?only=FRA` says. A retry built from a finished round always names them: the
+ * whole point is to re-ask France its currency without making the player retype its
+ * capital, which they got right.
+ *
+ * The round's `fields` stays the UNION of every target's - it is what `QuizPanel` mounts a
+ * row for, once, for the whole round - and each question's own list is what decides which
+ * of those rows is visible. That machinery already existed for countries missing a fact;
+ * per-country retry targets simply feed it.
+ */
+export type RetryTarget = {
+  iso3: string;
+  fields: FieldId[];
+};
+
 export type QuizConfig = {
   mode: QuizMode;
   /** Subregion labels, e.g. "Western Europe". Empty means every subregion. */
   subregions: string[];
   /** Which facts to ask for. Ignored entirely in `locate` mode. */
   fields: FieldId[];
+  /**
+   * Ask exactly these countries, and exactly these fields of each. Empty means no
+   * restriction.
+   *
+   * **Replaces `subregions` rather than intersecting it.** `?only=FRA&subregions=Eastern
+   * Africa` is two individually sensible params, and intersecting them would make it an
+   * empty round; restriction to a named list is the more specific instruction, so it
+   * wins outright. `subregions` is still carried through untouched, because "Change
+   * settings" pops back to a setup screen that still shows it ticked - the same reason
+   * `fields` is carried through a `locate` round that never reads it.
+   *
+   * It also beats `practice`: an explicit list of countries beats a heuristic selection
+   * of them. `buildRetryConfig` sets `practice: false` so a real config never says both,
+   * and the precedence rule only ever decides a hand-typed link.
+   *
+   * A general "ask exactly these" primitive rather than a retry-specific one - the same
+   * param is what "practise this one country" from the map would say.
+   *
+   * Read in two places, which is the one wrinkle worth knowing. WHO is asked is honoured
+   * at the call site, where `play.tsx` injects the pool - so a bare `buildQuiz(config)`
+   * ignores it, exactly as it ignores `practice`. WHICH FIELDS each of them is asked is
+   * honoured inside `buildQuiz`, because that is already where per-question fields are
+   * computed and there is nowhere else they could come from.
+   */
+  only: RetryTarget[];
   /** Seeds the shuffle, so the same config replays in the same order. */
   seed: number;
   /**
@@ -166,10 +209,48 @@ function toArray(raw: string | string[] | undefined): string[] {
     .filter(Boolean);
 }
 
+/**
+ * `['FRA:capital.currency', 'JPN']` -> retry targets.
+ *
+ * Never throws and never returns something unplayable, the rule the rest of this parser
+ * follows: an unknown field is dropped, an entry with no usable field list becomes "ask
+ * the round's own fields", and the same country named twice is merged rather than asked
+ * twice.
+ *
+ * Membership of the ISO-3 is deliberately NOT checked - `quizCountries` owns the
+ * catalogue, and importing it here would pull `countries.geo.json` into the one module
+ * that is purely about coercing strings. An unrecognised code simply matches nobody, and a
+ * round that matches nobody lands on the `quiz.empty` screen.
+ */
+function toRetryTargets(entries: readonly string[]): RetryTarget[] {
+  const byIso = new Map<string, RetryTarget>();
+
+  for (const entry of entries) {
+    const [rawIso, rawFields] = entry.split(':');
+    // ISO-3 is uppercase everywhere it is compared - the geometry's `iso3` property and
+    // `COUNTRY_FACTS`' keys - so a hand-typed `?only=fra` is folded rather than left to
+    // match nobody, which is the failure that most looks like it worked.
+    const iso3 = rawIso.trim().toUpperCase();
+    if (!iso3) continue;
+
+    const fields = (rawFields ?? '')
+      .split('.')
+      .map((field) => field.trim())
+      .filter((field): field is FieldId => (ANSWERABLE_FIELDS as readonly string[]).includes(field));
+
+    const existing = byIso.get(iso3);
+    if (existing) existing.fields = [...new Set([...existing.fields, ...fields])];
+    else byIso.set(iso3, { iso3, fields: [...new Set(fields)] });
+  }
+
+  return [...byIso.values()];
+}
+
 export function toQuizParams(config: QuizConfig): {
   mode: QuizMode;
   subregions: string;
   fields: string;
+  only: string;
   seed: string;
   practice: string;
 } {
@@ -184,6 +265,16 @@ export function toQuizParams(config: QuizConfig): {
     // whole config through the URL. Dropping them would silently clear the player's
     // facts selection the moment they tried the other mode.
     fields: config.fields.join(','),
+    // Always emitted too, empty when unrestricted - the discipline `subregions` and
+    // `practice` already follow. Worst case is 193 codes and 771 characters, which only a
+    // player who got every country wrong can produce.
+    // `FRA:capital.currency,JPN:name` - a comma between countries, a colon before the
+    // field list, a dot between fields. A bare `FRA` with no colon is legal and means the
+    // round's own fields. Dots rather than `+`, which a form-encoded query string reads as
+    // a space.
+    only: config.only
+      .map((target) => (target.fields.length ? `${target.iso3}:${target.fields.join('.')}` : target.iso3))
+      .join(','),
     seed: String(config.seed),
   };
 }
@@ -225,6 +316,15 @@ export function parseQuizParams(
     mode,
     practice,
     subregions: [...new Set(toArray(raw.subregions))],
+    // ISO-3 is uppercase everywhere it is compared - the geometry's `iso3` property and
+    // `COUNTRY_FACTS`' keys - so a hand-typed `?only=fra` is folded rather than left to
+    // match nobody, which is the failure that most looks like it worked.
+    //
+    // Membership is deliberately NOT checked, exactly as `subregions` is not: `quizCountries`
+    // owns the catalogue, and importing it here would pull `countries.geo.json` into the one
+    // module that is purely about coercing strings. An unrecognised code simply matches
+    // nobody, and a round that matches nobody lands on the `quiz.empty` screen.
+    only: toRetryTargets(toArray(raw.only)),
     fields: fields.length ? [...new Set(fields)] : [...DEFAULT_FIELDS],
     seed: Number.isFinite(parsedSeed) && parsedSeed >= 0 ? Math.floor(parsedSeed) : fallbackSeed(),
   };

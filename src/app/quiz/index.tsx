@@ -105,7 +105,9 @@ export default function QuizSetupScreen() {
     if (!canStart) return;
     router.push({
       pathname: "/quiz/play",
-      params: toQuizParams({ mode, subregions, fields, practice, seed: newSeed() }),
+      // The setup screen never restricts by country - `only` is what the results screen's
+      // retry builds, and what a deep link can carry.
+      params: toQuizParams({ mode, subregions, fields, only: [], practice, seed: newSeed() }),
     });
   };
 

@@ -9,6 +9,7 @@ import type { QuizConfig } from '@/quiz/quizConfig';
 import {
   answerableFields,
   countriesIn,
+  countriesWithCodes,
   NON_MEMBER_ISO3,
   QUIZ_COUNTRIES,
   REGIONS,
@@ -19,6 +20,7 @@ const config = (over: Partial<QuizConfig> = {}): QuizConfig => ({
   mode: 'facts',
   subregions: [],
   fields: ['name'],
+  only: [],
   seed: 1,
   practice: false,
   ...over,
@@ -261,5 +263,97 @@ describe('shuffle', () => {
   it('handles empty and single-item lists', () => {
     expect(shuffle([], makeRng(1))).toEqual([]);
     expect(shuffle(['x'], makeRng(1))).toEqual(['x']);
+  });
+});
+
+describe('countriesWithCodes', () => {
+  it('is the named countries and nothing else', () => {
+    expect(countriesWithCodes(['JPN', 'FRA']).map((c) => c.iso3).sort()).toEqual(['FRA', 'JPN']);
+  });
+
+  it('ignores the order the codes were given in', () => {
+    // This is what makes a seeded retry replayable: `buildQuiz` shuffles the pool, so if
+    // the pool order tracked the order the player happened to be asked, the same seed
+    // would give two different rounds.
+    expect(countriesWithCodes(['JPN', 'FRA'])).toEqual(countriesWithCodes(['FRA', 'JPN']));
+  });
+
+  it('drops a code that matches no country', () => {
+    expect(countriesWithCodes(['XXX'])).toEqual([]);
+    expect(countriesWithCodes(['FRA', 'XXX']).map((c) => c.iso3)).toEqual(['FRA']);
+  });
+
+  it('is empty for an empty list, which is why `only` is checked before it is used', () => {
+    // An empty `only` means "no restriction", so `play.tsx` must not reach this function
+    // at all in that case - it would ask nobody.
+    expect(countriesWithCodes([])).toEqual([]);
+  });
+
+  it('replaces the subregion filter rather than intersecting it', () => {
+    // Two individually sensible params - a subregion and a country outside it - must not
+    // combine into an empty round. `play.tsx` draws from the whole pool when `only` is set.
+    const questions = buildQuiz(
+      config({
+        subregions: ['Eastern Africa'],
+        only: [
+          { iso3: 'FRA', fields: [] },
+          { iso3: 'JPN', fields: [] },
+        ],
+      }),
+      countriesWithCodes(['FRA', 'JPN']),
+    );
+
+    expect(questions.map((q) => q.iso3).sort()).toEqual(['FRA', 'JPN']);
+  });
+
+  it('keeps a locate round asking a country that cannot answer the configured field', () => {
+    // Micronesia has no currency, and `buildQuiz` skips its completeness filter in locate
+    // mode - a retry carrying a currency selection must not silently drop it.
+    const questions = buildQuiz(
+      config({ mode: 'locate', fields: ['currency'], only: [{ iso3: 'FSM', fields: [] }] }),
+      countriesWithCodes(['FSM']),
+    );
+
+    expect(questions.map((q) => q.iso3)).toEqual(['FSM']);
+  });
+});
+
+describe('per-country fields', () => {
+  it('asks each country only the fields its target names', () => {
+    const questions = buildQuiz(
+      config({
+        fields: ['name', 'capital'],
+        only: [
+          { iso3: 'FRA', fields: ['capital'] },
+          { iso3: 'JPN', fields: ['name'] },
+        ],
+      }),
+      countriesWithCodes(['FRA', 'JPN']),
+    );
+
+    const asked = Object.fromEntries(questions.map((q) => [q.iso3, q.fields]));
+    expect(asked.FRA).toEqual(['capital']);
+    expect(asked.JPN).toEqual(['name']);
+  });
+
+  it('falls back to the round fields for a target that names none', () => {
+    // Which is what a hand-typed `?only=FRA` says, and what a locate retry emits.
+    const questions = buildQuiz(
+      config({ fields: ['name', 'capital'], only: [{ iso3: 'FRA', fields: [] }] }),
+      countriesWithCodes(['FRA']),
+    );
+
+    expect(questions[0].fields).toEqual(['name', 'capital']);
+  });
+
+  it('still drops a field the country has no answer for', () => {
+    // Micronesia has no currency in mledoze. A target naming it is narrowed away rather
+    // than producing a question with an unanswerable row.
+    const questions = buildQuiz(
+      config({ fields: ['name', 'currency'], only: [{ iso3: 'FSM', fields: ['name', 'currency'] }] }),
+      countriesWithCodes(['FSM']),
+    );
+
+    expect(questions[0].fields).toEqual(['name']);
   });
 });
