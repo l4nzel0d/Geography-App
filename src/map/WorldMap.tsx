@@ -56,6 +56,7 @@ export function WorldMap({
   camera,
   maxZoom = DEFAULT_MAX_ZOOM,
   labelField = 'none',
+  countries,
 }: WorldMapProps) {
   // Landscape is wider than one world at zoom 0, so the floor is derived from the
   // window rather than pinned to INITIAL_ZOOM. Without this a cold launch into
@@ -116,7 +117,7 @@ export function WorldMap({
 
       <GeoJSONSource
         id="countries"
-        data={worldGeoJson}
+        data={countries ?? worldGeoJson}
         // MapLibre's default is 44dp, which at zoom 0 spans ~30 degrees of longitude
         // and drags half a continent into every press. 10dp keeps enough slack for a
         // fingertip while letting `pickCountry` resolve by containment, and it means a

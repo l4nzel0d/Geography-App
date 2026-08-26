@@ -50,4 +50,14 @@ export type CountryFeatureProperties = {
    * Absent wherever either is missing, or where the area is mledoze's `-1` unknown.
    */
   density?: number;
+  /**
+   * How well the player knows this country, 0-100, folded on by `masteryGeoJson.ts`.
+   *
+   * Absent - not null, and not 0 - for a country that has never been asked, which is what
+   * lets the mastery ramp split it off with `['has','mastery']` into the grey no-data
+   * colour. "Never seen it" and "always get it wrong" are different things and the map
+   * has to be able to say which. Unlike the two above, this one CHANGES at runtime; see
+   * the note on `countries` in `worldMapProps.ts`.
+   */
+  mastery?: number;
 };

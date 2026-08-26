@@ -1782,6 +1782,224 @@ Assets under `_expo/static/` and `assets/` are content-hashed and marked immutab
 everything else the worker precaches carries a Workbox revision, so it updates despite
 the HTTP cache.
 
+## Per-country mastery
+
+The app remembers how you answer each country, colours the world map by what you know, and can
+build a practice round out of your weak spots. It is the first thing in the project that
+**persists anything at all**.
+
+### The model is a weakness score, and there is deliberately no clock
+
+Per `(iso3, GradedField)` — the same six fields a `FieldGrade` can be about, `location`
+included — the table keeps `asked`, `correct` and `lastCorrect`. Nothing else. No dates, no
+due times, no spaced repetition, and **`Date.now()` still appears nowhere in `src/`**.
+
+```
+recency  = 1 - RECENCY_WEIGHT * (lastWrong / fields)   // weight = 0.4
+
+display  = (correct / asked)                * recency   // what the map paints,  [0, 1]
+practice = (correct / (asked + PRIOR))      * recency   // what the sampler weighs, prior = 1
+```
+
+**Two scores, one formula, one parameter apart** — `scoreWith(record, prior)`. They disagree
+on purpose, and the reason is the most useful thing in this section.
+
+Four properties, each load-bearing:
+
+- **Never asked is `null`, never `0`.** A country you have not seen and one you always get
+  wrong are different things, and the map must say which. The null becomes an *absent*
+  feature property, which `['has','mastery']` splits into the grey band — the same
+  absence-all-the-way-down discipline `densityOf` already runs for the World Bank's gaps.
+- **The displayed score carries NO prior, and 100% is reachable.** Everything you have been
+  asked about a country, answered right, is 100% — however few times that was.
+- **The prior survives only in the practice score**, so a country proven once (0.5, weight
+  ~0.40) still resurfaces far more often than one proven nine times (0.9, weight ~0.16).
+  One lucky guess must not retire a country forever, and that is the *only* thing the prior
+  was ever really buying.
+- **Fields are pooled, not averaged as per-field rates**, so the score is weighted by how
+  often you were actually asked. The recency discount is *proportional*: missing the
+  capital of a country you also answer the name and currency for costs `0.4 × 1/3`.
+
+### The prior used to apply to both, and that was the one real design mistake here
+
+It shipped that way, and it was wrong in a way worth keeping written down. Every graded
+*field* counts as one `asked`, so with the default name-only round a country you had just
+answered **correctly** painted at **50%** — dead centre of the ramp — and reaching the green
+90% band took **nine consecutive correct answers on that one country**. Across 193 countries
+in 10-question rounds that is unreachable, so the map sat permanently orange-to-yellow
+however well anyone played.
+
+The error was conceptual rather than arithmetic: **the prior conflated "you are mediocre at
+this" with "we have not asked you much".** Those are different, and the map already says the
+second one with the grey `not asked yet` band — so the colour never has to hedge on its
+behalf. The sampler has no such band, which is exactly why the hedge belongs there and only
+there.
+
+The split cost almost nothing because `pickWeakSpots` already took *a score map*: it simply
+receives `practiceScores` instead of `scores`, and its logic is untouched. **If you ever hand
+it the display scores, one lucky guess retires a country** — `practicePool.test.ts` pins the
+ordering that prevents it.
+
+`masteryOf` validates its counters and returns `null` rather than `NaN` for anything
+non-finite. `asked: Infinity` is the instructive case: it divides to a finite `0`, which
+would paint a country as "always wrong" on the strength of a corrupt counter.
+
+### `recordResult` does not notify — and that is the whole design
+
+**`/quiz/play` is pushed over `MapScreen`, so the explore map's MapLibre surface stays
+mounted underneath for the entire round.** Notifying subscribers on every answer would
+re-fold the outlines and re-upload 1.6 MB of geometry to a backgrounded GL surface up to
+193 times in one round.
+
+So the store splits the two: `recordResult` updates the table and schedules a write,
+silently; `publishMastery` recomputes the scores, bumps a version, flushes the write and
+notifies. `play.tsx` calls the first from `check()` and the second **once, on unmount** —
+the single event that covers finishing, End quiz, *Discard and leave* and a plain back-out.
+
+`masteryStore.test.ts` asserts the asymmetry directly, and `MapScreen.test.tsx` asserts the
+consequence: the source's `data` is unchanged after 20 records and changes exactly once
+after a publish.
+
+**Recording happens in `check()`, not `next()`.** `check()` is guarded by
+`if (!question || result) return`, so it fires once per question — and recording in `next()`
+would lose the last checked answer whenever a player checks the final question and then
+backs out. *Discarding a round throws away the score, not what you learned.*
+
+### This is the first thing to change `<GeoJSONSource data>` after mount
+
+`worldGeoJson` is a module constant precisely so MapLibre never re-uploads the geometry, and
+`worldGeoJson.test.ts` exists to protect that. Mastery is dynamic, so it cannot be folded in
+at module load like `population` and `density`.
+
+Three things keep the churn down, and all three are pinned by tests:
+
+- **`withMastery` returns the same collection object when the table is empty**, so a player
+  who has never done a quiz is byte-identical to before.
+- **The fold runs unconditionally in `MapScreen`, not only in mastery mode.** Folding on
+  demand would change the identity on every switch *into and out of* the mode — two
+  re-uploads per visit. Unconditional makes the identity a pure function of the mastery
+  version, so switching fill modes never touches the source at all.
+- **Geometry is passed by reference**, exactly as `withChoroplethValues` does: ~240 tiny
+  allocations, not a copy of 1.6 MB.
+
+`WorldMap.web.tsx` needed a `setData` effect, because it adds the source once inside
+`map.once('load')` — plus a ref so a table that lands before the style loads is not dropped.
+The native side needs neither: `data` is a prop and React pushes it.
+
+**If this ever hitches or blanks on a device**, the escape hatch is to move mastery into the
+paint expression instead — `['match', ['get','iso3'], 'FRA', 62, …]`, at most 193 pairs,
+rebuilt per publish. That re-uploads nothing, because a paint-property change is the same
+code path a fill-mode switch already uses. The cost is that `fillColor` stops being a module
+constant for that one ramp.
+
+### The mastery ramp is the first LINEAR one
+
+`logRampFillColor` could not be reused. **A mastery score has a legitimate zero** — one
+question, answered wrong — and `log10(0)` is the `-Infinity` that `worldGeoJson.ts` spends
+four paragraphs keeping away from the population ramp. `linearRampFillColor` sits beside it
+with the same `['has', property]` split and no logarithm.
+
+That broke an assumption in `choropleth.test.ts`, whose `describe.each` asserted decade
+spacing and a `['log10', …]` wrapper for *every* ramp. It is now split into shared invariants
+over all three and log-only tests over the two that are logarithmic.
+
+Seven stops, matching the other ramps — **that count is load-bearing**, because the legend is
+one always-mounted view whose swatches are swapped by prop. Stops are in **percent**, so the
+legend's labels are free and the feature carries a small integer. Palette is ColorBrewer
+RdYlGn, echoing the quiz's existing red-wrong/green-right language. **Known trade: RdYlGn is
+not colourblind-safe**; the drop-in swap is RdYlBu-7, at the cost of "blue means you know it"
+reading oddly and edging toward density's BuPu.
+
+`ChoroplethRamp` gained an optional **`noDataLabel`**, so mastery's grey band reads *"not
+asked yet"* rather than *"no data"* — the grey countries are exactly the ones worth
+practising, which is most of the mode's value. It swaps the text of a row that is already
+mounted, so it inserts no view.
+
+### Practice is a `QuizConfig` flag, not a fourth `QuizMode`
+
+`MODE_USES_MAP` and `MODE_ASKS_FIELDS` are exhaustive records precisely so a new mode fails
+to **compile** until someone answers "does it show a map?". Practice has no answer, because
+it is orthogonal: it decides *who* is asked, not *how*. `practice × facts|locate|flag` are
+all coherent rounds. It crosses the URL as `'1'|'0'`, always emitted, absent meaning false.
+
+`pickWeakSpots` is weighted sampling **without replacement**, seeded and pure:
+
+```
+weight = PRACTICE_FLOOR + (1 - mastery) ** PRACTICE_EXPONENT   // 0.15, 2
+```
+
+**A never-asked country weighs exactly as much as one always answered wrong.** Unseen is
+maximally weak, which is what makes practice work on a fresh install and lets it double as a
+way through the whole world. Nothing has weight zero, so consecutive rounds differ and a
+fully-mastered pool still yields a full round; the spread is about 7:1.
+
+**`buildQuiz` needed no change**, exactly as flag mode needed none — its second parameter is
+already an injectable pool. The pool handed in is `countriesIn(config.subregions)`, so
+"practise my weak spots in Africa" works for free.
+
+**Practice and the region picker INTERSECT, and the setup screen has to say so.** The regions
+choose the candidate pool; the weak-spot weighting then draws ten out of that. They are
+orthogonal questions — *who* gets asked versus *where from* — which is why they are two
+sections rather than one mutually-exclusive list. The first version shipped that behaviour
+with no explanation and it read as a bug: the region note still said *"all 193 UN member
+states"*, which is wrong the moment practice is on, because it is ten drawn from 193. The
+note is now practice-aware (`quiz-setup-scope-note`) and pinned by a test. If this is ever
+revisited, note that making them exclusive by *hiding* the region picker is the worst of the
+options — the selection appears to vanish on toggle; disable it with a reason instead.
+
+`PRACTICE_ROUND_SIZE` is **10**, and it is the app's first round-length bound of any kind: a
+normal round is still the whole filtered pool, which for the world is 193 questions.
+
+**A practice round is the one config the seed does not pin.** Selection reads the device's
+mastery table, so "Play again" re-selects against the updated table and gives a different
+ten. That is right for practice, and it is a real break from the rule every other round
+obeys.
+
+### Storage
+
+One AsyncStorage key holding one versioned JSON blob, positional tuples
+`[asked, correct, lastCorrect]`. **Measured worst case — all 193 countries × all 6 fields —
+is 39 KB**, asserted in `masteryCodec.test.ts` rather than left as a comment. One key rather
+than 193 because the choropleth needs the whole table on the first frame.
+
+`decodeMastery` **never throws**, and validates **per field**: one corrupt entry costs one
+entry, not a player's whole history. An unknown ISO-3 is kept rather than rejected —
+validating it would mean importing the geometry into a pure module — and simply never
+matches a feature. `saveMastery` swallows its rejection: this is a cache the player can
+regenerate by playing, and a failed write must never cost them a round.
+
+Writes are debounced 2 s with an explicit flush on publish. **That `setTimeout` is not a
+clock** — nothing time-dependent enters what is stored or scored.
+
+**`masteryStorage.web.ts` is not optional.** AsyncStorage 2.2.0's web path reaches straight
+for `window.localStorage` with no guard (verified in `lib/module/AsyncStorage.js` — the
+IndexedDB backend is a later major), and `web.output: "static"` renders every route in Node,
+where there is no window. The split keeps the native module out of the web bundle entirely.
+It is a file-extension split, not a `Platform.OS` check; there are still zero of those.
+
+### What Jest cannot see here
+
+- **That a linear `interpolate` inside a `case`/`has` wrapper parses in the native
+  renderer.** A malformed paint expression blanks the fill layer with no exception anywhere.
+  `.maestro/mastery.yaml` is the cover, using the same proof-of-parse trick as
+  `choropleth-modes.yaml`.
+- **That replacing `<GeoJSONSource data>` on a live map redraws** rather than blanking or
+  hitching. Nothing in the app had ever done it. This is the riskiest unproven part.
+- **That AsyncStorage survives a cold start** — persistence across process death *is* the
+  feature, and Jest sees an in-memory shim.
+- **That `expo prebuild` links the module and the app still launches.** `icon-padding: 2`
+  shipped perfectly on web and killed the app fatally on Android; a native dependency is the
+  same class of risk.
+- **Whether the ramp is legible**, and whether a red-green colourblind player can read it.
+
+The mock now forwards **`data`** as well as `paint`, `layout` and `filter`. It used to strip
+it, which meant no test could tell one re-upload per round from one per answer.
+
+`.maestro/mastery.yaml` **cannot assert which countries a practice round picked** — the pool
+is a function of device state, not the seed — so it asserts structure only. That is a
+permanent reduction in what E2E can prove about this path, unlike `quiz.yaml`, which pins a
+seed precisely so it *can* assert on a real answer.
+
 ## Open risks
 
 - **MapLibre vs RN 0.86** — the library is developed against RN 0.85.3 and declares `>= 0.80`. Nothing

@@ -32,7 +32,16 @@ export const Camera = ({ ref, children, ...props }: AnyProps & { ref?: unknown }
  * made every `getByTestId` throw "found multiple elements", including the press helpers
  * that have nothing to do with labels.
  */
-export const GeoJSONSource = ({ children, data, ...props }: AnyProps) => (
+/**
+ * Forwards `data`, which it used to strip.
+ *
+ * Same reasoning as `paint` and `layout` below, and it became load-bearing when mastery
+ * arrived: this prop's IDENTITY is now the thing under test. `worldGeoJson` is a module
+ * constant precisely so the renderer never re-uploads 1.6 MB of geometry, and the mastery
+ * fold is the first thing in the app that ever changes it. A test that cannot see `data`
+ * cannot tell one re-upload per round from one per answer.
+ */
+export const GeoJSONSource = ({ children, ...props }: AnyProps) => (
   <View testID={`source-${String(props.id)}`} {...props}>
     {children}
   </View>

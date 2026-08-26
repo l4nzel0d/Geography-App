@@ -55,7 +55,11 @@ export function ChoroplethLegend({ ramp, visible }: { ramp: ChoroplethRamp; visi
 
       <View style={styles.noData}>
         <View style={[styles.noDataSwatch, { backgroundColor: NO_DATA_COLOR }]} />
-        <Text style={styles.axisLabel}>{NO_DATA_LABEL}</Text>
+        {/* Per-ramp, because mastery's grey means "not asked yet" rather than "no data" -
+            and pointing at the countries worth practising is most of that mode's value.
+            This swaps the text of a row that is already always mounted, so it inserts
+            nothing over the map surface. */}
+        <Text style={styles.axisLabel}>{ramp.noDataLabel ?? NO_DATA_LABEL}</Text>
       </View>
     </View>
   );

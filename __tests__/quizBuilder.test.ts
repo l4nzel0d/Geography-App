@@ -20,6 +20,7 @@ const config = (over: Partial<QuizConfig> = {}): QuizConfig => ({
   subregions: [],
   fields: ['name'],
   seed: 1,
+  practice: false,
   ...over,
 });
 

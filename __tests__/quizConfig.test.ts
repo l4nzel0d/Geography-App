@@ -44,6 +44,36 @@ describe('parseQuizParams', () => {
       subregions: ['Western Europe'],
       fields: ['name', 'capital'],
       seed: 42,
+      // Absent `practice` is a normal round, for the same reason as `mode`.
+      practice: false,
+    });
+  });
+
+  describe('practice', () => {
+    it.each([
+      ['1', true],
+      ['true', true],
+      ['0', false],
+      ['no', false],
+      ['', false],
+      [undefined, false],
+    ])('reads %p as %p', (raw, expected) => {
+      expect(parseQuizParams({ practice: raw }, seed).practice).toBe(expected);
+    });
+
+    it('takes the first value when the router hands back an array', () => {
+      expect(parseQuizParams({ practice: ['1', '0'] }, seed).practice).toBe(true);
+    });
+
+    it('round-trips through toQuizParams in both states', () => {
+      const base = { mode: 'facts' as const, subregions: [], fields: ['name' as const], seed: 7 };
+
+      for (const practice of [true, false]) {
+        const params = toQuizParams({ ...base, practice });
+        // Always emitted, so nothing depends on how expo-router treats an absent param.
+        expect(params.practice).toBe(practice ? '1' : '0');
+        expect(parseQuizParams(params, seed).practice).toBe(practice);
+      }
     });
   });
 
@@ -131,6 +161,7 @@ describe('toQuizParams', () => {
     subregions: ['Western Europe', 'Polynesia'],
     fields: ['name', 'population'],
     seed: 99,
+    practice: false,
   };
 
   it('round-trips through parseQuizParams', () => {

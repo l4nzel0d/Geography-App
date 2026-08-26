@@ -17,11 +17,13 @@ import { PORTRAIT_MAX_HEIGHT_FRACTION } from '@/components/infoSheetLayout';
 import { getWorldFitZoom } from '@/map/cameraFit';
 import { getCountryBounds } from '@/map/countryBounds';
 import { getCountryCameraStop } from '@/map/quizCamera';
-import { DENSITY_RAMP, POPULATION_RAMP } from '@/map/choropleth';
+import { DENSITY_RAMP, MASTERY_RAMP, POPULATION_RAMP } from '@/map/choropleth';
 import { MAP_FLAG_IMAGES } from '@/map/mapFlagImages';
 import { FLAG_ICON_PROPERTY, type LabelField } from '@/map/mapLabels';
 import { INITIAL_CENTER, INITIAL_ZOOM } from '@/map/WorldMap';
 import { selectCountry } from '@/search/pendingCountry';
+import { worldGeoJson } from '@/data/worldGeoJson';
+import { publishMastery, recordResult, __resetMasteryStore } from '@/mastery/masteryStore';
 
 /**
  * `_layout.tsx` supplies the SafeAreaProvider in the real app; these tests render
@@ -64,7 +66,7 @@ const pressCountry = (iso3: string) =>
  * without opening it - but going through the pill is what a user does, and it is what
  * keeps this helper honest about the panel actually opening.
  */
-const selectMode = async (mode: 'flat' | 'population' | 'density') => {
+const selectMode = async (mode: 'flat' | 'population' | 'density' | 'mastery') => {
   // Awaited, both of them: RNTL v14 made fireEvent async, and the panel's rows are
   // hidden from queries until the press that opens it has actually re-rendered.
   await fireEvent.press(screen.getByTestId('toggle-fill-mode'));
@@ -190,6 +192,91 @@ describe('MapScreen', () => {
     // Regex, not a string: the legend renders its title, every axis label and the
     // no-data key, and v14's toHaveTextContent matches the concatenation exactly.
     expect(legend()).toHaveTextContent(/People per country/);
+  });
+
+  describe('the geometry handed to the source', () => {
+    // Nothing in this app changed `<GeoJSONSource data>` after mount until mastery
+    // arrived, and `worldGeoJson.test.ts` exists to protect that object's stability.
+    // These two assertions are what stand between the feature and a 1.6 MB re-upload
+    // per answer - see `masteryStore`, whose record/publish split exists for this.
+    afterEach(() => {
+      __resetMasteryStore();
+    });
+
+    const sourceData = () => screen.getByTestId('source-countries').props.data;
+
+    it('is the untouched module constant while nothing has been played', async () => {
+      await render();
+      expect(sourceData()).toBe(worldGeoJson);
+    });
+
+    it('does not change when the fill mode changes', async () => {
+      await render();
+      const before = sourceData();
+
+      await selectMode('mastery');
+      await selectMode('population');
+      await selectMode('flat');
+
+      // The fold runs unconditionally, so switching modes never touches the source.
+      expect(sourceData()).toBe(before);
+    });
+
+    it('does not change when an answer is merely recorded', async () => {
+      await render();
+      const before = sourceData();
+
+      await act(async () => {
+        for (let i = 0; i < 20; i += 1) {
+          recordResult({
+            iso3: 'BRA',
+            grades: [
+              { field: 'name', correct: true, how: 'exact', given: 'Brazil', expected: 'Brazil' },
+            ],
+            allCorrect: true,
+          });
+        }
+      });
+
+      expect(sourceData()).toBe(before);
+    });
+
+    it('changes exactly once when a round publishes', async () => {
+      await render();
+      const before = sourceData();
+
+      await act(async () => {
+        recordResult({
+          iso3: 'BRA',
+          grades: [
+            { field: 'name', correct: true, how: 'exact', given: 'Brazil', expected: 'Brazil' },
+          ],
+          allCorrect: true,
+        });
+        publishMastery();
+      });
+
+      const after = sourceData();
+      expect(after).not.toBe(before);
+
+      // A second publish with nothing new recorded must not churn it again.
+      await act(async () => {
+        publishMastery();
+      });
+      expect(sourceData()).toBe(after);
+    });
+  });
+
+  it('paints the mastery ramp and names its grey band for what it means', async () => {
+    await render();
+    await selectMode('mastery');
+
+    expect(fillColor()).toEqual(MASTERY_RAMP.fillColor);
+    expect(legendShown()).toBe(true);
+    expect(legend()).toHaveTextContent(/Mastery from quizzes/);
+    // The per-ramp no-data label. "no data" would be wrong here: those countries have
+    // simply not been asked, which is an invitation rather than a gap in the dataset.
+    expect(legend()).toHaveTextContent(/not asked yet/);
   });
 
   it('paints the density ramp and retitles the legend', async () => {

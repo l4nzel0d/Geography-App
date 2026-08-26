@@ -1,0 +1,159 @@
+# E2E: the mastery choropleth, and a practice round.
+#
+# Two things here that no unit test can reach.
+#
+# 1. **The mastery fill is the app's first LINEAR paint expression.** Every other ramp
+#    wraps its property in log10; this one cannot, because a mastery score has a
+#    legitimate zero. Jest replaces the native renderer with a stub, so a malformed
+#    expression passes every unit test and then blanks the fill layer on a device.
+#    Switching the mode on and still finding the map is the proof that it parsed - the
+#    same trick choropleth-modes.yaml and map-labels.yaml use.
+#
+# 2. **This is the first thing in the app that changes `<GeoJSONSource data>` after
+#    mount.** `worldGeoJson`'s identity was stable for the app's whole life precisely so
+#    MapLibre never re-uploaded 1.6 MB of geometry. Playing a round and coming back to a
+#    mastery-coloured map exercises that re-upload on real hardware.
+#
+# **This flow cannot assert WHICH countries a practice round picked.** Every other quiz
+# flow can pin a seed and therefore type an answer it knows is right; a weak-spots pool is
+# a function of the stored mastery table, which lives on the device and changes as you
+# play, so the seed does not determine it. Everything below is therefore structural.
+#
+# `clearState: true` matters more here than in the other flows: it is the only one with a
+# persisted table behind it, so without it run #2 starts with run #1's history.
+#
+#   maestro --device <serial> test .maestro/mastery.yaml
+appId: com.boris.geographyapp
+---
+- launchApp:
+    clearState: true
+
+- setOrientation: PORTRAIT
+
+- assertVisible:
+    id: 'world-map'
+
+# --- the ramp parses, and says the world is unplayed ------------------------------
+- tapOn:
+    id: 'toggle-fill-mode'
+- assertVisible:
+    id: 'fill-mode-panel'
+- tapOn:
+    id: 'mode-mastery'
+- assertNotVisible:
+    id: 'fill-mode-panel'
+
+- assertVisible:
+    id: 'choropleth-legend'
+- assertVisible: 'Mastery from quizzes'
+# The per-ramp no-data label. On a cleared install EVERY country is in this band, which
+# is the state this half of the flow is really asserting.
+- assertVisible: 'not asked yet'
+- assertNotVisible: 'no data'
+# Mastery's own axis labels, so a legend that failed to swap ramps is caught here rather
+# than passing on a row the other ramps also have.
+- assertVisible: '100%'
+- assertNotVisible: 'People per country'
+
+# If the linear expression failed to parse, MapLibre drops the layer and this is where
+# it shows.
+- assertVisible:
+    id: 'world-map'
+
+# Selection is unaffected by the fill mode - marked by an outline rather than the orange
+# fill, same as the other two ramps. Russia, deep in Siberia.
+- tapOn:
+    point: '81%,20%'
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Russia'
+- tapOn:
+    id: 'close-info-sheet'
+- assertNotVisible:
+    id: 'country-info-sheet'
+
+# --- a practice round -------------------------------------------------------------
+- tapOn:
+    id: 'open-quiz'
+- assertVisible:
+    id: 'quiz-setup'
+
+# The new picker. "My weak spots" on an empty table means every country is equally and
+# maximally weak, which is exactly why a practice round is playable on a fresh install.
+- assertVisible:
+    id: 'practice-picker'
+- tapOn:
+    id: 'practice-weak'
+
+# Australia and New Zealand is the smallest subregion at two countries, which is also
+# what pins the round length below: min(10, 2).
+- scrollUntilVisible:
+    element:
+      id: 'subregion-Australia and New Zealand'
+    direction: DOWN
+- tapOn:
+    id: 'subregion-Australia and New Zealand'
+
+# The button must state the capped size, not the pool size.
+- assertVisible: 'Start — 2 countries'
+- tapOn:
+    id: 'quiz-start'
+
+- assertVisible:
+    id: 'quiz-panel'
+- assertVisible:
+    id: 'quiz-progress'
+
+# Answer both questions - deliberately wrong, so the countries land at the weak end of
+# the ramp where they are easiest to see. The name is not knowable here without pinning
+# the pool, which this flow cannot do.
+- tapOn:
+    id: 'quiz-input-name'
+- inputText: 'Narnia'
+- tapOn:
+    id: 'quiz-submit'
+- tapOn:
+    id: 'quiz-submit'
+
+- tapOn:
+    id: 'quiz-input-name'
+- inputText: 'Narnia'
+- tapOn:
+    id: 'quiz-submit'
+- tapOn:
+    id: 'quiz-submit'
+
+# The round ends into the results screen.
+- assertVisible:
+    id: 'quiz-results'
+- tapOn:
+    id: 'quiz-back-to-map'
+
+# --- back on the map, the table has reached it ------------------------------------
+# The play screen publishes on unmount, so by the time the map is uncovered the fold has
+# already run and the source has been handed new geometry. A blank map here is the
+# re-upload failing.
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'choropleth-legend'
+- assertVisible: 'Mastery from quizzes'
+
+# Selection still works after the source was replaced under a live map.
+- tapOn:
+    point: '81%,20%'
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Russia'
+- tapOn:
+    id: 'close-info-sheet'
+
+# Back to the flat basemap.
+- tapOn:
+    id: 'toggle-fill-mode'
+- tapOn:
+    id: 'mode-flat'
+- assertNotVisible:
+    id: 'choropleth-legend'
+- assertVisible:
+    id: 'world-map'

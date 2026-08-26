@@ -24,9 +24,12 @@ import { INITIAL_CENTER, WorldMap } from '@/map/WorldMap';
 import { buildExitPrompt, type ExitAction } from '@/quiz/exitPrompt';
 import { gradeQuestion, type QuestionResult, toAnswerInput } from '@/quiz/gradeAnswer';
 import { gradeLocation } from '@/quiz/gradeLocation';
-import { buildQuiz } from '@/quiz/quizBuilder';
+import { buildQuiz, makeRng } from '@/quiz/quizBuilder';
+import { pickWeakSpots, PRACTICE_ROUND_SIZE } from '@/quiz/practicePool';
+import { countriesIn } from '@/quiz/quizCountries';
 import { type FieldId, MODE_USES_MAP, parseQuizParams } from '@/quiz/quizConfig';
 import { getQuizPanelLayout } from '@/quiz/quizPanelLayout';
+import { getMasterySnapshot, publishMastery, recordResult } from '@/mastery/masteryStore';
 import { setQuizResult } from '@/quiz/quizResultStore';
 
 /**
@@ -71,6 +74,9 @@ const REVEAL_DELAY_MS = 700;
 
 const EMPTY_ANSWERS: PanelAnswers = { text: {}, chips: {} };
 
+/** Keeps the pool draw off the same RNG stream as the question shuffle. */
+const PRACTICE_SALT = 0x5f3a71c9;
+
 export default function QuizPlayScreen() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
@@ -84,7 +90,37 @@ export default function QuizPlayScreen() {
   // Params are only read once: re-parsing on every render would hand `buildQuiz` a new
   // seed the moment expo-router hands back a differently-shaped params object.
   const [config] = useState(() => parseQuizParams(params as Record<string, string | string[]>));
-  const [questions] = useState(() => buildQuiz(config));
+  /**
+   * The round, built once.
+   *
+   * `buildQuiz` needed no change for practice, exactly as it needed none for flag mode:
+   * its second parameter is already an injectable pool, and `undefined` falls through to
+   * the whole filtered one.
+   *
+   * The scores are read once here, in the same initialiser, following `config`'s
+   * parsed-once discipline. A cold-start deep link straight onto this route could get in
+   * before the storage read lands, which yields an empty table and therefore a uniform
+   * random ten - it degrades, and never throws. Reaching here through the UI means two
+   * screens' worth of time, by which point it has always landed.
+   *
+   * The seed is salted so the selection and `buildQuiz`'s own Fisher-Yates do not draw
+   * from the same mulberry32 stream.
+   */
+  const [questions] = useState(() =>
+    buildQuiz(
+      config,
+      config.practice
+        ? pickWeakSpots(
+            countriesIn(config.subregions),
+            // The PRACTICE scores, not the map's: a country answered right once reads
+            // 100% on the map but is still worth revisiting here. See `MASTERY_PRIOR`.
+            getMasterySnapshot().practiceScores,
+            PRACTICE_ROUND_SIZE,
+            makeRng(config.seed ^ PRACTICE_SALT),
+          )
+        : undefined,
+    ),
+  );
 
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<PanelAnswers>(EMPTY_ANSWERS);
@@ -225,6 +261,22 @@ export default function QuizPlayScreen() {
   useEffect(() => cancelReveal, []);
 
   /**
+   * Tell the map what was learned, once, however the round ended.
+   *
+   * Unmount is the single event that covers all four ways out - finishing the last
+   * question, End quiz, *Discard and leave*, and a plain back-out - which is why it is
+   * here rather than in `finish`.
+   *
+   * **Discarding a round throws away the score, not what you learned.** The exit dialog's
+   * options are about whether to see a results screen; every answer that was actually
+   * checked is already recorded, and choosing to leave does not un-ask a question.
+   *
+   * `publishMastery` is a no-op when nothing was recorded, so a round abandoned on the
+   * first question - and StrictMode's double mount - both cost nothing.
+   */
+  useEffect(() => publishMastery, []);
+
+  /**
    * Show where the country actually was, a beat after the wrong guess turned red.
    *
    * The stop is computed NOW rather than in the timer so it is fitted to the map box the
@@ -256,6 +308,20 @@ export default function QuizPlayScreen() {
     }, REVEAL_DELAY_MS);
   };
 
+  /**
+   * Show the verdict, and remember it.
+   *
+   * Both grading branches go through here so recording cannot be added to one and
+   * forgotten on the other. `recordResult` is deliberately silent - it updates the table
+   * and schedules a write, but does not notify - so the explore map's MapLibre surface,
+   * which is still mounted underneath this pushed screen, is not handed new geometry once
+   * per answer. `publishMastery` on unmount is what tells it, exactly once.
+   */
+  const commit = (graded: QuestionResult) => {
+    recordResult(graded);
+    setResult(graded);
+  };
+
   const check = () => {
     if (!question || result) return;
 
@@ -263,7 +329,7 @@ export default function QuizPlayScreen() {
       // One tap, one right answer, `===`. Nothing in `gradeAnswer`'s spelling tolerance
       // has anything to say about an ISO-3 code that came out of `pickCountry`.
       const graded = gradeLocation(question, picked);
-      setResult(graded);
+      commit(graded);
       // A correct guess leaves the camera exactly where the player put it: they found
       // the country, so there is nothing to show them.
       if (!graded.allCorrect) scheduleReveal(question.iso3);
@@ -273,7 +339,7 @@ export default function QuizPlayScreen() {
     // `toAnswerInput` folds each set field's uncommitted text in as a final chip. Merging
     // the two maps directly would let `chips` shadow `text` and silently drop whatever
     // the player typed without pressing return - which read as the field being ignored.
-    setResult(gradeQuestion(question, toAnswerInput(answers)));
+    commit(gradeQuestion(question, toAnswerInput(answers)));
   };
 
   const next = () => {

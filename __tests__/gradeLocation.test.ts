@@ -67,7 +67,7 @@ describe('gradeLocation', () => {
 
   it('summarises into the score screen like any other field', () => {
     const summary = summarize({
-      config: { mode: 'locate', subregions: [], fields: [], seed: 1 },
+      config: { mode: 'locate', subregions: [], fields: [], seed: 1, practice: false },
       results: [
         gradeLocation(question('NPL'), 'NPL'),
         gradeLocation(question('CHL'), 'ARG'),

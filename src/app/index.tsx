@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -7,6 +7,9 @@ import { getMapFocusRect } from '@/components/infoSheetLayout';
 import { useDismissKey } from '@/components/useDismissKey';
 import { useWindowSize } from '@/components/useWindowSize';
 import { MapControls } from '@/components/MapControls';
+import { withMastery } from '@/data/masteryGeoJson';
+import { worldGeoJson } from '@/data/worldGeoJson';
+import { getMasterySnapshot, subscribeToMastery } from '@/mastery/masteryStore';
 import { getViewportFitZoom } from '@/map/cameraFit';
 import { getCountryBounds } from '@/map/countryBounds';
 import type { LabelField } from '@/map/mapLabels';
@@ -72,6 +75,28 @@ export default function MapScreen() {
   // Only `top` is used, to keep the framed country clear of the chrome row.
   const insets = useSafeAreaInsets();
 
+  /**
+   * How well the player knows each country, for the mastery fill mode.
+   *
+   * Subscribed INLINE rather than through a `useMastery()` hook, and that is deliberate:
+   * `reactCompiler` is on, and CLAUDE.md records that moving a subscription into a custom
+   * hook changed what the compiler memoised and left the quiz holding a stale layout
+   * through a rotation. This is a byte-for-byte sibling of the search subscription below.
+   */
+  const [mastery, setMastery] = useState(getMasterySnapshot);
+  useEffect(() => subscribeToMastery(setMastery), []);
+
+  /**
+   * The outlines, with mastery folded on.
+   *
+   * Folded UNCONDITIONALLY, not only while the mastery mode is showing. Folding on demand
+   * would change the source's identity on every switch into and out of the mode - two
+   * geometry re-uploads per visit - whereas this makes the identity a pure function of the
+   * mastery version, so switching fill modes never touches the source at all. The fold is
+   * ~240 tiny allocations and returns `worldGeoJson` itself while nothing has been played.
+   */
+  const countries = useMemo(() => withMastery(worldGeoJson, mastery.scores), [mastery]);
+
   useEffect(() => subscribeToCountrySelection((iso3) => {
     setSelectedIso3(iso3);
     setFocus((previous) => ({ iso3, nonce: (previous?.nonce ?? 0) + 1 }));
@@ -133,6 +158,7 @@ export default function MapScreen() {
         camera={camera}
         maxZoom={EXPLORE_MAX_ZOOM}
         labelField={labelField}
+        countries={countries}
       />
       <MapControls
         fillMode={fillMode}

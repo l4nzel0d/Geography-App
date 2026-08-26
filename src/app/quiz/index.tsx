@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { goBack } from "@/navigation/goBack";
 import { FieldPicker } from "@/components/quiz/FieldPicker";
 import { ModePicker } from "@/components/quiz/ModePicker";
+import { PracticePicker } from "@/components/quiz/PracticePicker";
 import {
   getInfoSheetLayout,
   MAX_CONTENT_WIDTH,
@@ -13,6 +14,7 @@ import {
 import { quizColors, quizRadii } from "@/components/palette";
 import { useWindowSize } from "@/components/useWindowSize";
 import { SubregionPicker } from "@/components/quiz/SubregionPicker";
+import { PRACTICE_ROUND_SIZE } from "@/quiz/practicePool";
 import { countriesIn } from "@/quiz/quizCountries";
 import {
   DEFAULT_MODE,
@@ -43,21 +45,27 @@ export default function QuizSetupScreen() {
   const [mode, setMode] = useState<QuizMode>(DEFAULT_MODE);
   const [subregions, setSubregions] = useState<string[]>([]);
   const [fields, setFields] = useState<FieldId[]>(["name"]);
+  const [practice, setPractice] = useState(false);
 
-  const countryCount = countriesIn(subregions).length;
+  const poolCount = countriesIn(subregions).length;
+  // A practice round is capped; a normal one is still the whole filtered pool. `min`
+  // rather than the constant, so a two-country subregion says "2 countries", not "10".
+  const countryCount = practice
+    ? Math.min(PRACTICE_ROUND_SIZE, poolCount)
+    : poolCount;
   // A `locate` round asks one thing of every country and needs no field at all, so the
   // only way to make it unplayable is to select subregions that contain nobody. Both of
   // the typing modes DO need one - this is not only which picker to show, it is also
   // what stops a round starting with nothing ticked and silently falling back to asking
   // the country's name.
   const needsFields = MODE_ASKS_FIELDS[mode];
-  const canStart = (!needsFields || fields.length > 0) && countryCount > 0;
+  const canStart = (!needsFields || fields.length > 0) && poolCount > 0;
 
   const start = () => {
     if (!canStart) return;
     router.push({
       pathname: "/quiz/play",
-      params: toQuizParams({ mode, subregions, fields, seed: newSeed() }),
+      params: toQuizParams({ mode, subregions, fields, practice, seed: newSeed() }),
     });
   };
 
@@ -111,10 +119,21 @@ export default function QuizSetupScreen() {
           </>
         ) : null}
 
+        <Text style={styles.section}>Who gets asked?</Text>
+        <PracticePicker practice={practice} onChange={setPractice} />
+
         <Text style={styles.section}>Which parts of the world?</Text>
-        <Text style={styles.sectionNote}>
-          Leave everything unselected to play the whole world — all 193 UN
-          member states.
+        {/*
+          The two sections INTERSECT - the regions choose the candidate pool and the
+          weak-spot weighting then draws from that - so "practise my weak spots in Africa"
+          is a real round. Nothing on screen said so, and the old note was actively
+          misleading once practice existed: a practice round over the whole world is ten
+          countries drawn from 193, not 193.
+        */}
+        <Text testID="quiz-setup-scope-note" style={styles.sectionNote}>
+          {practice
+            ? `Your ${PRACTICE_ROUND_SIZE} weakest countries will be drawn from these regions. Leave everything unselected to draw from all 193.`
+            : "Leave everything unselected to play the whole world — all 193 UN member states."}
         </Text>
         <SubregionPicker selected={subregions} onChange={setSubregions} />
       </ScrollView>

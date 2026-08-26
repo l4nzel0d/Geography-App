@@ -126,6 +126,21 @@ export type QuizConfig = {
   fields: FieldId[];
   /** Seeds the shuffle, so the same config replays in the same order. */
   seed: number;
+  /**
+   * Draw the round from the player's weakest countries rather than the whole pool.
+   *
+   * A flag rather than a fourth `QuizMode`, and deliberately: `MODE_USES_MAP` and
+   * `MODE_ASKS_FIELDS` are exhaustive records precisely so a new mode fails to COMPILE
+   * until someone answers "does it show a map?" - and practice has no answer, because it
+   * is orthogonal. `practice` x `facts | locate | flag` are all coherent rounds.
+   *
+   * **This is the one part of a config the seed does not pin.** Selection reads the
+   * mastery table, which lives on the device and changes as you play, so "Play again" on
+   * a practice round re-selects against the updated table and gives a different ten. That
+   * is right for practice - and it is a real break from the rule that a seeded round
+   * replays identically, which every other round in the app still obeys.
+   */
+  practice: boolean;
 };
 
 export const DEFAULT_FIELDS: FieldId[] = ['name'];
@@ -154,9 +169,13 @@ export function toQuizParams(config: QuizConfig): {
   subregions: string;
   fields: string;
   seed: string;
+  practice: string;
 } {
   return {
     mode: config.mode,
+    // Always emitted, rather than omitted when false, so nothing depends on how
+    // expo-router treats an absent versus an empty param.
+    practice: config.practice ? '1' : '0',
     subregions: config.subregions.join(','),
     // Carried even in `locate` mode, where nothing reads it: "Change settings" pops back
     // to a setup screen that still has these ticked, and "Play again" round-trips the
@@ -195,8 +214,14 @@ export function parseQuizParams(
   const rawMode = (Array.isArray(raw.mode) ? raw.mode[0] : raw.mode)?.trim();
   const mode = QUIZ_MODES.find((candidate) => candidate === rawMode) ?? DEFAULT_MODE;
 
+  // Absent or unrecognised is `false`, which is what every link written before practice
+  // existed says by omission - the same rule `mode` follows.
+  const rawPractice = (Array.isArray(raw.practice) ? raw.practice[0] : raw.practice)?.trim();
+  const practice = rawPractice === '1' || rawPractice === 'true';
+
   return {
     mode,
+    practice,
     subregions: [...new Set(toArray(raw.subregions))],
     fields: fields.length ? [...new Set(fields)] : [...DEFAULT_FIELDS],
     seed: Number.isFinite(parsedSeed) && parsedSeed >= 0 ? Math.floor(parsedSeed) : fallbackSeed(),

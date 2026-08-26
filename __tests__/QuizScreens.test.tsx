@@ -22,6 +22,12 @@ import { CURRENCIES_REQUIRED } from '@/quiz/gradeAnswer';
 import { buildQuiz } from '@/quiz/quizBuilder';
 import { parseQuizParams } from '@/quiz/quizConfig';
 import { setQuizResult } from '@/quiz/quizResultStore';
+import {
+  __resetMasteryStore,
+  getMasterySnapshot,
+  publishMastery,
+} from '@/mastery/masteryStore';
+import { PRACTICE_ROUND_SIZE } from '@/quiz/practicePool';
 
 const METRICS: Metrics = {
   frame: { x: 0, y: 0, width: 390, height: 844 },
@@ -229,6 +235,93 @@ describe('the setup screen', () => {
         params: expect.objectContaining({ mode: 'facts', fields: 'name,capital' }),
       });
     });
+
+    describe('who gets asked', () => {
+      it('starts on everything, so nothing changes for an existing player', async () => {
+        await render(<QuizSetupScreen />);
+        await fireEvent.press(screen.getByTestId('quiz-start'));
+
+        expect(mockPush).toHaveBeenCalledWith({
+          pathname: '/quiz/play',
+          params: expect.objectContaining({ practice: '0' }),
+        });
+      });
+
+      it('sends a weak-spots round through as a param', async () => {
+        await render(<QuizSetupScreen />);
+        await fireEvent.press(screen.getByTestId('practice-weak'));
+        await fireEvent.press(screen.getByTestId('quiz-start'));
+
+        expect(mockPush).toHaveBeenCalledWith({
+          pathname: '/quiz/play',
+          params: expect.objectContaining({ practice: '1' }),
+        });
+      });
+
+      it('caps the button count at the practice round size', async () => {
+        // The whole world is 193; a practice round is ten of them, and the button has to
+        // say what the player is actually about to get.
+        await render(<QuizSetupScreen />);
+        expect(screen.getByTestId('quiz-start')).toHaveTextContent(/193 countries/);
+
+        await fireEvent.press(screen.getByTestId('practice-weak'));
+        expect(screen.getByTestId('quiz-start')).toHaveTextContent(
+          new RegExp(`${PRACTICE_ROUND_SIZE} countries`),
+        );
+      });
+
+      it('does not cap below the pool, so a small subregion says its real size', async () => {
+        await render(<QuizSetupScreen />);
+        await fireEvent.press(screen.getByTestId('practice-weak'));
+        await fireEvent.press(screen.getByTestId('subregion-Australia and New Zealand'));
+
+        expect(screen.getByTestId('quiz-start')).toHaveTextContent(/2 countries/);
+      });
+
+      it('explains that the two sections intersect, rather than leaving it a guess', async () => {
+        // The old note said "all 193 UN member states", which is wrong the moment
+        // practice is on: it is ten drawn from 193.
+        await render(<QuizSetupScreen />);
+        expect(screen.getByTestId('quiz-setup-scope-note')).toHaveTextContent(
+          /all 193 UN member states/,
+        );
+
+        await fireEvent.press(screen.getByTestId('practice-weak'));
+        expect(screen.getByTestId('quiz-setup-scope-note')).toHaveTextContent(
+          new RegExp(`Your ${PRACTICE_ROUND_SIZE} weakest countries will be drawn from these regions`),
+        );
+      });
+
+      it('scopes weak spots to the chosen regions, rather than ignoring them', async () => {
+        // The two are composable on purpose - "practise my weak spots in Africa" is a
+        // real round - so both must reach the play screen together.
+        await render(<QuizSetupScreen />);
+        await fireEvent.press(screen.getByTestId('practice-weak'));
+        await fireEvent.press(screen.getByTestId('subregion-Western Europe'));
+        await fireEvent.press(screen.getByTestId('quiz-start'));
+
+        expect(mockPush).toHaveBeenCalledWith({
+          pathname: '/quiz/play',
+          params: expect.objectContaining({
+            practice: '1',
+            subregions: 'Western Europe',
+          }),
+        });
+      });
+
+      it('combines with a mode, rather than replacing one', async () => {
+        // Practice is about WHO is asked; the mode is about HOW. Both travel.
+        await render(<QuizSetupScreen />);
+        await fireEvent.press(screen.getByTestId('mode-locate'));
+        await fireEvent.press(screen.getByTestId('practice-weak'));
+        await fireEvent.press(screen.getByTestId('quiz-start'));
+
+        expect(mockPush).toHaveBeenCalledWith({
+          pathname: '/quiz/play',
+          params: expect.objectContaining({ mode: 'locate', practice: '1' }),
+        });
+      });
+    });
   });
 });
 
@@ -243,6 +336,111 @@ describe('the play screen', () => {
   const cameraProps = () => screen.getByTestId('map-camera').props;
   const selectionPaint = () =>
     screen.getByTestId('layer-country-selected').props.paint['fill-color'];
+
+  describe('what the round teaches the map', () => {
+    // Mastery is recorded per ANSWER, in `check()`, not at the end of the round. That is
+    // what makes an abandoned round still count, and what stops the last checked answer
+    // being lost when a player checks the final question and then backs out.
+    beforeEach(() => {
+      __resetMasteryStore();
+    });
+
+    afterEach(() => {
+      __resetMasteryStore();
+    });
+
+    it('records nothing until an answer is actually checked', async () => {
+      soloRound();
+      await render(<QuizPlayScreen />);
+
+      await act(async () => {
+        publishMastery();
+      });
+      expect(getMasterySnapshot().scores).toEqual({});
+    });
+
+    it('records a correct answer against the country it was asked about', async () => {
+      const questions = soloRound();
+      await render(<QuizPlayScreen />);
+
+      await fireEvent.changeText(
+        screen.getByTestId('quiz-input-name'),
+        questions[0].facts.name,
+      );
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+      await act(async () => {
+        publishMastery();
+      });
+
+      expect(getMasterySnapshot().scores[questions[0].iso3]).toBeGreaterThan(0);
+    });
+
+    it('records a wrong answer as a zero rather than as nothing', async () => {
+      // "Never asked" and "always wrong" have to stay distinguishable: the first is grey
+      // on the map, the second is the red end of the ramp.
+      const questions = soloRound();
+      await render(<QuizPlayScreen />);
+
+      await fireEvent.changeText(screen.getByTestId('quiz-input-name'), 'Narnia');
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+      await act(async () => {
+        publishMastery();
+      });
+
+      expect(getMasterySnapshot().scores[questions[0].iso3]).toBe(0);
+    });
+
+    it('records a blank answer, which is a real "no idea" rather than a non-event', async () => {
+      const questions = soloRound();
+      await render(<QuizPlayScreen />);
+
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+      await act(async () => {
+        publishMastery();
+      });
+
+      expect(getMasterySnapshot().scores).toHaveProperty(questions[0].iso3);
+    });
+
+    it('records once per question, not once per press of an already-graded Check', async () => {
+      const questions = soloRound();
+      await render(<QuizPlayScreen />);
+
+      await fireEvent.changeText(screen.getByTestId('quiz-input-name'), 'Narnia');
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+      // The second press is Next, and `check` early-returns while a result stands.
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+      await act(async () => {
+        publishMastery();
+      });
+
+      // One wrong answer out of one is exactly 0; a double count would still be 0, so
+      // assert the shape of the table rather than the score.
+      expect(Object.keys(getMasterySnapshot().scores)).toEqual([questions[0].iso3]);
+    });
+
+    it('publishes when the screen unmounts, so leaving a round still teaches the map', async () => {
+      // Discarding a round throws away the SCORE, not what you learned - and unmount is
+      // the one event that covers finishing, ending early, discarding and backing out.
+      const questions = soloRound();
+      const view = await render(<QuizPlayScreen />);
+
+      await fireEvent.changeText(screen.getByTestId('quiz-input-name'), 'Narnia');
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+      expect(getMasterySnapshot().scores).toEqual({});
+
+      await act(async () => {
+        view.unmount();
+      });
+
+      expect(getMasterySnapshot().scores).toHaveProperty(questions[0].iso3);
+    });
+  });
 
   it('shows the map, the panel and the progress from the first frame', async () => {
     soloRound();
@@ -899,7 +1097,13 @@ describe('the play screen in flag mode', () => {
 
 describe('the results screen', () => {
   const run = {
-    config: { mode: 'facts' as const, subregions: [], fields: ['name' as const], seed: 1 },
+    config: {
+      mode: 'facts' as const,
+      subregions: [],
+      fields: ['name' as const],
+      seed: 1,
+      practice: false,
+    },
     total: 3,
     endedEarly: true,
     results: [

@@ -95,4 +95,18 @@ export type WorldMapProps = {
    * every existing test render exactly as they did.
    */
   labelField?: LabelField;
+  /**
+   * The outlines to draw. Defaults to the module-scope `worldGeoJson`.
+   *
+   * **Changing this prop re-uploads the geometry to the renderer**, which is why nothing
+   * did until mastery arrived: `worldGeoJson`'s identity is stable for the app's whole
+   * life precisely so MapLibre never has to. Only `MapScreen` passes it, only the mastery
+   * table changes it, and `withMastery` returns the SAME object while that table is empty
+   * - so a player who has never done a quiz is byte-identical to before.
+   *
+   * `masteryStore` is built around keeping that rare: `recordResult` is silent and only
+   * `publishMastery` notifies, so a 193-question round costs one change rather than 193.
+   * A quiz round passes nothing at all here.
+   */
+  countries?: GeoJSON.FeatureCollection;
 };

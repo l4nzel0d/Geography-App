@@ -186,6 +186,7 @@ export function WorldMap({
   camera,
   maxZoom = DEFAULT_MAX_ZOOM,
   labelField = 'none',
+  countries,
 }: WorldMapProps) {
   const containerRef = useRef<View | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -244,6 +245,19 @@ export function WorldMap({
   useEffect(() => {
     onSelectRef.current = onSelect;
   });
+
+  /**
+   * The outlines to draw, readable from inside `map.once('load')`.
+   *
+   * The source is added exactly once, in a callback that would otherwise close over the
+   * value `countries` had on the frame the map was created. Mastery arrives asynchronously
+   * - a table read from storage can land before the style finishes loading - and without
+   * this the very first paint would silently use the unfolded geometry until the next
+   * publish. Written during render rather than in an effect because `load` can fire before
+   * effects for this pass have run.
+   */
+  const countriesRef = useRef(countries ?? worldGeoJson);
+  countriesRef.current = countries ?? worldGeoJson;
 
   // --- wait for the container to have a size ---------------------------------------
   useEffect(() => {
@@ -350,7 +364,7 @@ export function WorldMap({
     });
 
     map.once('load', () => {
-      map.addSource(COUNTRIES_SOURCE, { type: 'geojson', data: worldGeoJson as never });
+      map.addSource(COUNTRIES_SOURCE, { type: 'geojson', data: countriesRef.current as never });
 
       // Every addLayer names its source explicitly. The native <Layer> children inherit
       // it from the parent <GeoJSONSource> through context; there is no such context here.
@@ -686,6 +700,26 @@ export function WorldMap({
 
     return () => clearTimeout(deadline);
   }, [camera]);
+
+  /**
+   * Push a new set of outlines at the live source.
+   *
+   * `addSource` runs once, so this is the only way a mastery update reaches an
+   * already-created map. Guarded on `ready` because the source does not exist until the
+   * style has loaded; the ref above covers the case where the update arrived first.
+   *
+   * The native side needs no equivalent - `<GeoJSONSource data>` is a prop, and React
+   * pushes it - which is the whole reason this file exists as a sibling.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+
+    const source = map.getSource(COUNTRIES_SOURCE) as
+      | { setData: (data: unknown) => void }
+      | undefined;
+    source?.setData(countriesRef.current as never);
+  }, [ready, countries]);
 
   /**
    * Place whatever was owed as soon as there is a map to place it on.
