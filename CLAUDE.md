@@ -177,6 +177,30 @@ Added 2026-08-26, verified on the emulator:
   is a native change: `expo-image` was already a dependency and ships the SVG decoder, so
   no `react-native-svg`, no `expo prebuild`, no rebuild.
 
+Added 2026-08-26, verified on the emulator (`Medium_Phone`, x86_64) **in a release build**,
+and in a desktop browser:
+
+- **a sixth map-label option, `flag`.** The Labels pill now draws each country's flag over
+  it instead of text. See *Flag labels are a second layer, and they must be raster*.
+- **the flags on the map are PNG, not the SVGs the rest of the app uses**, because
+  **MapLibre's icon pipeline is raster-only on every platform** — and the same
+  `assets/flags/*.svg` that renders happily in `<CountryFlag>` draws *nothing* as a map
+  icon, log-only, with no exception. `npm run flags:data` now rasterises them.
+- 729 Jest tests across 31 suites pass, typecheck clean.
+- **verified on a release APK, which is the part that matters**: it launches, the map
+  renders, and all 249 flags draw. Also verified in a browser: the flags appear, the baked
+  border reads against the green basemap, the info sheet is unaffected, and switching back
+  to Name leaves no flags behind.
+- **`icon-padding: 2` crashed the app on launch, fatally, and the browser never noticed.**
+  That is the entry's most useful lesson and it has its own note below.
+- **not run: `.maestro/map-labels.yaml`** (the flag stanza is written but unexercised), the
+  **offline acceptance test**, landscape, and the S25.
+- nothing here adds a network call — the PNGs are bundled on native and served same-origin
+  from `public/` on web — and nothing here is a native change: no `app.json` edit and no new
+  native dependency, so a JS reload is enough. **A release build is still worth its own run**,
+  because a required PNG reaches MapLibre through a `drawable-*` resource lookup there and a
+  Metro URL in dev, and those are two different code paths.
+
 ## Stack
 
 | Concern | Choice | Notes |
@@ -252,8 +276,10 @@ src/
     cameraFit.ts            # pure: zoom floors - world-fit width, and the both-axes fit
     choropleth.ts           # pure: population ramp + the fill-color paint expression
     offlineStyle.ts         # inline style: background layer, a bundled font-face, no sources
-    mapLabels.ts            # pure: label field catalogue + the symbol layer's expressions
-    labelFit.ts             # pure: text + country width -> the zoom a label appears at
+    mapLabels.ts            # pure: label field catalogue + both symbol layers' expressions
+    mapFlagImages.ts        # GENERATED: 249 PNG requires, keyed flag-<iso2>
+    mapFlagImages.web.ts    # GENERATED: the same keys, as /map-flags/ URLs
+    labelFit.ts             # pure: one fit core; text width or flag width -> that zoom
   data/
     countries.geo.json      # 240 outlines, properties trimmed to { iso3, name }   (1.6 MB)
     countryFacts.json       # 250 fact records keyed by ISO-3                       (65 KB)
@@ -302,7 +328,7 @@ src/
   search/
     countrySearch.ts        # pure: the 237-country index and the ranked matcher
     pendingCountry.ts       # subscription handover from /search back to the map
-scripts/build-flag-assets.mjs       # offline; assets/flags + the generated require map
+scripts/build-flag-assets.mjs       # offline; the SVG set, the PNG map rasters, 3 require maps
 scripts/build-label-points.mjs      # offline; polylabel anchors from the committed geometry
 scripts/build-country-data.mjs      # full online rebuild
 scripts/enrich-country-facts.mjs    # offline facts-only re-derivation
@@ -619,6 +645,104 @@ top-left row, and search and quiz keep the top-right row they had before. `MapOp
   trick `choropleth-modes.yaml` uses, and the only automated defence against a malformed layout
   expression or a `text-font` naming a face that `font-faces` does not define. **Confirming that text
   actually appears is a manual screenshot step.**
+
+### Flag labels are a second layer, and they must be raster
+
+The sixth option draws each country's flag instead of text. It sits second in the picker, beside
+Name, because both answer the same question: which country is this.
+
+**The app already bundles all 249 flags as SVGs, and not one of them can be used here.** MapLibre's
+icon pipeline is raster-only on every platform, and each half of that was read out of the shipped
+source rather than guessed:
+
+- **Android** — `DownloadMapImageTask.java`: a `require`d asset in release goes to
+  `BitmapUtils.getBitmapFromResource` → `BitmapFactory.decodeResource`; in dev the same require is a
+  Metro URL decoded by **Fresco**, which demands a `CloseableStaticBitmap`. Neither decodes SVG.
+- **iOS** — `UIImage` via `RCTImageLoader`, round-tripped through `UIImagePNGRepresentation`.
+- **Web** — `maplibre-gl`'s `arrayBufferToImageBitmap` hardcodes `new Blob([…], {type:"image/png"})`
+  and throws *"Note that SVGs are not supported."*
+
+**`expo-image`'s Android SVG decoder is expo-image's own Glide pipeline and never reaches MapLibre.**
+That is the trap: the identical file that renders in the info sheet draws nothing as a map icon, and
+it fails **log-only** — one `FLog.e("Failed to load bitmap from: …")` line and a blank map.
+
+So `npm run flags:data` now rasterises with `@resvg/resvg-js` (a devDependency; output committed) into
+`assets/map-flags/`, `public/map-flags/` and two generated require maps. ~380 KB for the native pair
+and ~285 KB for the web — an eighth of the 2.0 MB SVG set, because a flag at 72 px is about 1 KB.
+
+**A `sprite` entry in the style is still forbidden**, for the reason `offlineStyle.ts` gives: it is a
+remote-URL-shaped dependency. Images go in imperatively instead — `<Images>` on native,
+`map.addImage` on web.
+
+#### Two raster scales, because of a density trap
+
+`DownloadMapImageTask` sets `inDensity` **only when the resolved asset's scale is not 1**. Ship a
+single unsuffixed `br.png` and React Native files it under `drawable-mdpi`, so `decodeResource` takes
+`inDensity` from the bucket (160) against an `inTargetDensity` of 480 on a 3x phone and **upsamples
+every flag 3x at decode time** — a blurry icon, and ~35 MB of style bitmaps for the set.
+
+With `br@3x.png` beside it, `resolveAssetSource` reports scale 3, the two densities match, and the
+bitmap is used as-is: crisp, ~3.9 MB. Verified in the build output — the 1x lands in `drawable-mdpi`
+and the @3x in `drawable-xxhdpi` (density 480), which is exactly the `160 * 3` the loader computes.
+Both therefore arrive as **24 style px**, which is what lets one `icon-size` expression be right on
+every density. The 1x file also keeps **Jest** working, whose resolver does no `@Nx` lookup.
+
+`icon-size` is expressed as a fraction of `MAP_FLAG_INTRINSIC_DP`, not as bare numbers: if the flags
+are ever the wrong size on a device, the image arrived at a different pixel ratio than assumed and
+that is the one place to correct it. Web is told the ratio outright — `addImage(…, {pixelRatio: 3})`.
+
+#### `icon-padding: 2` is a fatal crash, and the browser will not tell you
+
+The text layer sets `text-padding: 2`, so the symmetrical thing to write on the icon layer is
+`icon-padding: 2`. It killed the app on launch:
+
+```
+UnexpectedNativeTypeException: Value for value cannot be cast from Double to ReadableArray
+  at MLRNStyleFactory.setIconPadding(MLRNStyleFactory.kt:1606)
+```
+
+The two are not symmetrical in the binding. **`setTextPadding` calls `getFloat`; `setIconPadding`
+calls `getFloatArray`**, because the spec types `text-padding` as a `number` and `icon-padding` as a
+`padding`. maplibre-gl on the web accepts the scalar without a murmur, so the feature looked perfect
+in a browser and crashed instantly on a device — which is exactly how it got in.
+
+It is now **unset**, because the spec's own default is already `[2]`. If it ever needs setting it must
+be an **array**. `MapScreen.test.tsx` guards that, and the same question is worth asking of any other
+icon property: check the `else` branch of its setter in `MLRNStyleFactory.kt` before trusting a
+scalar. The ones this layer does use are fine — `icon-allow-overlap` takes `getBoolean`, and
+`icon-image`, `icon-size` and `symbol-sort-key` all take the expression branch.
+
+#### The layer, the latch, and what draws
+
+- **A second symbol layer, `country-flag`**, on the same `country-labels` source. One symbol layer has
+  one `text-field`, and a flag has none. Both layers stay mounted in every mode and **exactly one of
+  the two filters ever matches** — `labelFilter` goes empty for `flag`, `flagIconFilter` for
+  everything else. Nothing is added or removed at runtime, so the never-paints bug stays out of reach.
+- **`icon-image` is a constant**, unlike `text-field`. An expression that emptied out off-mode would
+  be a missing-image lookup, and a log line, every time labels were anything but flags — noise in the
+  one log the offline acceptance test reads.
+- **`<Images>` is permanently mounted but its `images` prop is latched**, `{}` until flags are first
+  selected. Registering 249 bitmaps costs one sequential `AsyncTask`, ~3.9 MB of style images, and in
+  a **dev build 249 HTTP round-trips to Metro** — too much to pay on every cold start for a mode most
+  sessions never open. `setImages` only ever ADDS keys, so the latch is one-way by construction.
+- **The border is baked into the PNG**, because **MapLibre has no `icon-halo`**. Japan, Finland and
+  Nigeria are nearly all white and would otherwise be holes against the near-white end of a choropleth
+  ramp. The stroke **straddles the viewBox edge** rather than sitting inside it: a centred stroke on an
+  inset rect lands on a fractional pixel at 24 px wide and antialiases to a pale grey. Flags are also
+  composited **onto white** first — Nepal is a pennant on transparency, and a dark frame around empty
+  space reads as a broken image.
+- **`flag` is a `LabelField` but deliberately NOT a `LabelFieldId`**, the same trade `location` makes
+  against `FieldId`. Everything iterating `LABEL_FIELD_IDS` — `labelTextFor`'s exhaustive switch, the
+  text layer — is about a string, so none of them needs a flag case.
+- Fit reuses `FIT_TOLERANCE` through a shared `getFitMinZoom`. A 20 dp flag clears the test where 66 dp
+  of "Uzbekistan" does not, so **flag labels are markedly denser than name labels** — expected, and the
+  same effect the population field already shows.
+
+#### `assets/**/*.png` had to join the Gradle bundle inputs
+
+`withJsonBundleInputs` widened to `assets/**/*.png` for exactly the reason it was written: that task
+also runs the `--assets-dest` pass, and re-rendering the flags at a different size or border colour
+touches no `.js`/`.ts`/`.json`, so Gradle would mark it UP-TO-DATE and ship the previous flags.
 
 ## Quiz mode
 
@@ -1110,6 +1234,10 @@ copies the 249 the dataset references into `assets/flags/` and writes
 Metro only bundles what the app `require`s and `public/` is web staging that never reaches
 an APK.
 
+That same script now also emits a **raster** set for the map's flag labels, which is a
+different set for a real reason — MapLibre cannot decode an SVG icon on any platform. See
+*Flag labels are a second layer, and they must be raster* under *Map labels*.
+
 **The map is generated because Metro cannot do a dynamic `require`.** There is no way to
 write ``require(`../assets/flags/${{iso2}}.svg`)`` — the bundler resolves requires at build
 time, so every path has to appear literally. 249 literals in a generated file is the honest
@@ -1409,6 +1537,8 @@ npm run typecheck
 npm run test:e2e                   # maestro, needs a running emulator/device
 npm run build:data                 # one-off, needs network; rewrites BOTH json files
 npm run enrich:data                # offline; rewrites countryFacts.json only
+npm run flags:data                 # offline; the flag SVGs, the PNG map rasters and 3 require
+                                   # maps. Rasterising 498 PNGs takes a couple of minutes.
 
 # web
 npm run web                        # expo start --web (dev; no service worker)
@@ -1511,7 +1641,7 @@ freely now, so none can assume it:
 | `.maestro/tap-country.yaml` | `PORTRAIT` | Russia → Greenland → close → ocean-deselect |
 | `.maestro/landscape-info-panel.yaml` | `LANDSCAPE_LEFT` | Brazil → Mali → close → ocean-deselect → rotate to portrait with the card open |
 | `.maestro/choropleth-modes.yaml` | `PORTRAIT` | toggle on → legend → Russia still selects → close → toggle off |
-| `.maestro/map-labels.yaml` | `PORTRAIT` | each label field in turn → map and selection still work |
+| `.maestro/map-labels.yaml` | `PORTRAIT` | each label field in turn, flags included → map and selection still work |
 | `.maestro/search-country.yaml` | `PORTRAIT` | open search → browse → type → pick → the map highlights and flies |
 | `.maestro/quiz.yaml` | `PORTRAIT` + rotate | Quiz → pick a subregion and fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score |
 

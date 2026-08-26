@@ -16,8 +16,12 @@ import labelPoints from '@/data/labelPoints.json';
 import type { CountryFacts } from '@/data/types';
 import { MAX_LABEL_ZOOM } from '@/map/labelFit';
 import {
+  FLAG_ICON_PROPERTY,
+  FLAG_ZOOM_PROPERTY,
+  flagIconFilter,
   LABEL_FIELD_IDS,
   LABEL_FIELDS,
+  type LabelField,
   labelFilter,
   labelTextField,
   RANK_PROPERTY,
@@ -181,10 +185,117 @@ describe('labelTextField', () => {
   });
 });
 
+describe('the flag layer and the text layer are mutually exclusive', () => {
+  /**
+   * The single most important property here, and the one nothing else can catch.
+   *
+   * Two symbol layers share the label source, both stay mounted for ever, and which one draws
+   * is expressed entirely through their filters. If both ever matched, flags would sit under
+   * country names; if neither did, the picker would silently do nothing. Jest is the only
+   * place this is visible - on a device it is just a map that looks wrong.
+   */
+  const NOTHING = ['==', ['get', 'iso3'], ''];
+  const EVERY_FIELD: LabelField[] = ['none', ...LABEL_FIELD_IDS, 'flag'];
+
+  it.each(EVERY_FIELD)('has exactly one live layer for %s', (field) => {
+    const textLive = labelFilter(field)[0] === 'all';
+    const flagLive = flagIconFilter(field)[0] === 'all';
+
+    expect(textLive).toBe(field !== 'none' && field !== 'flag');
+    expect(flagLive).toBe(field === 'flag');
+    expect(textLive && flagLive).toBe(false);
+  });
+
+  it('turns the text layer off for flags, text-field included', () => {
+    expect(labelFilter('flag')).toEqual(NOTHING);
+    // Empty rather than undefined: an undefined layout property is malformed, and a malformed
+    // one passes Jest and blanks the layer inside the native renderer.
+    expect(labelTextField('flag')).toBe('');
+  });
+
+  it('requires both the image name and the fit threshold', () => {
+    const filter = flagIconFilter('flag') as unknown as unknown[];
+    expect(filter[0]).toBe('all');
+    expect(filter[1]).toEqual(['has', FLAG_ICON_PROPERTY]);
+    expect(filter[2]).toEqual(['<=', ['get', FLAG_ZOOM_PROPERTY], ['zoom']]);
+  });
+
+  it('does not collide with the properties of any text field', () => {
+    // A shared name would silently overwrite one field with the other in labelGeoJson.
+    expect(LABEL_FIELD_IDS.map(textPropertyFor)).not.toContain(FLAG_ICON_PROPERTY);
+    expect(LABEL_FIELD_IDS.map(zoomPropertyFor)).not.toContain(FLAG_ZOOM_PROPERTY);
+  });
+});
+
+describe('the flag anchor', () => {
+  it('names an image, not a country', () => {
+    // `flag-fr`, not `fr` and not `France`: a style's images share one namespace, so the
+    // prefix is what keeps a two-letter code from colliding with a future non-flag icon.
+    expect(propertiesOf('FRA')?.[FLAG_ICON_PROPERTY]).toBe('flag-fr');
+  });
+
+  it('gives every flagged country a threshold inside the zoom range', () => {
+    const flagged = features.filter((f) => FLAG_ICON_PROPERTY in (f.properties ?? {}));
+    expect(flagged.length).toBeGreaterThan(220);
+
+    for (const feature of flagged) {
+      const properties = feature.properties as Record<string, unknown>;
+      expect(properties[FLAG_ICON_PROPERTY]).toMatch(/^flag-[a-z]{2}$/);
+      expect(properties[FLAG_ZOOM_PROPERTY]).toBeLessThanOrEqual(MAX_LABEL_ZOOM);
+      expect(properties[FLAG_ZOOM_PROPERTY]).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('appears earlier than the name it replaces', () => {
+    // The density property, not a magic number: a 20 dp flag clears the fit test where 66 dp
+    // of "Uzbekistan" does not, so a flag round is visibly busier than a name one.
+    const uzb = propertiesOf('UZB') ?? {};
+    expect(uzb[FLAG_ZOOM_PROPERTY]).toBeLessThan(uzb[zoomPropertyFor('name')] as number);
+  });
+
+  it('omits the flag entirely for a record that has none', () => {
+    /*
+      Built from a fixture rather than read off `labelGeoJson`, because the one flagless record
+      upstream - BES, the Caribbean Netherlands - has no outline at 1:50m and therefore no
+      label anchor either, so the real data cannot exercise this. The property under test is
+      the idiom, not that country: absent rather than null, which is what lets the layer split
+      it off with `['has', ...]` exactly as Micronesia is split off the currency field.
+    */
+    const flagless: Record<string, CountryFacts> = {
+      NUL: { ...allCountryFacts.FRA, flag: '' },
+    };
+    const built = buildLabelGeoJson(flagless, { NUL: { at: [0, 0], w: 1 } });
+
+    expect(built.features).toHaveLength(1);
+    expect(built.features[0].properties).not.toHaveProperty(FLAG_ICON_PROPERTY);
+    expect(built.features[0].properties).not.toHaveProperty(FLAG_ZOOM_PROPERTY);
+    // Still labelled, just not with a flag - the country did not stop existing.
+    expect(built.features[0].properties).toHaveProperty(textPropertyFor('name'));
+  });
+});
+
 describe('the field catalogue', () => {
-  it('offers none plus every text field, none first', () => {
+  it('offers none, the flag and every text field, none first', () => {
     expect(LABEL_FIELDS[0].field).toBe('none');
-    expect(LABEL_FIELDS.map((option) => option.field).slice(1)).toEqual([...LABEL_FIELD_IDS]);
+    // Spelled out rather than derived from LABEL_FIELD_IDS, which it used to be: `flag` is a
+    // LabelField and deliberately NOT a LabelFieldId, so the two lists no longer line up.
+    expect(LABEL_FIELDS.map((option) => option.field)).toEqual([
+      'none',
+      'name',
+      'flag',
+      'capital',
+      'languages',
+      'currencies',
+      'population',
+    ]);
+  });
+
+  it('keeps the flag out of the TEXT field list', () => {
+    // The whole point of the split, and the thing a tidy-up would undo: everything that
+    // iterates LABEL_FIELD_IDS - labelTextFor's exhaustive switch, the text layer's
+    // text-field - is about a string, and a flag is an icon.
+    expect(LABEL_FIELD_IDS).not.toContain('flag');
+    expect(LABEL_FIELDS.some((option) => option.field === 'flag')).toBe(true);
   });
 
   it('gives every option a distinct label and a screen-reader description', () => {

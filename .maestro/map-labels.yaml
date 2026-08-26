@@ -91,6 +91,42 @@ appId: com.boris.geographyapp
 - assertVisible:
     id: 'world-map'
 
+# --- flags: an ICON layer, and the only field that registers native images ---
+# This is the flow's biggest job. Everything about flags happens where no unit test can
+# look: `icon-image` and `icon-size` are evaluated inside the native renderer, and 249
+# PNGs are decoded through <Images> the first time this is selected - a drawable lookup in
+# release, Fresco over HTTP in dev. A malformed layout expression drops the layer, and a
+# failed decode is a LOG LINE and a blank map. Neither is visible from here, but a crash,
+# an ANR or a wedged surface is, which is the same proof-of-parse trick the rest of this
+# file relies on. Whether flags actually APPEAR is a screenshot; see CLAUDE.md.
+- tapOn:
+    id: 'toggle-label-field'
+- tapOn:
+    id: 'label-field-flag'
+- assertNotVisible:
+    id: 'label-field-panel'
+- assertVisible: 'Flag'
+- assertVisible:
+    id: 'world-map'
+
+# Two filters flip on every change - the text layer off, the icon layer on - so going back
+# to text and then to flags again is the one path that catches a stale one. A filter left
+# behind would draw flags underneath the country names.
+- tapOn:
+    id: 'toggle-label-field'
+- tapOn:
+    id: 'label-field-name'
+- assertVisible: 'Name'
+- assertVisible:
+    id: 'world-map'
+- tapOn:
+    id: 'toggle-label-field'
+- tapOn:
+    id: 'label-field-flag'
+- assertVisible: 'Flag'
+- assertVisible:
+    id: 'world-map'
+
 # --- labels compose with a choropleth ---
 # The two settings are independent on purpose, and only one panel is open at a time.
 - tapOn:

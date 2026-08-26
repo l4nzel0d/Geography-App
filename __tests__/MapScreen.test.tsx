@@ -18,6 +18,8 @@ import { getWorldFitZoom } from '@/map/cameraFit';
 import { getCountryBounds } from '@/map/countryBounds';
 import { getCountryCameraStop } from '@/map/quizCamera';
 import { DENSITY_RAMP, POPULATION_RAMP } from '@/map/choropleth';
+import { MAP_FLAG_IMAGES } from '@/map/mapFlagImages';
+import { FLAG_ICON_PROPERTY, type LabelField } from '@/map/mapLabels';
 import { INITIAL_CENTER, INITIAL_ZOOM } from '@/map/WorldMap';
 import { selectCountry } from '@/search/pendingCountry';
 
@@ -70,14 +72,17 @@ const selectMode = async (mode: 'flat' | 'population' | 'density') => {
 };
 
 /** Same shape for the label field picker. */
-const selectLabelField = async (
-  field: 'none' | 'name' | 'capital' | 'languages' | 'currencies' | 'population',
-) => {
+const selectLabelField = async (field: LabelField) => {
   await fireEvent.press(screen.getByTestId('toggle-label-field'));
   await fireEvent.press(screen.getByTestId(`label-field-${field}`));
 };
 
 const labelLayer = () => screen.getByTestId('layer-country-label');
+const flagLayer = () => screen.getByTestId('layer-country-flag');
+
+/** What has been handed to `<Images>` - `{}` until flags are asked for. See WorldMap.tsx. */
+const registeredImages = () =>
+  screen.getByTestId('map-flag-images').props.images as Record<string, unknown>;
 
 const fillColor = () => screen.getByTestId('layer-country-fill').props.paint['fill-color'];
 
@@ -488,6 +493,82 @@ describe('map labels', () => {
     // Still well-formed rather than undefined: a malformed layout property is invisible
     // here and fatal in the native renderer.
     expect(labelLayer().props.layout['text-field']).toBe('');
+  });
+
+  it('mounts the flag layer well-formed and switched off', async () => {
+    await render();
+
+    // Same discipline as the text layer: the layer exists in every mode and its `icon-image`
+    // is a valid expression from the first frame. The filter is what turns it on.
+    expect(flagLayer().props.filter).toEqual(['==', ['get', 'iso3'], '']);
+    expect(flagLayer().props.layout['icon-image']).toEqual(['get', FLAG_ICON_PROPERTY]);
+    // And nothing has been decoded: the latch is closed until flags are actually asked for.
+    expect(registeredImages()).toEqual({});
+  });
+
+  it('wires up the flag field, and turns the text layer off with it', async () => {
+    await render();
+    await selectLabelField('flag');
+
+    const filter = flagLayer().props.filter as unknown[];
+    expect(filter[0]).toBe('all');
+    expect(filter[1]).toEqual(['has', FLAG_ICON_PROPERTY]);
+
+    // The cross-layer half, which is the thing that would show up as flags underneath names.
+    expect(labelLayer().props.filter).toEqual(['==', ['get', 'iso3'], '']);
+    expect(labelLayer().props.layout['text-field']).toBe('');
+  });
+
+  it('registers the flag images on first use, and keeps them after', async () => {
+    await render();
+    await selectLabelField('flag');
+
+    expect(Object.keys(registeredImages())).toHaveLength(Object.keys(MAP_FLAG_IMAGES).length);
+
+    await selectLabelField('name');
+
+    // The layer goes quiet, but the images stay: `MLRNImages.setImages` only ever ADDS keys,
+    // so the latch is one-way by construction. Asserted so nobody "fixes" it into a leak.
+    expect(flagLayer().props.filter).toEqual(['==', ['get', 'iso3'], '']);
+    expect(Object.keys(registeredImages())).toHaveLength(Object.keys(MAP_FLAG_IMAGES).length);
+  });
+
+  it('declutters the flags the same way it declutters text', async () => {
+    await render();
+    await selectLabelField('flag');
+
+    const { layout } = flagLayer().props;
+    expect(layout['icon-allow-overlap']).toBe(false);
+    // Same sort key as the text layer, so the widest country wins either way.
+    expect(layout['symbol-sort-key']).toEqual(['get', 'rank']);
+    // A malformed interpolate blanks the layer inside the native renderer and nowhere else.
+    expect(layout['icon-size'][0]).toBe('interpolate');
+    // And the numbers must be numbers: an undefined constant would make these NaN, which
+    // Jest would otherwise wave through as a well-shaped expression.
+    for (const stop of [layout['icon-size'][4], layout['icon-size'][6]]) {
+      expect(Number.isFinite(stop)).toBe(true);
+      expect(stop).toBeGreaterThan(0);
+    }
+  });
+
+  it('never gives icon-padding a scalar, which crashes Android outright', async () => {
+    /*
+      A regression guard for a fatal crash, not a style preference.
+
+      `MLRNStyleFactory.setIconPadding` calls `getFloatArray`, while `setTextPadding` calls
+      `getFloat` - the spec types the first as a `padding` and the second as a `number`. So
+      the symmetrical-looking `icon-padding: 2` beside `text-padding: 2` throws
+      `UnexpectedNativeTypeException: cannot be cast from Double to ReadableArray` the instant
+      the layer is added, killing the app on launch. maplibre-gl on the web accepts the scalar
+      without complaint, so nothing in a browser catches it.
+
+      Unset is correct - the spec default is already [2]. If it is ever set, it must be an array.
+    */
+    await render();
+    await selectLabelField('flag');
+
+    const padding = flagLayer().props.layout['icon-padding'];
+    if (padding !== undefined) expect(Array.isArray(padding)).toBe(true);
   });
 
   it('lets labels sit on top of a choropleth', async () => {

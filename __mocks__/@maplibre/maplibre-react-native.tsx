@@ -51,6 +51,20 @@ export const Layer = (props: AnyProps) => (
   <View testID={`layer-${String(props.id)}`} {...props} />
 );
 
-export const Images = () => null;
+/**
+ * Renders a real view and forwards `images`, unlike the `() => null` this used to be.
+ *
+ * The same blind spot `layout` and `paint` each had before: a symbol layer whose
+ * `icon-image` names an image that nothing ever registered draws nothing on a device and
+ * logs a single line - `FLog.e("Failed to load bitmap from: ...")` on Android - with no
+ * exception anywhere. Off a device this is the only way to see that the registration
+ * happened at all, which is what `MapScreen.test.tsx` asserts about the flag latch.
+ *
+ * The testID comes from the prop rather than being hardcoded, for the reason
+ * `GeoJSONSource`'s is derived from `id`: a fixed one is fine until there are two.
+ */
+export const Images = ({ testID, ...props }: AnyProps & { testID?: string }) => (
+  <View testID={testID ?? 'map-images'} {...props} />
+);
 export const Marker = () => null;
 export const UserLocation = () => null;

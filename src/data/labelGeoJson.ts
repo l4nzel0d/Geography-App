@@ -1,6 +1,10 @@
+import { flagLetters } from '@/components/flagEmoji';
 import { formatCompactNumber, formatLabelList } from '@/components/formatters';
-import { getLabelMinZoom } from '@/map/labelFit';
+import { getFlagMinZoom, getLabelMinZoom } from '@/map/labelFit';
 import {
+  FLAG_ICON_PROPERTY,
+  FLAG_IMAGE_PREFIX,
+  FLAG_ZOOM_PROPERTY,
   LABEL_FIELD_IDS,
   type LabelFieldId,
   RANK_PROPERTY,
@@ -88,6 +92,25 @@ export function buildLabelGeoJson(
 
       properties[textPropertyFor(field)] = text;
       properties[zoomPropertyFor(field)] = getLabelMinZoom(text, anchor.w);
+      hasAny = true;
+    }
+
+    /*
+      The flag, which is an ICON rather than text and so sits outside the loop above.
+
+      `flag` is deliberately not a `LabelFieldId` - see `mapLabels.ts` - so `labelTextFor`'s
+      exhaustive switch, `LABEL_FIELD_IDS` and the text layer all stay about strings, and this
+      is the one place that has to know a flag exists at all.
+
+      `countryFacts.json` has no ISO-2 field: it stores the flag as a regional-indicator emoji
+      pair, and `flagLetters` is the repo's only decoder for it. Absent rather than null, as
+      everywhere else here, so `['has', ...]` drops the single record with no flag upstream
+      (BES) exactly as it drops Micronesia from the currency field.
+    */
+    const iso2 = flagLetters(countryFacts.flag);
+    if (iso2) {
+      properties[FLAG_ICON_PROPERTY] = `${FLAG_IMAGE_PREFIX}${iso2.toLowerCase()}`;
+      properties[FLAG_ZOOM_PROPERTY] = getFlagMinZoom(anchor.w);
       hasAny = true;
     }
 

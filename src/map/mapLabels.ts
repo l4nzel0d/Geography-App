@@ -1,5 +1,7 @@
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 
+import { MAP_FLAG_INTRINSIC_DP } from './labelFit';
+
 /**
  * The fact drawn on top of every country, and the expressions that draw it.
  *
@@ -12,17 +14,25 @@ import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
  * fill mode.
  */
 
-/** `none` is a real state - the default - not the absence of one. */
-export type LabelField =
-  | 'none'
-  | 'name'
-  | 'capital'
-  | 'languages'
-  | 'currencies'
-  | 'population';
+/**
+ * The fields that put TEXT on a feature.
+ *
+ * Written out as the literal union and `LabelField` derived from it, rather than the other
+ * way round, because `flag` is a label field that is not one of these - see below.
+ */
+export type LabelFieldId = 'name' | 'capital' | 'languages' | 'currencies' | 'population';
 
-/** Every field except `none`, i.e. the ones that actually have text on a feature. */
-export type LabelFieldId = Exclude<LabelField, 'none'>;
+/**
+ * What the map is labelled with. `none` is a real state - the default - not the absence of one.
+ *
+ * **`flag` is deliberately not a `LabelFieldId`**, the same way `location` is a `GradedField`
+ * but not a `FieldId` in `quiz/quizConfig.ts`. Everything that iterates `LABEL_FIELD_IDS` -
+ * `labelTextFor`'s exhaustive switch, the text layer's `text-field` - is about a string drawn
+ * through the bundled font, and a flag is not one: it is a raster image drawn by a second
+ * symbol layer through `icon-image`. Keeping it out of that union means none of them needs a
+ * case for it, and the compiler will not let one be added by accident.
+ */
+export type LabelField = 'none' | LabelFieldId | 'flag';
 
 export const LABEL_FIELD_IDS: readonly LabelFieldId[] = [
   'name',
@@ -46,6 +56,8 @@ export const LABEL_FIELDS: readonly {
 }[] = [
   { field: 'none', label: 'None', description: 'No labels on the map' },
   { field: 'name', label: 'Name', description: 'Show each country name on the map' },
+  // Beside Name, because both answer the same question: which country is this.
+  { field: 'flag', label: 'Flag', description: 'Show each country flag on the map' },
   { field: 'capital', label: 'Capital', description: 'Show each capital city on the map' },
   {
     field: 'languages',
@@ -67,17 +79,80 @@ export const LABEL_FIELDS: readonly {
 /**
  * Feature property names, derived rather than written out so `labelGeoJson.ts` and the
  * layer cannot disagree about what a property is called. `name` -> `tName` / `zName`.
+ *
+ * The `t` prefix means "the thing drawn" rather than strictly "text": for `flag` it holds the
+ * name of a map image, not a string to render.
  */
-export function textPropertyFor(field: LabelFieldId): string {
+export function textPropertyFor(field: Exclude<LabelField, 'none'>): string {
   return `t${field[0].toUpperCase()}${field.slice(1)}`;
 }
 
-export function zoomPropertyFor(field: LabelFieldId): string {
+export function zoomPropertyFor(field: Exclude<LabelField, 'none'>): string {
   return `z${field[0].toUpperCase()}${field.slice(1)}`;
 }
 
 /** Sort key property: `symbol-sort-key`, lower placed first. See `labelGeoJson.ts`. */
 export const RANK_PROPERTY = 'rank';
+
+/**
+ * The empty-string-matches-nothing filter the selection layers already use.
+ *
+ * Named once because there are now two layers that need it, and they need it in opposite
+ * modes: the text layer is off for `none` and `flag`, the icon layer is off for everything
+ * else. That is what keeps both mounted in every mode with nothing added or removed at
+ * runtime - the rule that puts the never-paints bug out of reach.
+ */
+const NOTHING = ['==', ['get', 'iso3'], ''] as unknown as ExpressionSpecification;
+
+/**
+ * Prefix on every flag map-image name, so `tFlag` holds `flag-br` rather than a bare `br`.
+ *
+ * A style's images share one namespace, so an unprefixed two-letter name is a collision
+ * waiting for the first non-flag icon this app ever adds. `scripts/build-flag-assets.mjs`
+ * generates `MAP_FLAG_ASSETS` with the same prefix, and `data-integrity.test.ts` asserts every
+ * property the features carry names an image that exists.
+ */
+export const FLAG_IMAGE_PREFIX = 'flag-';
+
+/** Holds the map-image name, e.g. `flag-br`. Not text - see `textPropertyFor`. */
+export const FLAG_ICON_PROPERTY = textPropertyFor('flag');
+
+/** The fit threshold, exactly as the text fields have one. See `labelFit.ts`. */
+export const FLAG_ZOOM_PROPERTY = zoomPropertyFor('flag');
+
+/**
+ * `icon-image` for the flag layer.
+ *
+ * A constant rather than a builder: unlike `text-field` there is no mode in which this has to
+ * say something different, because the layer's own filter matches nothing unless flags are on.
+ * It is well-formed in every mode, which is what matters - a malformed layout property passes
+ * every Jest test and then blanks the layer inside the native renderer.
+ */
+export const FLAG_ICON_IMAGE = ['get', FLAG_ICON_PROPERTY] as unknown as ExpressionSpecification;
+
+/**
+ * `icon-size` for the flag layer - how far the 24 px image is scaled at each zoom.
+ *
+ * The mirror of the text layer's `text-size` ramp, which runs 11 -> 14 about a nominal 12: this
+ * runs **18 dp at world zoom to 24 dp from zoom 6**, about the nominal `MAP_FLAG_WIDTH_DP` of
+ * 20 that the fit test uses. Growing a little with zoom is the same judgement in both cases -
+ * small enough that a crowded world view still reads, roomier once there is space for it.
+ *
+ * Expressed as a fraction of `MAP_FLAG_INTRINSIC_DP` rather than as bare numbers, because that
+ * is the one thing here that could be wrong on a device: if the image arrives at a different
+ * pixel ratio than the rasteriser intended, every flag is scaled by the same wrong factor and
+ * this is where it gets corrected. At zoom 6 the ratio is exactly 1, so the flag is drawn
+ * texel-for-texel from the @3x raster on a 3x screen.
+ */
+export const FLAG_ICON_SIZE = [
+  'interpolate',
+  ['linear'],
+  ['zoom'],
+  0,
+  18 / MAP_FLAG_INTRINSIC_DP,
+  6,
+  24 / MAP_FLAG_INTRINSIC_DP,
+] as unknown as ExpressionSpecification;
 
 /**
  * Which labels the symbol layer draws.
@@ -100,7 +175,9 @@ export const RANK_PROPERTY = 'rank';
  * the never-paints bug out of reach.
  */
 export function labelFilter(field: LabelField): ExpressionSpecification {
-  if (field === 'none') return ['==', ['get', 'iso3'], ''];
+  // `flag` joins `none` here: it is drawn by the icon layer below, so the TEXT layer must be
+  // off. Exactly one of the two filters ever matches anything.
+  if (field === 'none' || field === 'flag') return NOTHING;
 
   return [
     'all',
@@ -118,6 +195,24 @@ export function labelFilter(field: LabelField): ExpressionSpecification {
  * Jest test and then blanks the layer inside the native renderer.
  */
 export function labelTextField(field: LabelField): ExpressionSpecification | string {
-  if (field === 'none') return '';
+  if (field === 'none' || field === 'flag') return '';
   return ['get', textPropertyFor(field)] as unknown as ExpressionSpecification;
+}
+
+/**
+ * Which flags the icon layer draws - the mirror image of `labelFilter`.
+ *
+ * Same two conditions as the text layer, for the same two reasons: `has` drops the one record
+ * with no flag upstream (BES), and the zoom comparison is the fit half of decluttering. What
+ * differs is only where the threshold came from - a fixed icon width rather than a string's
+ * estimated one. See `labelFit.ts`.
+ */
+export function flagIconFilter(field: LabelField): ExpressionSpecification {
+  if (field !== 'flag') return NOTHING;
+
+  return [
+    'all',
+    ['has', FLAG_ICON_PROPERTY],
+    ['<=', ['get', FLAG_ZOOM_PROPERTY], ['zoom']],
+  ] as unknown as ExpressionSpecification;
 }

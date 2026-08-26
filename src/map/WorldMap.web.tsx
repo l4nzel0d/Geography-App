@@ -43,7 +43,27 @@ import { useWindowSize } from '@/components/useWindowSize';
 
 import { getWorldFitZoom } from './cameraFit';
 import { CHOROPLETH_RAMPS } from './choropleth';
-import { labelFilter, labelTextField, RANK_PROPERTY } from './mapLabels';
+import { MAP_FLAG_RASTER_SCALE } from './labelFit';
+/*
+  The `.web` sibling by its EXPLICIT path, which is unusual in this codebase and deliberate.
+
+  Every other platform pair here - `useWindowSize`, `CountryFlag` - declares the same type on
+  both sides, so letting TypeScript resolve the bare specifier to the native file costs
+  nothing. These two genuinely differ: native holds `require`d asset ids (numbers) and web
+  holds same-origin URLs (strings), because the two renderers want different things. Importing
+  the bare name here would type `MAP_FLAG_IMAGES` from the native file and hand a number to
+  `map.loadImage`. Naming the file is safe precisely because this module is never bundled
+  anywhere but web.
+*/
+import { MAP_FLAG_IMAGES } from './mapFlagImages.web';
+import {
+  FLAG_ICON_IMAGE,
+  FLAG_ICON_SIZE,
+  flagIconFilter,
+  labelFilter,
+  labelTextField,
+  RANK_PROPERTY,
+} from './mapLabels';
 import { LABEL_FONT, mapColors, WEB_OFFLINE_STYLE } from './offlineStyle';
 import { pickCountry } from './pickCountry';
 import type { MapCameraStop } from './quizCamera';
@@ -86,6 +106,7 @@ const COUNTRY_LAYERS = {
   border: 'country-border',
   casing: 'country-selected-casing',
   outline: 'country-selected-outline',
+  flag: 'country-flag',
   label: 'country-label',
 } as const;
 
@@ -168,6 +189,18 @@ export function WorldMap({
 }: WorldMapProps) {
   const containerRef = useRef<View | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  /**
+   * Registered once per map, and only once flags have actually been asked for.
+   *
+   * Same judgement as the native `<Images>` latch: 249 images is real work - here 249 fetches
+   * and decodes - and most sessions never open this mode. In dev there is no service worker at
+   * all, so the first switch is 249 cold requests to Metro; a production build precaches them.
+   *
+   * The promise is the latch. A second switch to `flag` awaits the same one rather than
+   * starting again, and `map.hasImage` makes each individual add idempotent besides.
+   */
+  const flagImagesRef = useRef<Promise<void> | null>(null);
+
   const [ready, setReady] = useState(false);
 
   /**
@@ -371,6 +404,28 @@ export function WorldMap({
       // for why one point per country rather than a symbol layer on the polygons.
       map.addSource(LABELS_SOURCE, { type: 'geojson', data: labelGeoJson as never });
 
+      /*
+        The flag layer, added here rather than behind the font gate below: a symbol layer with
+        no `text-field` never asks for a glyph, so there is nothing to wait for. Same `layout`
+        objects the native component hands MapLibre Native - the style spec is the portability
+        layer. It starts filtered to nothing, like every other mode-driven layer here.
+      */
+      map.addLayer({
+        id: COUNTRY_LAYERS.flag,
+        type: 'symbol',
+        source: LABELS_SOURCE,
+        filter: asFilter(flagIconFilter('none')),
+        layout: {
+          'icon-image': asExpression(FLAG_ICON_IMAGE),
+          'icon-size': asExpression(FLAG_ICON_SIZE),
+          'icon-allow-overlap': false,
+          // `icon-padding` is deliberately unset here too, so the two platforms keep drawing
+          // the same thing. Web would accept a scalar; Android's binding fatally will not.
+          // See the long note in WorldMap.tsx - the spec default is already [2].
+          'symbol-sort-key': ['get', RANK_PROPERTY],
+        },
+      });
+
       setReady(true);
     });
 
@@ -394,6 +449,10 @@ export function WorldMap({
       // dropped by the browser, which looks exactly like the emulator's black-map bug.
       map.remove();
       mapRef.current = null;
+      // Style images belong to the map that was just removed, so the latch has to reopen with
+      // it - otherwise the next map would await a promise that registered images into a dead
+      // style and then filter a layer on to draw images it does not have.
+      flagImagesRef.current = null;
       setReady(false);
     };
     // Created once, as soon as the container has a size. fitZoom/maxZoom changes are
@@ -474,6 +533,46 @@ export function WorldMap({
       'text-field',
       asExpression(labelTextField(labelField)),
     );
+  }, [ready, labelField]);
+
+  // --- the flag layer, and the images it needs ------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !map.getLayer(COUNTRY_LAYERS.flag)) return;
+
+    // Leaving is synchronous, and must be: there is nothing to load in order to draw nothing,
+    // and an awaited version would leave flags on screen behind the next mode.
+    if (labelField !== 'flag') {
+      map.setFilter(COUNTRY_LAYERS.flag, asFilter(flagIconFilter(labelField)));
+      return;
+    }
+
+    if (!flagImagesRef.current) {
+      flagImagesRef.current = Promise.all(
+        Object.entries(MAP_FLAG_IMAGES).map(async ([name, url]) => {
+          if (map.hasImage(name)) return;
+          const { data } = await map.loadImage(url);
+          // `pixelRatio` is not optional. These are the 3x bytes - 72 device px for 24 style
+          // px - and nothing in a PNG says so, so without it the shared `icon-size` draws
+          // every flag three times too large. Native learns the same fact from the bitmap's
+          // density; see the RASTERS note in scripts/build-flag-assets.mjs.
+          if (!map.hasImage(name)) map.addImage(name, data, { pixelRatio: MAP_FLAG_RASTER_SCALE });
+        }),
+      ).then(() => undefined);
+    }
+
+    let cancelled = false;
+    flagImagesRef.current.then(() => {
+      // Registering BEFORE the filter flips is the one asymmetry with native worth keeping:
+      // the web is imperative and can await, so it never has native's one-frame window where
+      // the layer references images that are not there yet, and never logs a missing image.
+      if (cancelled || mapRef.current !== map) return;
+      map.setFilter(COUNTRY_LAYERS.flag, asFilter(flagIconFilter('flag')));
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [ready, labelField]);
 
   // --- zoom bounds ---------------------------------------------------------------

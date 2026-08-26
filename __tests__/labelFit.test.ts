@@ -11,8 +11,11 @@ import {
   AVG_GLYPH_RATIO,
   estimateLabelWidthDp,
   FIT_TOLERANCE,
+  getFitMinZoom,
+  getFlagMinZoom,
   getLabelMinZoom,
   LABEL_FONT_SIZE,
+  MAP_FLAG_WIDTH_DP,
   MAX_LABEL_ZOOM,
   TEXT_MAX_WIDTH_EM,
 } from '@/map/labelFit';
@@ -94,5 +97,45 @@ describe('getLabelMinZoom', () => {
     }
     expect(getLabelMinZoom('', 10)).toBe(MAX_LABEL_ZOOM);
     expect(Number.isFinite(getLabelMinZoom('Nauru', 0.0001))).toBe(true);
+  });
+});
+
+describe('getFlagMinZoom', () => {
+  /**
+   * A flag's width is a constant, not a function of its content - which is the only thing that
+   * differs from a text label. Everything else, `FIT_TOLERANCE` included, is shared through
+   * `getFitMinZoom` so the two cannot be judged by different rules.
+   */
+  it('is the shared core, asked for a fixed width', () => {
+    for (const widthDeg of [0.5, 5, 40, 152]) {
+      expect(getFlagMinZoom(widthDeg)).toBe(
+        getFitMinZoom(MAP_FLAG_WIDTH_DP * FIT_TOLERANCE, widthDeg),
+      );
+    }
+  });
+
+  it('lets a wider country carry its flag sooner', () => {
+    const zooms = [0.5, 2, 10, 50, 150].map(getFlagMinZoom);
+    for (let i = 1; i < zooms.length; i += 1) expect(zooms[i]).toBeLessThanOrEqual(zooms[i - 1]);
+  });
+
+  it('stays inside the zoom range, degenerate widths included', () => {
+    for (const widthDeg of [0.001, 0.5, 5, 152]) {
+      expect(getFlagMinZoom(widthDeg)).toBeGreaterThanOrEqual(0);
+      expect(getFlagMinZoom(widthDeg)).toBeLessThanOrEqual(MAX_LABEL_ZOOM);
+    }
+    // A zero span would reach log2(0); anything non-finite would poison the filter with a
+    // value the native comparison cannot order.
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(getFlagMinZoom(bad)).toBe(MAX_LABEL_ZOOM);
+    }
+  });
+
+  it('appears before the name of the same country', () => {
+    // Why a flag map is visibly denser than a name map: 20 dp of flag clears the fit test at a
+    // lower zoom than 66 dp of "Uzbekistan". The property, not a pinned number.
+    for (const widthDeg of [1, 5, 20]) {
+      expect(getFlagMinZoom(widthDeg)).toBeLessThan(getLabelMinZoom('Uzbekistan', widthDeg));
+    }
   });
 });
