@@ -9,6 +9,7 @@ import worldCountries from 'world-countries';
 
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 
+import { FLAG_ASPECTS } from '@/components/flagAspects';
 import { flagLetters } from '@/components/flagEmoji';
 import geo from '@/data/countries.geo.json';
 import { allCountryFacts, getCountryFacts } from '@/data/countryFacts';
@@ -224,11 +225,23 @@ describe('quiz data', () => {
 
   it('stores every quiz flag as a resolvable regional indicator pair', () => {
     // Not pedantry. The web build resolves the pair back to an ISO-2 through
-    // `flagLetters` to find `public/flags/<iso2>.svg`; anything that does not resolve
+    // `flagLetters` to find `public/flags/<iso2>.webp`; anything that does not resolve
     // falls through to the two-letter badge - which in a flag round is the answer,
-    // printed on screen. Paired with webAssets.test.ts's "an SVG for every flag in the
-    // dataset", this closes the loop from quiz country to file on disk.
+    // printed on screen. Paired with webAssets.test.ts's "serves the quiz master for every
+    // flag in the dataset", this closes the loop from quiz country to file on disk.
     expect(pool.filter(([, facts]) => !flagLetters(facts.flag)).map(([iso3]) => iso3)).toEqual([]);
+  });
+
+  it('knows the drawn shape of every quiz flag', () => {
+    // The last link in that loop. A code with no entry in the generated aspect table falls
+    // back to 4:3 silently, and the quiz frame is then the wrong shape for the one field the
+    // round is asking about - which looks like a rendering quirk rather than missing data.
+    const unshaped = pool
+      .map(([iso3, facts]) => [iso3, flagLetters(facts.flag)?.toLowerCase()] as const)
+      .filter(([, iso2]) => !iso2 || !(iso2 in FLAG_ASPECTS))
+      .map(([iso3]) => iso3);
+
+    expect(unshaped).toEqual([]);
   });
 
   it('has exactly one flagless record, and it is outside the pool', () => {

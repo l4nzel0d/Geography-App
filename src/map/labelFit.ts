@@ -85,29 +85,42 @@ export const FIT_TOLERANCE = 0.55;
 export const MAX_LABEL_ZOOM = 10;
 
 /**
- * How wide a flag icon is drawn, in dp - the nominal middle of the layer's `icon-size` ramp,
+ * How TALL a flag icon is drawn, in dp - the nominal middle of the layer's `icon-size` ramp,
  * exactly as `LABEL_FONT_SIZE` is the middle of its `text-size` one.
  *
- * The user's call. It roughly matches the visual weight of a name label's cap height, so
- * switching between Name and Flag does not change how busy the map feels. It is also what
- * decides WHICH countries get a flag: at the launch camera a 411 dp screen shows ~166 degrees
- * of longitude, so a country needs about 4.5 degrees of width to clear the fit test below.
- * Expect flags to be markedly denser than name labels - a 20 dp flag fits where 66 dp of
- * "Uzbekistan" does not.
+ * **Height, and that is the whole point.** This used to be a width, because every flag was
+ * 4:3 and a width was therefore also a statement about height. The shipped flags now carry
+ * their own ratios, and the argument this number rests on - that it matches the visual
+ * weight of a name label's cap height, so switching between Name and Flag does not change
+ * how busy the map feels - was always an argument about height.
+ *
+ * 15 is exactly what the old 20 dp width meant at 4:3, so no 4:3 flag moves by a pixel and
+ * the 41 that still come from `flag-icons` are untouched. It is also what decides WHICH
+ * countries get a flag: at the launch camera a 411 dp screen shows ~166 degrees of
+ * longitude, so an ordinary 3:2 flag needs about 5 degrees of width to clear the fit test
+ * below. Expect flags to be markedly denser than name labels - a 22 dp flag fits where 66 dp
+ * of "Uzbekistan" does not - and expect a 2:1 flag to need half again as much room as a 4:3
+ * one, which is the honest answer and was invisible before.
  */
-export const MAP_FLAG_WIDTH_DP = 20;
+export const MAP_FLAG_HEIGHT_DP = 15;
+
+/** The ends of the `icon-size` ramp, in dp of HEIGHT. See `FLAG_ICON_SIZE`. */
+export const MAP_FLAG_MIN_HEIGHT_DP = 13.5;
+export const MAP_FLAG_MAX_HEIGHT_DP = 18;
 
 /**
- * What MapLibre thinks a flag image is wide, in dp, before `icon-size` scales it.
+ * What MapLibre thinks a flag image is TALL, in dp, before `icon-size` scales it.
  *
- * The rasters are 24 px at 1x and 72 px at 3x (`scripts/build-flag-assets.mjs`), and the scale
- * is reported alongside the URI, so the image arrives as 24 dp on every density. The layer's
- * `icon-size` is `MAP_FLAG_WIDTH_DP / MAP_FLAG_INTRINSIC_DP` - derived from these two rather
- * than written as a bare number, because if the flags ever come out the wrong size on a device
- * the cause is the image arriving at a different pixel ratio than assumed, and this is the one
- * place to correct it.
+ * The rasters are 18 px tall at 1x and 54 px at 3x (`scripts/build-flag-assets.mjs`), and
+ * the scale is reported alongside the URI, so the image arrives 18 dp tall on every density.
+ * Their WIDTH is per-flag and needs no constant: `icon-size` is one scalar and scales both
+ * axes, so pinning the axis every flag shares pins everything.
+ *
+ * The layer's `icon-size` is derived from this rather than written as a bare number, because
+ * if the flags ever come out the wrong size on a device the cause is the image arriving at a
+ * different pixel ratio than assumed, and this is the one place to correct it.
  */
-export const MAP_FLAG_INTRINSIC_DP = 24;
+export const MAP_FLAG_INTRINSIC_DP = 18;
 
 /**
  * Device pixels per dp in the raster the map actually draws - the `@3x` file.
@@ -177,6 +190,11 @@ export function getLabelMinZoom(
 /**
  * The zoom at which a country `widthDeg` degrees wide is big enough to carry its flag.
  *
+ * **`aspect` is required, not defaulted**, and that is deliberate: the icons are
+ * height-anchored, so a 28:11 Qatar is three times the width of a 15:13 Belgium drawn beside
+ * it, and a caller that forgot to say so would silently get 4:3 - the very assumption this
+ * whole change exists to delete.
+ *
  * **`FIT_TOLERANCE` is reused deliberately, not by omission.** The argument its comment makes -
  * that Chile, Norway, Vietnam and Italy are never as wide as their own label, and look wrong
  * unlabelled beside named neighbours - is about width, and applies to a rectangle exactly as it
@@ -184,6 +202,6 @@ export function getLabelMinZoom(
  * `FLAG_FIT_TOLERANCE` here rather than changing the shared one and moving every text label
  * with it.
  */
-export function getFlagMinZoom(widthDeg: number): number {
-  return getFitMinZoom(MAP_FLAG_WIDTH_DP * FIT_TOLERANCE, widthDeg);
+export function getFlagMinZoom(widthDeg: number, aspect: number): number {
+  return getFitMinZoom(MAP_FLAG_HEIGHT_DP * aspect * FIT_TOLERANCE, widthDeg);
 }

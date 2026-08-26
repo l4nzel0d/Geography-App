@@ -15,7 +15,7 @@ import {
   getFlagMinZoom,
   getLabelMinZoom,
   LABEL_FONT_SIZE,
-  MAP_FLAG_WIDTH_DP,
+  MAP_FLAG_HEIGHT_DP,
   MAX_LABEL_ZOOM,
   TEXT_MAX_WIDTH_EM,
 } from '@/map/labelFit';
@@ -101,41 +101,79 @@ describe('getLabelMinZoom', () => {
 });
 
 describe('getFlagMinZoom', () => {
+  /** The ratios in the shipped set that bracket everything else: Nepal, 4:3, 3:2, 2:1, Qatar. */
+  const ASPECTS = [0.8203, 4 / 3, 1.4993, 2, 2.5473];
+
   /**
-   * A flag's width is a constant, not a function of its content - which is the only thing that
-   * differs from a text label. Everything else, `FIT_TOLERANCE` included, is shared through
-   * `getFitMinZoom` so the two cannot be judged by different rules.
+   * A flag's width is a function of the flag, not of a shared constant - which is the only
+   * thing that differs from a text label, where it is a function of the string. Everything
+   * else, `FIT_TOLERANCE` included, is shared through `getFitMinZoom` so the two cannot be
+   * judged by different rules.
    */
-  it('is the shared core, asked for a fixed width', () => {
+  it('is the shared core, asked for this flag’s own drawn width', () => {
+    for (const aspect of ASPECTS) {
+      for (const widthDeg of [0.5, 5, 40, 152]) {
+        expect(getFlagMinZoom(widthDeg, aspect)).toBe(
+          getFitMinZoom(MAP_FLAG_HEIGHT_DP * aspect * FIT_TOLERANCE, widthDeg),
+        );
+      }
+    }
+  });
+
+  /**
+   * The property the whole raster migration buys, and the only place it is pinned.
+   *
+   * Height is what the icons hold fixed, so a 28:11 Qatar really is three times the width of
+   * a pennant-shaped Nepal drawn beside it and needs correspondingly more country under it.
+   * While every flag was 4:3 there was no way to say this, and every country was judged
+   * against one made-up width.
+   */
+  it('makes a wider flag wait for a wider country', () => {
+    for (const widthDeg of [1, 5, 20, 60]) {
+      const zooms = ASPECTS.map((aspect) => getFlagMinZoom(widthDeg, aspect));
+      for (let i = 1; i < zooms.length; i += 1) {
+        expect(zooms[i]).toBeGreaterThanOrEqual(zooms[i - 1]);
+      }
+    }
+  });
+
+  /**
+   * The 41 flags still rendered from `flag-icons` are 4:3, and they must land exactly where
+   * the old width-anchored code put them - `MAP_FLAG_HEIGHT_DP * 4/3` is the 20 dp that used
+   * to be written as `MAP_FLAG_WIDTH_DP`. If this drifts, the migration moved labels it had
+   * no business moving.
+   */
+  it('leaves a 4:3 flag exactly where the width-anchored version had it', () => {
     for (const widthDeg of [0.5, 5, 40, 152]) {
-      expect(getFlagMinZoom(widthDeg)).toBe(
-        getFitMinZoom(MAP_FLAG_WIDTH_DP * FIT_TOLERANCE, widthDeg),
-      );
+      expect(getFlagMinZoom(widthDeg, 4 / 3)).toBe(getFitMinZoom(20 * FIT_TOLERANCE, widthDeg));
     }
   });
 
   it('lets a wider country carry its flag sooner', () => {
-    const zooms = [0.5, 2, 10, 50, 150].map(getFlagMinZoom);
+    const zooms = [0.5, 2, 10, 50, 150].map((widthDeg) => getFlagMinZoom(widthDeg, 1.4993));
     for (let i = 1; i < zooms.length; i += 1) expect(zooms[i]).toBeLessThanOrEqual(zooms[i - 1]);
   });
 
   it('stays inside the zoom range, degenerate widths included', () => {
     for (const widthDeg of [0.001, 0.5, 5, 152]) {
-      expect(getFlagMinZoom(widthDeg)).toBeGreaterThanOrEqual(0);
-      expect(getFlagMinZoom(widthDeg)).toBeLessThanOrEqual(MAX_LABEL_ZOOM);
+      expect(getFlagMinZoom(widthDeg, 1.4993)).toBeGreaterThanOrEqual(0);
+      expect(getFlagMinZoom(widthDeg, 1.4993)).toBeLessThanOrEqual(MAX_LABEL_ZOOM);
     }
     // A zero span would reach log2(0); anything non-finite would poison the filter with a
     // value the native comparison cannot order.
     for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(getFlagMinZoom(bad)).toBe(MAX_LABEL_ZOOM);
+      expect(getFlagMinZoom(bad, 1.4993)).toBe(MAX_LABEL_ZOOM);
     }
   });
 
   it('appears before the name of the same country', () => {
-    // Why a flag map is visibly denser than a name map: 20 dp of flag clears the fit test at a
-    // lower zoom than 66 dp of "Uzbekistan". The property, not a pinned number.
+    // Why a flag map is visibly denser than a name map. Asserted for the WIDEST flag in the
+    // set, so the claim is honest for all 249 rather than for a comfortable middle: even
+    // Qatar's 38 dp clears the fit test sooner than 66 dp of "Uzbekistan".
     for (const widthDeg of [1, 5, 20]) {
-      expect(getFlagMinZoom(widthDeg)).toBeLessThan(getLabelMinZoom('Uzbekistan', widthDeg));
+      expect(getFlagMinZoom(widthDeg, 2.5473)).toBeLessThan(
+        getLabelMinZoom('Uzbekistan', widthDeg),
+      );
     }
   });
 });

@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { CountrySearchResult } from '@/search/countrySearch';
 
 import { CountryFlag } from '../CountryFlag';
+import { FLAG_SIZES } from '../flagSizes';
 import { quizColors, quizRadii } from '../palette';
 import { useTranslator } from '@/i18n/useTranslator';
 import { getLocale } from '@/i18n/locale';
@@ -47,9 +48,18 @@ export const CountryResultRow = memo(function CountryResultRow({
         matchedAs ? t('search.result.alias', { name, alias: matchedAs }) : name
       }
     >
-      {/* Shared with the info sheet, so a platform that cannot draw flag emoji gets a
-          real image here too rather than a bare country code. See flagEmoji.ts. */}
-      <CountryFlag flag={flag} size="sm" />
+      {/*
+        Shared with the info sheet, so a platform that cannot draw flag emoji gets a real
+        image here too rather than a bare country code. See flagEmoji.ts.
+
+        The fixed slot is what keeps the names down the list starting at one x-position:
+        a flag's width is its own now, so this column would otherwise run from Nepal's
+        17 dp to Qatar's 44, and a scrolling list of ragged names reads as broken rather
+        than as varied.
+      */}
+      <View style={styles.flagSlot}>
+        <CountryFlag flag={flag} size="sm" />
+      </View>
 
       <View style={styles.text}>
         <Text style={styles.name} numberOfLines={1}>
@@ -75,6 +85,7 @@ const styles = StyleSheet.create({
     borderRadius: quizRadii.field,
   },
   rowPressed: { backgroundColor: quizColors.surfaceRaised },
+  flagSlot: { width: FLAG_SIZES.sm.maxWidth, alignItems: 'center' },
   text: { flex: 1 },
   name: { color: quizColors.text, fontSize: 16 },
   subregion: { color: quizColors.textMuted, fontSize: 13, marginTop: 2 },

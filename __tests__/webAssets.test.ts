@@ -54,14 +54,22 @@ describe('public/ web assets', () => {
 });
 
 /**
- * Every flag the info sheet can ask for must exist on disk.
+ * Every flag image the app can ask for must exist under `public/`, and be the same bytes as
+ * the copy under `assets/`.
  *
- * Windows draws no flag emoji, so the web build serves real SVGs from `public/flags/`
- * (see `CountryFlag.web.tsx`). A country whose file is missing renders a broken image
- * until the badge fallback catches it - so the invariant is checked here rather than
- * discovered in the UI, mirroring how `data-integrity.test.ts` guards the pipeline.
+ * The flag is a real image on every platform now, and the web reaches it over HTTP:
+ * `/flags` for the quiz's full-size master, `/flag-thumbs` for a row, `/map-flags` for the
+ * symbol layer (see `CountryFlag.web.tsx` and `WorldMap.web.tsx`). A country whose file is
+ * missing renders a broken image until the badge fallback catches it - so the invariant is
+ * checked here rather than discovered in the UI, mirroring how `data-integrity.test.ts`
+ * guards the pipeline.
+ *
+ * **Byte identity is the point**, and it is checkable now in a way it never was: `public/`
+ * used to be a second copy of the `flag-icons` SVGs and `public/map-flags` a second render,
+ * so the two could only be compared for existence. Both are now a straight `copyFileSync` of
+ * `assets/`, performed by the one function in `copy-web-assets.mjs`.
  */
-describe('public/flags', () => {
+describe('the flag images under public/', () => {
   const facts = factsJson as Record<string, { flag: string | null }>;
   const codes = [
     ...new Set(
@@ -72,20 +80,49 @@ describe('public/flags', () => {
     ),
   ].sort();
 
-  it('has an SVG for every flag in the dataset', () => {
+  /** Mirrors `FLAG_COPIES` in `scripts/copy-web-assets.mjs`. */
+  const TIERS = [
+    { what: 'the quiz master', from: 'assets/flags', to: 'public/flags', ext: 'webp', suffix: '' },
+    {
+      what: 'the row thumb',
+      from: 'assets/flag-thumbs',
+      to: 'public/flag-thumbs',
+      ext: 'webp',
+      suffix: '',
+    },
+    {
+      // The web has no `@Nx` suffixes, so it takes the 3x bytes under a plain name and
+      // `WorldMap.web.tsx` passes `pixelRatio` explicitly.
+      what: 'the map raster',
+      from: 'assets/map-flags',
+      to: 'public/map-flags',
+      ext: 'png',
+      suffix: '@3x',
+    },
+  ];
+
+  it.each(TIERS)('serves $what for every flag in the dataset', ({ to, ext }) => {
     expect(codes.length).toBeGreaterThan(200);
 
-    // If this fails, run `npm run web:assets`.
-    const missing = codes.filter((c) => !existsSync(join(root, `public/flags/${c}.svg`)));
+    // If this fails, run `npm run flags:data`.
+    const missing = codes.filter((c) => !existsSync(join(root, `${to}/${c}.${ext}`)));
     expect(missing).toEqual([]);
   });
 
-  it('ships only the flags the dataset references', () => {
-    // flag-icons carries more codes than this app has countries. Shipping the extras
-    // would be dead payload in every service-worker precache.
-    const shipped = readdirSync(join(root, 'public/flags'))
-      .filter((f) => f.endsWith('.svg'))
-      .map((f) => f.replace('.svg', ''))
+  it.each(TIERS)('serves $what as the very same bytes as assets/', ({ from, to, ext, suffix }) => {
+    for (const c of codes) {
+      expect(sha(join(root, `${to}/${c}.${ext}`))).toBe(
+        sha(join(root, `${from}/${c}${suffix}.${ext}`)),
+      );
+    }
+  });
+
+  it.each(TIERS)('ships only the flags the dataset references, as $what', ({ to, ext }) => {
+    // Anything extra here is dead payload in every service-worker precache, twice over -
+    // Expo copies `public/` into both locale trees.
+    const shipped = readdirSync(join(root, to))
+      .filter((f) => f.endsWith(`.${ext}`))
+      .map((f) => f.replace(`.${ext}`, ''))
       .sort();
 
     expect(shipped).toEqual(codes);

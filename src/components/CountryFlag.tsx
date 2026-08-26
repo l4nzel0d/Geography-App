@@ -1,5 +1,5 @@
 /**
- * The country's flag. Native: the real SVG, bundled in the app.
+ * The country's flag. Native: a real raster image, bundled in the app.
  *
  * ## Why not the emoji any more
  *
@@ -21,23 +21,36 @@
  * given, centres by arithmetic, and is vector all the way down. Every workaround the
  * emoji needed - the nudge, the generous line box, the roomy plaque - is deleted.
  *
+ * ## Two tiers, picked by how big the flag is about to be drawn
+ *
+ * `fill` - the quiz's flag round, where the flag runs the full width of the stage - takes
+ * the ~1024 px master out of `flagAssets.ts`. Every fixed size takes the 96 px thumb out
+ * of `flagThumbs.ts` instead, because the search screen lists every country it matches and
+ * fifty full-size decodes on a keystroke is not a thing to do for a 21 dp row.
+ *
+ * ## Each flag is drawn at ITS OWN shape
+ *
+ * The images used to be `flag-icons` SVGs, which normalise every flag to 4:3. Almost none
+ * is - see `flagAspects.ts` - so a fixed size is a HEIGHT now and the width follows the
+ * flag. A LIST of flags therefore has a ragged right edge; the two screens that show one
+ * park this in a fixed-width slot themselves, which keeps that decision where the layout
+ * is rather than inside a component that only knows about one flag.
+ *
  * ## This does not weaken the offline requirement
  *
- * The SVGs are **bundled in the APK**, not fetched: `scripts/build-flag-assets.mjs` puts
- * them in `assets/flags/` and generates the static `require` map that reaches them, so
- * Metro packages them like any other asset. No socket, no DNS, nothing to precache.
- *
- * Rendering them needs no new native module either. `expo-image` is already a dependency
- * and ships its own Android SVG support - it vendors AndroidSVG and registers a Glide
- * decoder (`InputStream -> SVG -> Drawable`), so this needed no `react-native-svg`, no
- * `expo prebuild` and no native rebuild.
+ * The images are **bundled in the APK**, not fetched: `scripts/build-flag-assets.mjs` puts
+ * them in `assets/flags/` and `assets/flag-thumbs/` and generates the static `require` maps
+ * that reach them, so Metro packages them like any other asset. No socket, no DNS, nothing
+ * to precache.
  */
 import { Image } from 'expo-image';
-import { Text, View } from 'react-native';
+import { Text } from 'react-native';
 
+import { DEFAULT_FLAG_ASPECT, FLAG_ASPECTS } from './flagAspects';
 import { FLAG_ASSETS } from './flagAssets';
 import { flagLetters } from './flagEmoji';
-import { FLAG_SIZES, type FlagSize } from './flagSizes';
+import { FLAG_SIZES, flagBox, type FlagSize } from './flagSizes';
+import { FLAG_THUMBS } from './flagThumbs';
 import { useTranslator } from '@/i18n/useTranslator';
 
 /** No flag in the dataset - a real white-flag glyph, which every platform draws. */
@@ -71,10 +84,11 @@ export function CountryFlag({
 }) {
   const t = useTranslator();
 
-  const { fontSize, width, height } = FLAG_SIZES[size];
-  const box = fill ? ({ width: '100%', height: '100%' } as const) : { width, height };
+  const { fontSize } = FLAG_SIZES[size];
   const letters = flagLetters(flag);
-  const asset = letters ? FLAG_ASSETS[letters.toLowerCase()] : undefined;
+  const iso2 = letters?.toLowerCase();
+  // The master only where the flag is drawn large; see the tier note above.
+  const asset = iso2 ? (fill ? FLAG_ASSETS[iso2] : FLAG_THUMBS[iso2]) : undefined;
 
   /**
    * Only reachable for a record with no flag - BES is `""` upstream - since every code
@@ -89,16 +103,28 @@ export function CountryFlag({
     );
   }
 
+  const a11y = label ?? t('flag.a11y', { code: letters ?? '' });
+
+  const { height, maxWidth } = FLAG_SIZES[size];
+  const box = fill
+    ? ({ width: '100%', height: '100%' } as const)
+    : flagBox(height, FLAG_ASPECTS[iso2 ?? ''] ?? DEFAULT_FLAG_ASPECT, maxWidth);
+
   return (
     <Image
       testID="country-flag-image"
       source={asset}
-      // `contain`, not `cover`: a flag cropped to fill a box is a different flag. Every
-      // `flag-icons` SVG is 4:3, so given a 4:3 parent this fills it exactly and the
-      // choice never shows - it is insurance against a parent that is not.
+      /*
+        `contain`, not `cover`: a flag cropped to fill a box is a different flag.
+
+        It used to be described as insurance that never showed, because every flag and every
+        box were both 4:3. Now it is load-bearing in two real cases - a `fill` parent whose
+        `aspectRatio` rounds a hair away from the image's, and Qatar, whose box is capped by
+        `maxWidth` and is a rounding off its own 28:11.
+      */
       contentFit="contain"
       style={[box, fill ? null : { borderRadius: 3 }]}
-      accessibilityLabel={label ?? t('flag.a11y', { code: letters ?? '' })}
+      accessibilityLabel={a11y}
     />
   );
 }

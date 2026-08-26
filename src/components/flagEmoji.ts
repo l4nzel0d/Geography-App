@@ -10,7 +10,7 @@
  *
  * There is no way to fix that with CSS, and fetching flag images would break the offline
  * requirement. So the app detects the gap and draws a deliberate badge instead - see
- * the flag's own SVG. This module is the pure half: turning the pair back into its letters.
+ * the flag's own image. This module is the pure half: turning the pair back into its letters.
  */
 
 /** U+1F1E6 REGIONAL INDICATOR SYMBOL LETTER A - the base of the 26-codepoint block. */

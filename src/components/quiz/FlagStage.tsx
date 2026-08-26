@@ -1,6 +1,8 @@
 import { Keyboard, Pressable, StyleSheet, View } from 'react-native';
 
 import { CountryFlag } from '@/components/CountryFlag';
+import { DEFAULT_FLAG_ASPECT, FLAG_ASPECTS } from '@/components/flagAspects';
+import { flagLetters } from '@/components/flagEmoji';
 
 import { quizColors, quizRadii } from '../palette';
 import { useTranslator } from '@/i18n/useTranslator';
@@ -18,9 +20,21 @@ type FlagStageProps = {
 };
 
 /**
- * Every `flag-icons` SVG is 4:3, so the frame is too and the flag fills it exactly.
+ * The shape of the frame is the shape of THIS flag.
+ *
+ * It used to be a constant `4 / 3`, because `flag-icons` normalised every SVG to that.
+ * Almost no flag is 4:3 - Qatar is 28:11, Nepal is a pennant, the Vatican is square - so
+ * the frame took its shape from the library rather than from the country, and a flag round
+ * quietly taught the wrong thing about the one field it is asking about.
+ *
+ * `FLAG_ASPECTS` is generated beside the images themselves, so the frame and the picture in
+ * it can never disagree. The fallback is only reachable for a record with no flag at all -
+ * BES - which `CountryFlag` renders as a glyph and which is outside the quiz pool anyway.
  */
-const FLAG_ASPECT = 4 / 3;
+function flagAspect(flag: string | null): number {
+  const letters = flagLetters(flag);
+  return (letters && FLAG_ASPECTS[letters.toLowerCase()]) || DEFAULT_FLAG_ASPECT;
+}
 
 /**
  * How wide the flag is allowed to get.
@@ -106,7 +120,7 @@ export function FlagStage({ flag, compact }: FlagStageProps) {
         It carries no padding on purpose. The aspect ratio has to describe the FLAG, and
         padding inside an `aspectRatio` box would make the picture some other shape.
       */}
-      <View style={styles.frame}>
+      <View testID="quiz-flag-stage-frame" style={[styles.frame, { aspectRatio: flagAspect(flag) }]}>
         <CountryFlag flag={flag} fill label={t('quiz.flag.a11y')} />
       </View>
     </Pressable>
@@ -129,12 +143,14 @@ const styles = StyleSheet.create({
     /**
      * Width-first, height-capped: take the full width, derive the height from the aspect
      * ratio, and give way on both when the stage is shorter than that implies. `maxHeight`
-     * is what makes a landscape round work, where the stage is wide and short.
+     * is what makes a landscape round work, where the stage is wide and short - and it now
+     * binds in PORTRAIT too, for Nepal: the only flag in the set taller than it is wide, so
+     * the only one whose frame derives a height greater than the room it has.
      */
     width: '100%',
     maxWidth: FLAG_MAX_WIDTH,
     maxHeight: '100%',
-    aspectRatio: FLAG_ASPECT,
+    // `aspectRatio` is applied at the call site, because it is per country.
     // Re-centres once `maxWidth` binds, since the stage stretches its children.
     alignSelf: 'center',
     backgroundColor: quizColors.surfaceRaised,

@@ -43,6 +43,7 @@
     "jest-expo": "~57.0.4",
     "polylabel": "^2.1.0",
     "serve": "^14.2.6",
+    "sharp": "^0.35.4",
     "typescript": "~6.0.3",
     "workbox-build": "^7.4.1",
     "world-countries": "^5.1.0"
@@ -65,7 +66,8 @@
     "build:web": "node scripts/build-web.mjs",
     "web:icons": "node scripts/build-web-icons.mjs",
     "serve:web": "serve dist -l 4173",
-    "web:phone": "node scripts/build-web.mjs && serve dist -l 4173"
+    "web:phone": "node scripts/build-web.mjs && serve dist -l 4173",
+    "flags:import": "node scripts/import-flag-masters.mjs"
   },
   "jest": {
     "preset": "jest-expo",

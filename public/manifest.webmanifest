@@ -1,7 +1,7 @@
 {
   "name": "Countries of the World",
   "short_name": "Countries",
-  "description": "A world map you can explore offline: tap any country for its population, currency, languages, capital and area, colour the land by population or density, label every country, search 237 countries, or take a quiz.",
+  "description": "A world map you can explore offline: tap any country for its population, currency, capital and area, colour the land by population or density, label every country, search 237 countries, or take a quiz.",
   "lang": "en",
   "start_url": "/",
   "scope": "/",

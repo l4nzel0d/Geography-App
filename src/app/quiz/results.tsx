@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CountryFlag } from "@/components/CountryFlag";
+import { FLAG_SIZES } from "@/components/flagSizes";
 import {
   getInfoSheetLayout,
   MAX_CONTENT_WIDTH,
@@ -157,8 +158,12 @@ export default function QuizResultsScreen() {
             >
               <View style={styles.reviewHeader}>
                 {/* Shared with the map and search, so a platform that cannot draw flag
-                    emoji gets a real image rather than a bare country code. */}
-                <CountryFlag flag={facts?.flag ?? null} size="xs" />
+                    emoji gets a real image rather than a bare country code. The fixed slot
+                    keeps the names - and the tick column pinned right of them - aligned
+                    down the review list, since a flag's width is its own now. */}
+                <View style={styles.flagSlot}>
+                  <CountryFlag flag={facts?.flag ?? null} size="xs" />
+                </View>
                 <Text style={styles.reviewName}>
                   {facts?.name ?? result.iso3}
                 </Text>
@@ -326,6 +331,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   reviewHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  flagSlot: { width: FLAG_SIZES.xs.maxWidth, alignItems: "center" },
   reviewName: {
     color: quizColors.text,
     fontSize: 15,

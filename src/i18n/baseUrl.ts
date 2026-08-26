@@ -26,7 +26,7 @@ export const BASE_URL: string = process.env.EXPO_BASE_URL ?? '';
  * anything expo-router generates is already prefixed.
  *
  * Getting this wrong does not fail online, which is what makes it dangerous: the English
- * deploy serves `/flags/ru.svg` and a page at `/ru/` will happily load it. But that URL is
+ * deploy serves `/flags/ru.webp` and a page at `/ru/` will happily load it. But that URL is
  * **outside the `/ru/` service worker's scope**, so no worker handles it and the Russian
  * PWA loses its flags and its map worker the moment it goes offline - against the one hard
  * requirement this project has.

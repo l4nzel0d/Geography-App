@@ -267,10 +267,32 @@ describe('the flag anchor', () => {
   });
 
   it('appears earlier than the name it replaces', () => {
-    // The density property, not a magic number: a 20 dp flag clears the fit test where 66 dp
+    // The density property, not a magic number: a ~22 dp flag clears the fit test where 66 dp
     // of "Uzbekistan" does not, so a flag round is visibly busier than a name one.
     const uzb = propertiesOf('UZB') ?? {};
     expect(uzb[FLAG_ZOOM_PROPERTY]).toBeLessThan(uzb[zoomPropertyFor('name')] as number);
+  });
+
+  it('asks a wider flag for a wider country, at the same anchor width', () => {
+    /*
+      The only place the aspect threaded into `getFlagMinZoom` is observable, and the reason
+      the whole flag set was re-rasterised at true ratios.
+
+      Two identical fixtures, one anchor width, two flags: Qatar's 28:11 is drawn three times
+      the width of Nepal's pennant at the shared icon height, so it needs three times the
+      country under it before it fits. While every flag was 4:3 both got the same number, and
+      one of the two was always wrong.
+    */
+    const wide: Record<string, CountryFacts> = { WID: { ...allCountryFacts.FRA, flag: '🇶🇦' } };
+    const narrow: Record<string, CountryFacts> = { NRW: { ...allCountryFacts.FRA, flag: '🇳🇵' } };
+
+    const anchor = { at: [0, 0] as [number, number], w: 10 };
+    const zoomOf = (facts: Record<string, CountryFacts>, iso3: string) =>
+      buildLabelGeoJson(facts, { [iso3]: anchor }).features[0].properties?.[
+        FLAG_ZOOM_PROPERTY
+      ] as number;
+
+    expect(zoomOf(wide, 'WID')).toBeGreaterThan(zoomOf(narrow, 'NRW'));
   });
 
   it('omits the flag entirely for a record that has none', () => {

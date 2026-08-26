@@ -1,3 +1,4 @@
+import { DEFAULT_FLAG_ASPECT, FLAG_ASPECTS } from '@/components/flagAspects';
 import { flagLetters } from '@/components/flagEmoji';
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '@/i18n/localeTypes';
 import { formatCompactNumber, formatLabelList } from '@/components/formatters';
@@ -138,8 +139,15 @@ export function buildLabelGeoJson(
     */
     const iso2 = flagLetters(countryFacts.flag);
     if (iso2) {
-      properties[FLAG_ICON_PROPERTY] = `${FLAG_IMAGE_PREFIX}${iso2.toLowerCase()}`;
-      properties[FLAG_ZOOM_PROPERTY] = getFlagMinZoom(anchor.w);
+      const code = iso2.toLowerCase();
+      properties[FLAG_ICON_PROPERTY] = `${FLAG_IMAGE_PREFIX}${code}`;
+      // Per flag, not shared. The icons are height-anchored, so a 2:1 flag is half again
+      // as wide as a 4:3 one and needs a wider country before it fits - the same thing a
+      // longer name says about a text label, and invisible while every flag was 4:3.
+      properties[FLAG_ZOOM_PROPERTY] = getFlagMinZoom(
+        anchor.w,
+        FLAG_ASPECTS[code] ?? DEFAULT_FLAG_ASPECT,
+      );
       hasAny = true;
     }
 

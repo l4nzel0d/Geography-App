@@ -14,6 +14,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { FLAG_ASPECTS } from '@/components/flagAspects';
 import { flagLetters } from '@/components/flagEmoji';
 import { allCountryFacts } from '@/data/countryFacts';
 import { labelGeoJson } from '@/data/labelGeoJson';
@@ -25,11 +26,28 @@ const ROOT = join(__dirname, '..');
 const RASTER_DIR = join(ROOT, 'assets', 'map-flags');
 const WEB_RASTER_DIR = join(ROOT, 'public', 'map-flags');
 
-/** The scales `scripts/build-flag-assets.mjs` writes, and the sizes they must come out at. */
+/**
+ * The scales `scripts/build-flag-assets.mjs` writes, and the HEIGHT each must come out at.
+ *
+ * The width used to be here too, a flat 24 and 72, because every flag was 4:3. It is now a
+ * property of the flag - see `expectedWidth` - and height is what all 249 share.
+ */
 const RASTERS = [
-  { suffix: '', width: 24, height: 18 },
-  { suffix: '@3x', width: 72, height: 54 },
+  { suffix: '', height: 18, scale: 1 },
+  { suffix: '@3x', height: 54, scale: 3 },
 ];
+
+/**
+ * The script's own width rule, restated so the two have to be changed together.
+ *
+ * **The 3x width is three times the 1x width, not an independent `round(54 * aspect)`.**
+ * Rounding each scale separately disagrees by a pixel for some ratios, and MapLibre derives
+ * an icon's style width as `pixels / pixelRatio` - so the same flag would be 34.00 dp wide
+ * on a 1x screen and 34.33 dp on a 3x one, from one `icon-size`. Nothing in Jest opens these
+ * files; this is the only place that would ever notice.
+ */
+const expectedWidth = (iso2: string, scale: number) =>
+  scale * Math.round(RASTERS[0].height * FLAG_ASPECTS[iso2]);
 
 /** PNG dimensions straight out of the IHDR chunk - no decoder needed. */
 function pngSize(file: string) {
@@ -83,16 +101,41 @@ describe('the registered images cover what the layer asks for', () => {
 });
 
 describe('the rasters on disk', () => {
-  it('ships both scales for every flag, at the sizes icon-size assumes', () => {
-    // `icon-size` is `MAP_FLAG_WIDTH_DP / MAP_FLAG_INTRINSIC_DP`, and the 24 in that is this
-    // file's 24. Re-render at another width without changing the constant and every flag is
-    // drawn at the wrong size, on a device, with nothing else to say so.
+  it('ships both scales for every flag, at the size icon-size assumes', () => {
+    // `icon-size` is a fraction of `MAP_FLAG_INTRINSIC_DP`, and the 18 in that is this file's
+    // 18. Re-render at another height without changing the constant and every flag is drawn
+    // at the wrong size, on a device, with nothing else to say so.
     for (const iso2 of codes) {
-      for (const { suffix, width, height } of RASTERS) {
+      for (const { suffix, height, scale } of RASTERS) {
         const file = join(RASTER_DIR, `${iso2}${suffix}.png`);
         expect(existsSync(file)).toBe(true);
-        expect(pngSize(file)).toEqual({ width, height });
+        expect(pngSize(file)).toEqual({ width: expectedWidth(iso2, scale), height });
       }
+    }
+  });
+
+  it('keeps the two scales in exact proportion', () => {
+    // Stated separately from the sizes above, because it is the property that survives a
+    // change to either of them: whatever the widths are, the 3x must be exactly 3x.
+    for (const iso2 of codes) {
+      expect(pngSize(join(RASTER_DIR, `${iso2}@3x.png`)).width).toBe(
+        3 * pngSize(join(RASTER_DIR, `${iso2}.png`)).width,
+      );
+    }
+  });
+
+  it('leaves the 4:3 flags exactly where they were before the raster set', () => {
+    /*
+      The 41 codes the raster pack does not carry still come from `flag-icons`, still at 4:3,
+      and must still be 24x18 and 72x54 - the numbers this file used to hardcode for all 249.
+      If they moved, the migration touched labels it had no business touching.
+    */
+    const fourThirds = codes.filter((iso2) => FLAG_ASPECTS[iso2] === 1.3333);
+    expect(fourThirds.length).toBeGreaterThan(20);
+
+    for (const iso2 of fourThirds) {
+      expect(pngSize(join(RASTER_DIR, `${iso2}.png`))).toEqual({ width: 24, height: 18 });
+      expect(pngSize(join(RASTER_DIR, `${iso2}@3x.png`))).toEqual({ width: 72, height: 54 });
     }
   });
 
@@ -112,23 +155,44 @@ describe('the rasters on disk', () => {
     expect(readdirSync(WEB_RASTER_DIR).sort()).toEqual(codes.map((iso2) => `${iso2}.png`));
   });
 
-  it('gives every raster a unique Android drawable name', () => {
+  it('gives every flag image a unique Android drawable name', () => {
     /*
-      React Native flattens `assets/map-flags/br.png` into a single `drawable-*` resource named
-      `assets_mapflags_br` - lower-cased, separators turned to underscores, everything outside
-      [a-z0-9_] deleted. `assets/flags/` and `assets/map-flags/` both feed that one flat
-      namespace, so a collision would resolve to whichever file was copied last, in release
-      builds only, and silently. The hyphen being DELETED rather than replaced is what makes
-      this worth checking rather than assuming.
+      React Native flattens `assets/map-flags/br.png` into a single `drawable-*` resource,
+      and the rule is `getAndroidResourceIdentifier` in `@react-native/assets-registry`:
+      lower-case, `/` -> `_`, everything outside [a-z0-9_] DELETED, and a leading `assets_`
+      stripped. Two details make this worth checking rather than assuming - the hyphen is
+      deleted rather than replaced, so `flag-thumbs` and `flagthumbs` would be the same
+      resource, and **the extension is not part of the name at all**, so `flags/br.webp` and
+      a hypothetical `flags/br.png` would collide even though the files differ.
+
+      Three directories now feed that one flat namespace, and a collision resolves to
+      whichever file was copied last, in release builds only, and silently.
     */
     const drawableName = (dir: string, file: string) =>
-      `${dir}/${file}`.toLowerCase().replace(/[/.]/g, '_').replace(/[^a-z0-9_]/g, '');
+      `${dir}/${file}`
+        // `br.png` and `br@3x.png` are ONE resource in two density buckets, so they are
+        // meant to flatten to the same name. Dropping the suffix is what lets the rest of
+        // this be a uniqueness check rather than a guaranteed failure.
+        .replace(/@\d+x(?=\.)/i, '')
+        .replace(/\.[a-z0-9]+$/i, '')
+        .toLowerCase()
+        .replace(/\//g, '_')
+        .replace(/[^a-z0-9_]/g, '')
+        .replace(/^assets_/, '');
 
     const names = [
       ...readdirSync(join(ROOT, 'assets', 'flags')).map((f) => drawableName('assets/flags', f)),
+      ...readdirSync(join(ROOT, 'assets', 'flag-thumbs')).map((f) =>
+        drawableName('assets/flag-thumbs', f),
+      ),
       ...readdirSync(RASTER_DIR).map((f) => drawableName('assets/map-flags', f)),
     ];
 
-    expect(new Set(names).size).toBe(names.length);
+    // The three directory prefixes survive the hyphen deletion as distinct strings, which is
+    // the only reason the set below can be unique at all.
+    expect(new Set([...names].map((n) => n.replace(/_[a-z]{2}$/, ''))).size).toBe(3);
+
+    // One name per code per directory - the @3x files having collapsed onto their 1x twins.
+    expect(new Set(names).size).toBe(codes.length * 3);
   });
 });

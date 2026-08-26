@@ -23,7 +23,7 @@
  *
  * Expo copies `public/` into every output directory, so `dist/ru` gets its own flags,
  * icons and MapLibre worker. It has to: **a service worker cannot intercept requests
- * outside its own scope**, so a page at `/ru/` reaching for `/flags/ru.svg` at the root
+ * outside its own scope**, so a page at `/ru/` reaching for `/flags/ru.webp` at the root
  * would work online and fail the moment the network went away - against the one hard
  * requirement this project has. ~3.4 MB of duplication buys that.
  */
@@ -105,7 +105,10 @@ let size = 0;
 for (const build of [...BUILDS].reverse()) {
   const result = await generateSW({
     globDirectory: build.dir,
-    globPatterns: ['**/*.{html,js,mjs,css,json,webmanifest,ttf,otf,woff2,png,svg,ico}'],
+    // `webp` is load-bearing: every flag the app ships is one, and a format missing from
+    // this list is simply absent from the precache manifest. The app would install, look
+    // perfect online, and show nothing but two-letter badges the moment the network went.
+    globPatterns: ['**/*.{html,js,mjs,css,json,webmanifest,ttf,otf,woff2,png,webp,svg,ico}'],
     // The route listing is a debug page, not part of the app. The root build additionally
     // skips the Russian subtree, which has its own worker and would otherwise be precached
     // twice over by anyone who only ever visits one language.

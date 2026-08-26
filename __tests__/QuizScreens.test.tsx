@@ -14,9 +14,10 @@ import {
   screen,
   within,
 } from '@testing-library/react-native';
-import { BackHandler } from 'react-native';
+import { BackHandler, StyleSheet } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 
+import { FLAG_ASPECTS } from '@/components/flagAspects';
 import { FLAG_ASSETS } from '@/components/flagAssets';
 import { flagLetters } from '@/components/flagEmoji';
 import { setLocale, __resetLocale } from '@/i18n/locale';
@@ -1295,11 +1296,15 @@ describe('the play screen in flag mode', () => {
   });
 
   /**
-   * The bundled SVG the stage should be showing.
+   * The bundled 1024 px WebP master the stage should be showing.
    *
    * Asserted on the `source` rather than on any text: the flag stopped being an emoji
    * glyph and became a real image, which is what deleted a whole class of layout bug -
    * see `CountryFlag`.
+   *
+   * `FLAG_ASSETS` and not `FLAG_THUMBS`: the stage passes `fill`, and that is the switch
+   * between the two committed tiers. A row-sized thumb blown up to the width of the screen
+   * is what this pins against.
    */
   const assetFor = (flag: string | null) => FLAG_ASSETS[flagLetters(flag)!.toLowerCase()];
 
@@ -1314,6 +1319,25 @@ describe('the play screen in flag mode', () => {
     await render(<QuizPlayScreen />);
 
     expect(shownFlag()).toBe(assetFor(first.facts.flag));
+  });
+
+  it('gives the frame the shape of THIS flag, not a house 4:3', async () => {
+    /*
+      The thing the raster migration is actually for, and the only place it is pinned in a
+      rendered tree.
+
+      The frame used to carry a constant `4 / 3` because `flag-icons` normalised every SVG
+      to it - so a flag round taught the wrong shape for the one field it is asking about.
+      Asserted against `FLAG_ASPECTS` rather than a literal, since the table is generated
+      from the images themselves and a literal here would just be a second thing to update.
+    */
+    const [first] = flagRound();
+    await render(<QuizPlayScreen />);
+
+    const iso2 = flagLetters(first.facts.flag)!.toLowerCase();
+    const style = StyleSheet.flatten(screen.getByTestId('quiz-flag-stage-frame').props.style);
+
+    expect(style.aspectRatio).toBe(FLAG_ASPECTS[iso2]);
   });
 
   it('never names the country, before or after checking', async () => {

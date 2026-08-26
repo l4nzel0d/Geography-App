@@ -741,6 +741,18 @@ describe('map labels', () => {
       expect(Number.isFinite(stop)).toBe(true);
       expect(stop).toBeGreaterThan(0);
     }
+
+    /*
+      Pinned, not merely finite. The rasters are 18 dp tall and the ramp draws them 13.5 dp
+      tall at world zoom and 18 dp from zoom 6 - so these two are 0.75 and exactly 1, and the
+      1 is what makes a 3x screen draw the @3x file texel-for-texel.
+
+      "Finite and positive" would wave through a wrong `MAP_FLAG_INTRINSIC_DP`, which is
+      precisely the constant that exists to be corrected if flags come out the wrong size on
+      a device. Only the HEIGHT is scaled here; each flag's width follows its own ratio.
+    */
+    expect(layout['icon-size'][4]).toBeCloseTo(0.75, 10);
+    expect(layout['icon-size'][6]).toBe(1);
   });
 
   it('never gives icon-padding a scalar, which crashes Android outright', async () => {

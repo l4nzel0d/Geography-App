@@ -585,10 +585,11 @@ export function WorldMap({
         Object.entries(MAP_FLAG_IMAGES).map(async ([name, url]) => {
           if (map.hasImage(name)) return;
           const { data } = await map.loadImage(withBaseUrl(url));
-          // `pixelRatio` is not optional. These are the 3x bytes - 72 device px for 24 style
-          // px - and nothing in a PNG says so, so without it the shared `icon-size` draws
-          // every flag three times too large. Native learns the same fact from the bitmap's
-          // density; see the RASTERS note in scripts/build-flag-assets.mjs.
+          // `pixelRatio` is not optional. These are the 3x bytes - 54 device px for 18 style
+          // px of HEIGHT, each flag's width its own - and nothing in a PNG says so, so
+          // without it the shared `icon-size` draws every flag three times too large. Native
+          // learns the same fact from the bitmap's density; see the RASTERS note in
+          // scripts/build-flag-assets.mjs.
           if (!map.hasImage(name)) map.addImage(name, data, { pixelRatio: MAP_FLAG_RASTER_SCALE });
         }),
       ).then(() => undefined);

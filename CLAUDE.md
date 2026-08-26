@@ -18,20 +18,21 @@ in the APK and referenced as `asset://` — see *Map labels*.
 
 ## Status
 
-Everything below is implemented and unit-tested (~1000 Jest tests across 44 suites, typecheck clean).
+Everything below is implemented and unit-tested (1077 Jest tests across 46 suites, typecheck clean).
 Verification state, which is what actually varies:
 
 | | state |
 |---|---|
 | Emulator (`Medium_Phone`, x86_64) | all features seen working, dev + release builds |
 | Web (both locale trees, desktop browser) | verified |
-| **Offline acceptance test** | last passed at the *map-labels* commit; **not re-run** since flag labels, mastery or Russian |
-| **Galaxy S25 (SM-S931B)** | last verified long ago; not re-checked since 1:50m geometry, the font, flag PNGs or mastery |
-| Maestro | six flows pass; **no flow for locate mode, flag mode, or Russian** |
+| **Offline acceptance test** | last passed at the *map-labels* commit; **not re-run** since flag labels, mastery, Russian or the raster flags |
+| **Galaxy S25 (SM-S931B)** | last verified long ago; not re-checked since 1:50m geometry, the font, mastery or the raster flags |
+| Maestro | seven flows pass; **no flow for locate mode, flag mode, or Russian**, and none re-run since the raster flags |
 
-Nothing added since the last offline run introduces a network call, but the gate is the gate, and the
-web half changed how resources resolve (two service workers, per-subtree scope), which is exactly the
-class of change it exists for.
+Nothing added since the last offline run introduces a network call, but the gate is the gate, and two
+changes since are exactly the class it exists for: the web half changed how resources resolve (two
+service workers, per-subtree scope), and the raster flags replaced **every image asset in the app** and
+needed a new extension in the precache glob to be reachable offline at all.
 
 ## Stack
 
@@ -74,7 +75,7 @@ src/
     offlineStyle.ts / web     # inline style: background layer, bundled font-face, no sources
     mapLabels.ts              # label field catalogue + both symbol layers' expressions
     mapFlagImages.ts / .web   # GENERATED: 249 PNG requires / URLs, keyed flag-<iso2>
-    labelFit.ts               # text or flag width -> the zoom that fits it
+    labelFit.ts               # text width, or flag height x aspect -> the zoom that fits it
     countryBounds.ts          # which polygons to frame for one country
     quizCamera.ts             # bbox + viewport -> centre/zoom (whole viewport or a focus rect);
                               #   and getFlightDuration
@@ -84,14 +85,16 @@ src/
               placeNames.ts  ru/  labelPoints.json  labelGeoJson.ts  worldGeoJson.ts  types.ts
   components/ CountryInfoSheet  ConfirmDialog  infoSheetLayout  palette  formatters
               MapControls  MapOptionPill  MapOptionPanel  ChoroplethLegend
-              CountryFlag(.web)  flagAssets.ts (GENERATED)  LocaleToggleButton
+              CountryFlag(.web)  flagSizes  LocaleToggleButton
+              flagAssets / flagThumbs / flagAspects .ts (all GENERATED)
               quiz/  search/
   quiz/       quizConfig  quizCountries  quizBuilder  normalizeText  editDistance
               answerAliases  gradeAnswer  gradeLocation  quizScore  quizPanelLayout
               exitPrompt  resetPrompt  quizResultStore  practicePool
   mastery/    masteryStore  masteryCodec  masteryStorage(.web)  masteryScore
   search/     countrySearch.ts  pendingCountry.ts
-scripts/  countryOverrides  manifest  build-flag-assets  build-label-points
+scripts/  countryOverrides  manifest  build-label-points  copy-web-assets
+          import-flag-masters  build-flag-assets
           build-country-data  enrich-country-facts  countryFactRecord  build-web
 plugins/withJsonBundleInputs.js
 __tests__/  __mocks__/  .maestro/
@@ -453,24 +456,31 @@ Countries that lose show nothing — no dot, no abbreviation. Expect **populatio
 name labels** ("47m" is a quarter the width of "Uzbekistan"), and note the label source carries **no
 `onPress`**, so presses fall through to the outlines.
 
-### Flag labels are a second layer, and they must be raster
+### Flag labels are a second layer, and it is the one that must be PNG
 
-**The app bundles all 249 flags as SVGs and not one can be used here.** MapLibre's icon pipeline is
-raster-only on every platform, read out of the shipped source rather than guessed:
+The whole flag set is raster now (see *The flags are raster*), so "must be raster" is no longer the
+interesting claim — **"must be PNG, on Android"** is. MapLibre's icon pipeline, read out of the shipped
+source rather than guessed:
 
 - **Android** — `DownloadMapImageTask.java`: a `require`d asset in release goes to
   `BitmapFactory.decodeResource`; in dev the same require is a Metro URL decoded by **Fresco**, which
-  demands a `CloseableStaticBitmap`. Neither decodes SVG.
+  demands a `CloseableStaticBitmap`. Neither decodes SVG. (Both decode WebP, so this is now a choice
+  rather than a constraint — it is just the fussiest path in the app and the tier is 1 MB, so there is
+  nothing to buy by re-proving it.)
 - **iOS** — `UIImage` via `RCTImageLoader`, round-tripped through `UIImagePNGRepresentation`.
-- **Web** — `arrayBufferToImageBitmap` hardcodes `{type:"image/png"}` and throws *"Note that SVGs are
-  not supported."*
+- **Web** — **corrected**: `map.loadImage` reaches `getImage`, which sets `img.src = url` on an
+  `Image` element and takes anything a browser decodes. The `{type:"image/png"}` blob and the *"Note
+  that SVGs are not supported"* throw are real but live in `arrayBufferToImageBitmap`, on the
+  worker/sprite path, not here. maplibre-gl v6, verified in `dist/maplibre-gl.mjs`.
 
-**`expo-image`'s Android SVG decoder is expo-image's own Glide pipeline and never reaches MapLibre** —
-so the identical file that renders in the info sheet draws nothing as a map icon, and it fails
-**log-only**: one `FLog.e("Failed to load bitmap from: …")` and a blank map.
+**`expo-image`'s Android SVG decoder was expo-image's own Glide pipeline and never reached MapLibre** —
+so the identical file that rendered in the info sheet drew nothing as a map icon, and it failed
+**log-only**: one `FLog.e("Failed to load bitmap from: …")` and a blank map. That trap is gone with the
+SVGs, but the shape of it is why the map tier is still generated separately.
 
-So `npm run flags:data` rasterises with `@resvg/resvg-js` (devDependency; output committed) into
-`assets/map-flags/`, `public/map-flags/` and two generated require maps. ~380 KB native, ~285 KB web.
+So `npm run flags:data` derives the map tier with `sharp` from the committed masters into
+`assets/map-flags/` (both scales) and two generated require maps; `copy-web-assets.mjs` copies the 3x
+bytes to `public/map-flags/`. ~1.06 MB native, ~0.84 MB web.
 
 **A `sprite` entry in the style is still forbidden** — it is a remote-URL-shaped dependency. Images go
 in imperatively: `<Images>` on native, `map.addImage` on web.
@@ -483,11 +493,17 @@ single unsuffixed `br.png` and RN files it under `drawable-mdpi`, so `decodeReso
 blurry, and ~35 MB of style bitmaps.
 
 With `br@3x.png` beside it, `resolveAssetSource` reports scale 3, the densities match, and the bitmap
-is used as-is: crisp, ~3.9 MB. Both arrive as **24 style px**, which is what lets one `icon-size`
-expression be right at every density. The 1x file also keeps **Jest** working, whose resolver does no
-`@Nx` lookup. `icon-size` is expressed as a fraction of `MAP_FLAG_INTRINSIC_DP` — if flags are ever the
-wrong size on a device, that is the one place to correct it. Web is told outright:
-`addImage(…, {pixelRatio: 3})`.
+is used as-is: crisp. Both arrive as **18 style px TALL** — height, because each flag's width is its
+own now, and one scalar `icon-size` scales both axes, so the only axis all 249 share is the one worth
+pinning. That is what lets one `icon-size` expression be right at every density. The 1x file also keeps
+**Jest** working, whose resolver does no `@Nx` lookup. `icon-size` is expressed as a fraction of
+`MAP_FLAG_INTRINSIC_DP` — if flags are ever the wrong size on a device, that is the one place to
+correct it. Web is told outright: `addImage(…, {pixelRatio: 3})`.
+
+**The 3x width is computed as three times the 1x width, not rounded independently.** `round(18 × r)`
+and `round(54 × r)` disagree by a pixel for some ratios, and MapLibre derives an icon's style width as
+`pixels ÷ pixelRatio` — so the same flag would be 34.00 dp wide on a 1x screen and 34.33 dp on a 3x
+one, from one expression. Invisible in Jest, visible on a device; `mapFlagImages.test.ts` pins it.
 
 #### `icon-padding: 2` is a fatal crash, and the browser will not tell you
 
@@ -518,21 +534,28 @@ check the `else` branch of its setter in `MLRNStyleFactory.kt` before trusting a
   **dev build 249 HTTP round-trips to Metro**. `setImages` only ever ADDS keys, so the latch is one-way
   by construction.
 - **The border is baked into the PNG, because MapLibre has no `icon-halo`.** Japan, Finland and Nigeria
-  are nearly all white and would be holes against a pale choropleth. The stroke **straddles the viewBox
-  edge** — a centred stroke on an inset rect lands on a fractional pixel at 24 px and antialiases to
-  pale grey. Flags are composited **onto white** first: Nepal is a pennant on transparency, and a dark
-  frame around empty space reads as a broken image.
+  are nearly all white and would be holes against a pale choropleth. It is now four solid strips
+  composited **over** the resized flag rather than a stroke spliced into an SVG — so the file's outer
+  box stays exactly the flag's own aspect box, and every border pixel is opaque `13,43,69,255` by
+  construction at both scales rather than by the luck of a clipped stroke. Extending the canvas instead
+  would inset the picture by two pixels in eighteen and make every map flag a slightly different shape
+  from the same flag in the info sheet. Flags are composited **onto white** first, which now matters
+  only for the flag-icons fallbacks — the raster masters are already flat on white.
 - **`flag` is a `LabelField` but deliberately NOT a `LabelFieldId`**, the same trade `location` makes
   against `FieldId`: everything iterating `LABEL_FIELD_IDS` is about a string.
-- Fit reuses `FIT_TOLERANCE` via a shared `getFitMinZoom`. A 20 dp flag clears where 66 dp of
-  "Uzbekistan" does not, so **flag labels are markedly denser than name labels**.
+- Fit reuses `FIT_TOLERANCE` via a shared `getFitMinZoom`, and `getFlagMinZoom` now takes the flag's
+  **aspect as a required second argument** — height is fixed at a nominal `MAP_FLAG_HEIGHT_DP` of 15,
+  so the drawn width is `15 × aspect`: 20 dp at 4:3 (exactly the old constant, so no 4:3 flag moved),
+  22.5 at 3:2, 30 at 2:1, 38 for Qatar, 12.3 for Nepal. Even the widest clears where 66 dp of
+  "Uzbekistan" does not, so **flag labels are still markedly denser than name labels** — but a wide
+  flag now waits for a wider country, which is the truth and was unsayable before.
 
-#### `assets/**/*.png` had to join the Gradle bundle inputs
+#### `assets/**/*.png` and `assets/**/*.webp` had to join the Gradle bundle inputs
 
-`withJsonBundleInputs` widened to `assets/**/*.png` for exactly the reason it was written: that task
-also runs the `--assets-dest` pass, and re-rendering flags touches no `.js`/`.ts`/`.json`, so Gradle
-would mark it UP-TO-DATE and ship the previous flags. See *A release build can package a stale JS
-bundle*.
+`withJsonBundleInputs` widened to both for exactly the reason it was written: that task also runs the
+`--assets-dest` pass, and re-rendering flags touches no `.js`/`.ts`/`.json`, so Gradle would mark it
+UP-TO-DATE and ship the previous flags. `.webp` covers `assets/flags` and `assets/flag-thumbs`, which
+were never covered while they were SVGs either. See *A release build can package a stale JS bundle*.
 
 ### The chrome
 
@@ -935,7 +958,7 @@ Nepal; the map is what answers "which country was that", and a flag round has no
 
 That is why `CountryFlag` gained a `label`: its default names the ISO-2 code, which on web becomes
 `alt="Flag of NP"` — the answer, handed to a screen reader unasked. It does not hide the
-`<img src="/flags/np.svg">`, so view-source always spoils a web round; it fixes the case that matters.
+`<img src="/flags/np.webp">`, so view-source always spoils a web round; it fixes the case that matters.
 
 `FlagStage` takes the map's flex shape — `flex: 1` plus a `minHeight` — because a flag cannot absorb the
 keyboard the way a map can: measured on 411x914, a five-field round with the IME open leaves the stage a
@@ -946,7 +969,7 @@ sits *below* the map's own 96 dp, so a flag round never leaves the panel less ro
 The plaque behind the flag is not decoration: Japan, Finland and Nigeria are mostly white and read as a
 shapeless blob against the navy.
 
-### The flags are real SVGs, on every platform
+### The flags are raster, at each flag's own true aspect ratio
 
 **Worth reading, because the emoji route looked obviously cheaper and cost most of an afternoon.** The
 flag used to be a regional indicator pair in a `Text`. That works at 20 dp and falls apart the moment
@@ -962,38 +985,112 @@ glyph layout rather than a bug:
   against its pre-transform bounds.
 - **Below Android 13 emoji are 136x128 bitmap strikes**, so any large flag is an upscale.
 
-An image has none of those: it occupies exactly the box it is given, centres by arithmetic, and is
-vector all the way up. Switching deleted the nudge constant, the line-box-derived frame,
-`useFlagSupport` and its canvas measurement, and the emoji branch on web.
+An image has none of those: it occupies exactly the box it is given and centres by arithmetic.
+Switching deleted the nudge constant, the line-box-derived frame, `useFlagSupport` and its canvas
+measurement, and the emoji branch on web. That argument is unchanged; only the file format under it is.
 
-**It needed no new native module and no rebuild.** `expo-image` was already a dependency and vendors
-AndroidSVG with a Glide decoder. `react-native-svg` is *not* installed and was not needed.
+#### Why they stopped being SVGs
 
-**And it does not weaken the offline requirement.** `scripts/build-flag-assets.mjs` (`npm run
-flags:data`, offline, output committed) copies the 249 the dataset references into `assets/flags/` and
-writes `src/components/flagAssets.ts`. They live under `assets/` rather than `public/` because Metro
-only bundles what the app `require`s and `public/` is web staging that never reaches an APK.
+`flag-icons` normalises every flag to **4:3**, and almost none is. Measured over the 208 country files
+in the raster pack: **4 are 4:3**, 103 are ~3:2, 64 are ~2:1, and the outliers are real — Qatar 28:11,
+Nepal a pennant at 0.82, the Vatican square. So the app spent its whole life drawing nearly every flag
+the wrong shape, most visibly in the one round that asks about nothing else.
 
-**The map is generated because Metro cannot do a dynamic `require`** — there is no way to write a
-template-literal require path. 249 literals in a generated file is the honest way to say that.
+Dropping SVG also removed a dependency on **expo-image's vendored AndroidSVG decoder** — a
+simplification, not a regression, and `react-native-svg` was never installed.
 
-**Sizing: the flag is sized by its box, not by a number.** `FLAG_SIZES` has **no `lg`**, deliberately.
-The flag round passes `fill`: `width: '100%'` with `aspectRatio: 4/3` (every `flag-icons` SVG is 4:3),
-`maxHeight: '100%'` so it gives way when height binds (which is what makes landscape work), and
-`maxWidth: 460` so a desktop browser does not render wallpaper. The frame carries **no padding** —
-padding inside an `aspectRatio` box would make the picture some other shape — so it is a border directly
-around the flag with `overflow: 'hidden'`. That clipping is safe here **and only here**: the thing being
-clipped is an image that occupies exactly the box, not a glyph hanging out of its line box.
+#### Two scripts, because the source pack cannot be committed
 
-`FLAG_SIZES` survives for the three fixed-size call sites, and its `fontSize` for exactly one case: BES,
-the only record with no flag, where the white-flag glyph is still text.
+The same split as `build:data` / `enrich:data`, for the same reason:
 
-**The web draws the image unconditionally now**, where it used to use emoji except on Windows. The cost
-is worth naming: macOS and Android browsers previously downloaded nothing. In production the service
-worker precaches all of them; in dev there is no worker (`+html.tsx` registers it only for
-`production`), so every flag is a cold fetch from Metro, once per question — the reported "flags take
-forever on web", now on every platform. The unbuilt fix is to prefetch the next question's flag, which
-this app can do because it knows the whole question order up front.
+| | |
+|---|---|
+| `npm run flags:import` | **one-off**, needs `temp/classic_big_1000` (189 MB, gitignored). Writes the committed masters `assets/flags/<iso2>.webp` — 1024 px on the long side, WebP q82, 2.78 MB — and `src/components/flagAspects.ts`. |
+| `npm run flags:data` | **offline**, needs only the committed masters. Derives the thumbs, both map raster scales, the `public/` copies and four generated require maps. |
+
+Four sources feed the import, in priority order, and an unresolved code **throws**:
+
+1. **A hand-placed override**, any file named `<alpha-2>-…` — `CH-1.0-1200.png`. It beats the plain
+   `ch.jpg` beside it, and two overrides for one code throw rather than letting readdir order decide.
+   The rest of the filename is documentation and is deliberately **not parsed**: the image's own
+   dimensions are what the master is built from, so a filename disagreeing with its contents could
+   only mislead. (`DE-O-1200.png` has a typo where its ratio should be, and imports correctly.)
+2. **The pack's JPEG**, 202 of them, after dropping 14 non-country files (`eu`, `nato`, `scotland`, …)
+   and repairing three filenames.
+3. **A loose SVG dropped into the pack** — Montenegro and South Sudan, simply absent from it and both
+   quiz questions.
+4. **`flag-icons`' 4x3 SVG** for the **41 dependent territories** the pack does not carry — Puerto
+   Rico, Kosovo, the Falklands, New Caledonia. Those 41 stay 4:3; none is ever a quiz question.
+
+`@resvg/resvg-js` now runs only for those 43 SVGs, and `sharp` (devDependency, prebuilt) does the rest.
+
+**The four overrides are the two ways a flag pack goes wrong, one pair each.** *Shape*: Switzerland
+is drawn 3:2 and is square; Germany came out 1.6517 against an official 3:5. *Content*: Libya was the
+pre-2011 plain green flag and Mauritania predated the red stripes added in 2017 — no amount of care
+about ratios helps with a flag that is simply out of date, and nothing in this pipeline could have
+noticed. Same shape as `scripts/countryOverrides.mjs`, minus its "this override stopped differing"
+check, because the pack is a frozen folder rather than a package that can be upgraded underneath us.
+
+**A master's ratio is its own pixels, and 1024 px on the long side quantises it.** Germany's 5:3
+source lands at 1024x614 = 1.6678 rather than 1.6667, because 614 is the closer of the two integers.
+Every flag carries the same ~0.1% quantisation, `FLAG_ASPECTS` is measured off the written file rather
+than off the source, and `flagAssets.test.ts` asserts the two agree — so the error is consistent and
+visible rather than a discrepancy waiting to be found.
+
+#### Three tiers, because there are three consumers
+
+| tier | where | size | drawn at |
+|---|---|---|---|
+| master | `assets/flags`, `public/flags` | 1024 long side, WebP, 2.78 MB | the quiz's flag round, `fill` |
+| thumb | `assets/flag-thumbs`, `public/flag-thumbs` | **96 px tall**, WebP, 0.33 MB | info sheet 30 dp, search row 21, results row 18 |
+| map | `assets/map-flags` (both scales), `public/map-flags` | **18 / 54 px tall** + border, PNG, 1.06 MB | the `country-flag` symbol layer |
+
+The thumb tier is not tidiness: the search screen lists every country it matches, and handing fifty
+21 dp rows a 1024 px master apiece is fifty full-size decodes on a keystroke.
+
+`public/` is written by **`copy-web-assets.mjs` alone** now, as a straight `copyFileSync` of `assets/`.
+`build-flag-assets.mjs` calls it rather than writing those directories itself, so there is one copier
+rather than two places that could disagree — and `webAssets.test.ts` can assert **byte identity**,
+which it never could while `public/map-flags` was a second render.
+
+**The require maps are generated because Metro cannot do a dynamic `require`** — there is no way to
+write a template-literal require path. 249 literals per map is the honest way to say that.
+
+#### Sizing: heights, and each flag's own width
+
+`FLAG_SIZES` is `{ fontSize, height, maxWidth }` and has **no `lg`**, deliberately. A fixed size is a
+HEIGHT — a row of flags shares a baseline and a cap height, not a width — and `flagBox()` derives the
+width from `flagAspects.ts`. `maxWidth` is `round(height x 2.1)`, which **clamps Qatar and nothing
+else**: the next widest flags cluster at 2.00-2.01, sixty-four of them, and a cap of exactly 2 would
+shave half a percent off all of them for no reason. A clamped flag gives up height rather than being
+cropped.
+
+Width is a property of the flag now, so a *list* of them has a ragged right edge. `CountryResultRow`
+and the quiz results review each park theirs in a `width: maxWidth` slot — kept at the call sites,
+because they are the two screens that are lists; the info sheet's single header flag needs none.
+
+The flag round passes `fill`: `width: '100%'` with **`aspectRatio` from `FLAG_ASPECTS`, per country**,
+`maxHeight: '100%'` so it gives way when height binds (which is what makes landscape work, and what
+Nepal now exercises in *portrait*), and `maxWidth: 460` so a desktop browser does not render wallpaper.
+The frame carries **no padding** — padding inside an `aspectRatio` box would make the picture some other
+shape — so it is a border directly around the flag with `overflow: 'hidden'`. That clipping is safe here
+**and only here**: the thing being clipped is an image that occupies exactly the box, not a glyph
+hanging out of its line box.
+
+`FLAG_SIZES`' `fontSize` survives for exactly one case: BES, the only record with no flag, where the
+white-flag glyph is still text.
+
+**`webp` had to join `build-web.mjs`'s `globPatterns`**, and this is the highest-risk line in the whole
+change: that list is an explicit set of extensions, and a format missing from it is simply absent from
+the precache manifest. The app would install, look perfect online, and show nothing but two-letter
+badges the moment the network went — the one failure this project exists to prevent.
+
+**The web draws the image unconditionally**, where it used to use emoji except on Windows. In production
+the service worker precaches all three tiers; in dev there is no worker (`+html.tsx` registers it only
+for `production`), so every flag is a cold fetch from Metro. A search row now costs ~1.3 KB rather than
+a full master, which is most of the old "flags take forever on web". The unbuilt fix for the quiz round
+is to prefetch the next question's flag, which this app can do because it knows the whole question order
+up front.
 
 ## Per-country mastery
 
@@ -1412,7 +1509,9 @@ this port is small.
   activates, looks perfect and fails offline. `scripts/build-web.mjs` asserts the bundle is under the
   limit rather than trusting the summary line.
 - **Windows ships no country flag emoji at all** — Segoe UI Emoji has none. Not fixable in CSS; this is
-  part of why flags are SVGs everywhere now.
+  part of why flags are raster images everywhere now.
+- **`build-web.mjs`'s `globPatterns` is an explicit extension list.** A new asset format that is not in
+  it is silently absent from the precache manifest — perfect online, broken with the origin dead.
 
 ### Framing is tested end to end, on purpose
 
@@ -1473,7 +1572,8 @@ npm run test:e2e                   # maestro, needs a running device
 npm run build:data                 # one-off, needs network; rewrites BOTH json files
 npm run enrich:data                # offline; countryFacts.json only
 npm run labels:data                # offline; polylabel anchors
-npm run flags:data                 # offline; SVGs + 498 PNGs + 3 require maps (~2 min)
+npm run flags:import               # ONE-OFF; needs temp/classic_big_1000. Writes the masters
+npm run flags:data                 # offline; 249 thumbs + 498 PNGs + 747 public copies + 4 maps
 
 npm run web                        # expo start --web (dev; no service worker)
 npm run build:web                  # TWO exports + two workers. English -> dist/, Russian -> dist/ru/
@@ -1501,7 +1601,8 @@ emulator is right and the release APK is wrong", which reads like a minification
 found us on 2026-08-24: three corrected capitals, and the release APK showed only one.
 
 **The fix is `plugins/withJsonBundleInputs.js`**, registered in `app.json`, which widens that file tree
-with `**/*.json` and `assets/**/*.png` (excluding `.expo/`). It has to be a config plugin, because
+with `**/*.json`, `assets/**/*.png` and `assets/**/*.webp` (excluding `.expo/`). It has to be a
+config plugin, because
 **`android/` is gitignored and regenerated by `expo prebuild`**.
 
 Diagnosing a recurrence takes one command:
@@ -1603,6 +1704,27 @@ adb shell svc wifi enable
 - **`app.json` is layered by `app.config.js`.** Anything reading the config sees the merged result. Do not
   export `EXPO_PUBLIC_LOCALE` in your shell.
 - **Replacing `<GeoJSONSource data>` on a live map** (mastery) is the riskiest unproven operation.
+- **The raster flags have not been seen on a device.** Three things Jest cannot reach: whether Yoga
+  narrows the quiz frame or merely squashes it when `maxHeight` binds — which now happens in
+  *portrait*, for Nepal, the one portrait flag in the set; whether a 1024 px WebP master under
+  `drawable-mdpi` costs real memory in a flag round (Glide should downsample to the view, so measure
+  `dumpsys meminfo` rather than assume); and whether a 57x Lanczos downscale to an 18 px map icon reads
+  as well as the vector render it replaced (compare Greece's nine stripes and the US canton at zoom 6).
+- **The map's flag layer will look different, not just sharper.** Half the flags are now wider than the
+  old flat 20 dp at the same height, so `icon-allow-overlap: false` drops a different set at low zoom,
+  and `getFlagMinZoom` gates on true width so wide-flag countries appear later and narrow-flag ones
+  earlier. If it reads as too sparse, the lever is a dedicated `FLAG_FIT_TOLERANCE` — **not** turning
+  the shared `FIT_TOLERANCE`, which would move every text label with it.
+- **`temp/classic_big_1000` is gitignored, so `flags:import` is not reproducible from a clean clone.**
+  That is the design — the masters are committed and `flags:data` is fully reproducible — but it means
+  the pack has to be kept somewhere if the ratios are ever to be re-derived.
+- **41 flags are still 4:3 while their neighbours are not.** All dependent territories, none ever a
+  quiz question, but `pr`, `ky`, `vg`, `im` and `je` are visibly the wrong shape beside a true-ratio
+  neighbour in search. Fixing it needs no code: drop true-ratio sources into the pack and re-run both
+  scripts.
+- **The pack is a 2017 snapshot, and four flags were wrong enough to replace by hand** — see the
+  override lane below. Nothing systematically audits the other 204 for a flag that has changed since,
+  and no test could: a current flag and an obsolete one are both well-formed images.
 - **MapLibre vs RN 0.86** — the library is developed against 0.85.3 and declares `>= 0.80`.
 - **Release APK is x86_64 only** as built so far, and **debug-signed** (Expo's default). A proper upload
   key is needed before distribution.

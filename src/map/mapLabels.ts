@@ -3,7 +3,11 @@ import type { MessageKey } from '@/i18n/t';
 
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 
-import { MAP_FLAG_INTRINSIC_DP } from './labelFit';
+import {
+  MAP_FLAG_INTRINSIC_DP,
+  MAP_FLAG_MAX_HEIGHT_DP,
+  MAP_FLAG_MIN_HEIGHT_DP,
+} from './labelFit';
 
 /**
  * The fact drawn on top of every country, and the expressions that draw it.
@@ -153,7 +157,7 @@ const NOTHING = ['==', ['get', 'iso3'], ''] as unknown as ExpressionSpecificatio
  *
  * A style's images share one namespace, so an unprefixed two-letter name is a collision
  * waiting for the first non-flag icon this app ever adds. `scripts/build-flag-assets.mjs`
- * generates `MAP_FLAG_ASSETS` with the same prefix, and `data-integrity.test.ts` asserts every
+ * generates `MAP_FLAG_IMAGES` with the same prefix, and `data-integrity.test.ts` asserts every
  * property the features carry names an image that exists.
  */
 export const FLAG_IMAGE_PREFIX = 'flag-';
@@ -175,12 +179,18 @@ export const FLAG_ZOOM_PROPERTY = zoomPropertyFor('flag');
 export const FLAG_ICON_IMAGE = ['get', FLAG_ICON_PROPERTY] as unknown as ExpressionSpecification;
 
 /**
- * `icon-size` for the flag layer - how far the 24 px image is scaled at each zoom.
+ * `icon-size` for the flag layer - how far the 18 px-TALL image is scaled at each zoom.
  *
  * The mirror of the text layer's `text-size` ramp, which runs 11 -> 14 about a nominal 12: this
- * runs **18 dp at world zoom to 24 dp from zoom 6**, about the nominal `MAP_FLAG_WIDTH_DP` of
- * 20 that the fit test uses. Growing a little with zoom is the same judgement in both cases -
- * small enough that a crowded world view still reads, roomier once there is space for it.
+ * runs **13.5 dp of HEIGHT at world zoom to 18 dp from zoom 6**, about the nominal
+ * `MAP_FLAG_HEIGHT_DP` of 15 that the fit test uses. Growing a little with zoom is the same
+ * judgement in both cases - small enough that a crowded world view still reads, roomier once
+ * there is space for it.
+ *
+ * **Height, because width is now per flag.** One scalar `icon-size` multiplies both axes, so
+ * anchoring the one axis all 249 images share is the only way a single expression can be right
+ * for a 28:11 Qatar and a pennant-shaped Nepal at once. These are exactly the heights the old
+ * width-anchored ramp produced at 4:3, so nothing on the map got taller or shorter.
  *
  * Expressed as a fraction of `MAP_FLAG_INTRINSIC_DP` rather than as bare numbers, because that
  * is the one thing here that could be wrong on a device: if the image arrives at a different
@@ -193,9 +203,9 @@ export const FLAG_ICON_SIZE = [
   ['linear'],
   ['zoom'],
   0,
-  18 / MAP_FLAG_INTRINSIC_DP,
+  MAP_FLAG_MIN_HEIGHT_DP / MAP_FLAG_INTRINSIC_DP,
   6,
-  24 / MAP_FLAG_INTRINSIC_DP,
+  MAP_FLAG_MAX_HEIGHT_DP / MAP_FLAG_INTRINSIC_DP,
 ] as unknown as ExpressionSpecification;
 
 /**

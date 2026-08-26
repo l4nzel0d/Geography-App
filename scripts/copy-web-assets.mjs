@@ -25,11 +25,20 @@
  *    `import ... from "./maplibre-gl-shared.mjs"`, resolved relative to the worker's own
  *    URL. Copying only the worker yields a worker that 404s on startup.
  *
- * 2. **The flag images.** Windows draws no country flag emoji at all (see
- *    `components/flagEmoji.ts`), so the web build ships real flag SVGs and reaches for
- *    one only on the platforms that need it. They come from the `flag-icons`
- *    devDependency and are copied per ISO 3166-1 alpha-2 code, so only the ~249 flags the
- *    dataset actually references ship - not the 271 the package carries.
+ * 2. **The flag images.** The flag is a real image on every platform now - Windows draws
+ *    no country flag emoji at all (see `components/flagEmoji.ts`), and the native side
+ *    stopped using emoji too - so all three tiers have to be reachable over HTTP as well
+ *    as through a Metro `require`.
+ *
+ *    They are a straight copy of `assets/`, which `scripts/build-flag-assets.mjs` derives
+ *    from the committed masters and which is the single upstream. **This function is the
+ *    only writer of `public/flags`, `public/flag-thumbs` and `public/map-flags`** - that
+ *    script calls it rather than writing them itself, so there is one copier rather than
+ *    two places that could disagree about which bytes go where. `webAssets.test.ts`
+ *    asserts byte identity, and it can, because a copy is all this is.
+ *
+ *    Nothing here decodes an image, deliberately: Vercel runs `build:web`, which calls
+ *    this, and that build must never need a native image binary.
  *
  * The label font deliberately does NOT need copying. Expo's static rendering already
  * emits `@font-face{font-family:"Map Label";src:url("/assets/.../NotoSans-Regular.<hash>.ttf")}`
@@ -76,47 +85,63 @@ function isoFromFlag(flag) {
     .join('');
 }
 
-export const FLAGS_DIR = join(root, 'public/flags');
+/**
+ * The three flag tiers, and where each one is served from.
+ *
+ * `map-flags` is the odd one: the web has no `@Nx` scale suffixes, so it takes the 3x
+ * bytes under an unsuffixed name and `WorldMap.web.tsx` passes `pixelRatio` explicitly.
+ */
+export const FLAG_COPIES = [
+  { from: 'assets/flags', to: 'public/flags', ext: 'webp', suffix: '' },
+  { from: 'assets/flag-thumbs', to: 'public/flag-thumbs', ext: 'webp', suffix: '' },
+  { from: 'assets/map-flags', to: 'public/map-flags', ext: 'png', suffix: '@3x' },
+];
 
 /**
- * Copies one 4x3 SVG per flag the dataset references.
+ * Copies every shipped flag image into `public/`.
  *
- * Driven by `countryFacts.json` rather than by listing the package, so the set shipped is
- * exactly the set the info sheet can ask for. A code with no matching SVG FAILS the
+ * Driven by `countryFacts.json` rather than by listing the source directories, so the set
+ * shipped is exactly the set the UI can ask for. A code with no matching file FAILS the
  * script rather than being skipped - a silent gap here is a broken image in the UI, and
  * the pipeline's rule throughout this project is an explicit allowlist, never a silent
- * skip.
+ * skip. The misses are accumulated first so one run names all of them.
  */
 export function copyFlagAssets() {
   const facts = require('../src/data/countryFacts.json');
-  const source = join(dirname(require.resolve('flag-icons/package.json')), 'flags/4x3');
 
   const codes = [...new Set(Object.values(facts).map((f) => isoFromFlag(f.flag)).filter(Boolean))]
     .sort();
 
-  // Rebuilt from scratch so a country dropped upstream does not leave a stale file behind.
-  rmSync(FLAGS_DIR, { recursive: true, force: true });
-  mkdirSync(FLAGS_DIR, { recursive: true });
-
   const missing = [];
-  let bytes = 0;
-  for (const code of codes) {
-    const from = join(source, `${code}.svg`);
-    try {
-      copyFileSync(from, join(FLAGS_DIR, `${code}.svg`));
-      bytes += statSync(join(FLAGS_DIR, `${code}.svg`)).size;
-    } catch {
-      missing.push(code);
+
+  for (const { from, to, ext, suffix } of FLAG_COPIES) {
+    const sourceDir = join(root, from);
+    const targetDir = join(root, to);
+
+    // Rebuilt from scratch so a country dropped upstream does not leave a stale file behind.
+    rmSync(targetDir, { recursive: true, force: true });
+    mkdirSync(targetDir, { recursive: true });
+
+    let bytes = 0;
+    for (const code of codes) {
+      const file = join(sourceDir, `${code}${suffix}.${ext}`);
+      try {
+        copyFileSync(file, join(targetDir, `${code}.${ext}`));
+        bytes += statSync(file).size;
+      } catch {
+        missing.push(`${from}/${code}${suffix}.${ext}`);
+      }
     }
+
+    console.log(`  ${to}/  (${readdirSync(targetDir).length} flags, ${(bytes / 1024).toFixed(0)} KB)`);
   }
 
   if (missing.length) {
-    throw new Error(`No flag SVG for: ${missing.join(', ')}`);
+    throw new Error(
+      `No flag image for: ${missing.join(', ')}. ` +
+        'Run `npm run flags:data` (or `npm run flags:import` first, if the masters are gone).',
+    );
   }
-
-  console.log(
-    `  public/flags/  (${readdirSync(FLAGS_DIR).length} flags, ${(bytes / 1024).toFixed(0)} KB)`,
-  );
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

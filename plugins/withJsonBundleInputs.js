@@ -35,8 +35,8 @@ const { withAppBuildGradle } = require('expo/config-plugins');
 const MARKER = '// [withJsonBundleInputs]';
 
 const SNIPPET = `
-${MARKER} .json and assets/**.png are not inputs of BundleHermesCTask by default, so
-${MARKER} editing src/data/*.json or re-rendering assets/map-flags would leave
+${MARKER} .json and the assets/**.png|webp images are not inputs of BundleHermesCTask by
+${MARKER} default, so editing src/data/*.json or re-rendering the flag images would leave
 ${MARKER} assembleRelease packaging a stale bundle and stale drawables.
 tasks.withType(com.facebook.react.tasks.BundleHermesCTask).configureEach { bundleTask ->
     bundleTask.sources.include("**/*.json")
