@@ -11,6 +11,7 @@ import {
   subscribeToMastery,
 } from "@/mastery/masteryStore";
 import { buildResetPrompt, type ResetAction } from "@/quiz/resetPrompt";
+import { AnswerStylePicker } from "@/components/quiz/AnswerStylePicker";
 import { FieldPicker } from "@/components/quiz/FieldPicker";
 import { ModePicker } from "@/components/quiz/ModePicker";
 import { PracticePicker } from "@/components/quiz/PracticePicker";
@@ -65,6 +66,7 @@ export default function QuizSetupScreen() {
   const [subregions, setSubregions] = useState<string[]>([]);
   const [fields, setFields] = useState<FieldId[]>(["name"]);
   const [practice, setPractice] = useState(false);
+  const [choice, setChoice] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
 
   /**
@@ -107,7 +109,15 @@ export default function QuizSetupScreen() {
       pathname: "/quiz/play",
       // The setup screen never restricts by country - `only` is what the results screen's
       // retry builds, and what a deep link can carry.
-      params: toQuizParams({ mode, subregions, fields, only: [], practice, seed: newSeed() }),
+      params: toQuizParams({
+        mode,
+        subregions,
+        fields,
+        only: [],
+        practice,
+        choice,
+        seed: newSeed(),
+      }),
     });
   };
 
@@ -158,6 +168,15 @@ export default function QuizSetupScreen() {
           <>
             <Text style={styles.section}>{t('quiz.setup.fields')}</Text>
             <FieldPicker selected={fields} onChange={setFields} />
+
+            {/*
+              Behind the same gate as the field picker, and not by coincidence: this
+              chooses the INPUT for those fields, and a `locate` round has none - its
+              answer is the tap. The setting is still carried through such a round, so
+              coming back here shows it exactly as it was left.
+            */}
+            <Text style={styles.section}>{t('quiz.setup.style')}</Text>
+            <AnswerStylePicker choice={choice} onChange={setChoice} />
           </>
         ) : null}
 

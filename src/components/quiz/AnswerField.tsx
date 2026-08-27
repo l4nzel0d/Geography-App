@@ -1,12 +1,23 @@
 import { forwardRef } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { FieldGrade } from '@/quiz/gradeAnswer';
 import { useTranslator } from '@/i18n/useTranslator';
 import { type FieldId, FIELD_LABEL_KEYS, isSetField } from '@/quiz/quizConfig';
+import { CHOICE_OPTION_COUNT, type FieldOptions } from '@/quiz/quizOptions';
 
 import { ChipInput } from './ChipInput';
 import { quizColors, quizRadii } from '../palette';
+
+/**
+ * The slots the option buttons live in, mounted once and never added to.
+ *
+ * A fixed pool for the same reason `ChipInput` keeps `MAX_CHIPS` of them: this row
+ * shares a window with a live MapLibre surface, and a view that appears after the first
+ * mount is laid out perfectly and never painted. Only the buttons' TEXT changes from one
+ * country to the next.
+ */
+const OPTION_SLOTS = Array.from({ length: CHOICE_OPTION_COUNT }, (_, index) => index);
 
 type AnswerFieldProps = {
   field: FieldId;
@@ -16,6 +27,20 @@ type AnswerFieldProps = {
   chips: string[];
   onChangeText: (text: string) => void;
   onChangeChips: (chips: string[]) => void;
+  /**
+   * Whether this round is answered by button rather than by typing.
+   *
+   * Constant for the whole round, and the branch below is on THIS rather than on whether
+   * `options` happens to be set. A hidden row - a country that cannot be asked this field
+   * - has no options, and branching on their absence would swap an input in for the
+   * buttons mid-round, which is the one thing the fixed slots above exist to prevent.
+   */
+  choice: boolean;
+  /** The buttons to offer, when the current country can be asked this field. */
+  options?: FieldOptions;
+  /** Which option is pressed, if any. */
+  picked?: string;
+  onPick: (value: string) => void;
   /** How many entries a set field needs, and out of how many, for the label. */
   requirement?: { required: number; available: number };
   /** Set once the answer is checked; drives the border colour and the reveal line. */
@@ -40,6 +65,10 @@ export const AnswerField = forwardRef<TextInput, AnswerFieldProps>(function Answ
     chips,
     onChangeText,
     onChangeChips,
+    choice,
+    options,
+    picked,
+    onPick,
     requirement,
     grade,
     onSubmitEditing,
@@ -118,7 +147,48 @@ export const AnswerField = forwardRef<TextInput, AnswerFieldProps>(function Answ
     >
       <Text style={styles.label}>{label}</Text>
 
-      {isSet ? (
+      {choice ? (
+        <View testID={`quiz-options-${field}`} style={styles.options}>
+          {OPTION_SLOTS.map((slot) => {
+            const option = options?.options[slot];
+            const chosen = option != null && option === picked;
+            // Once graded, the right answer always goes green - including the one the
+            // player did not press, which is the whole reveal in a choice round - and a
+            // wrong press goes red beside it.
+            const isAnswer = graded && option != null && option === grade.expected;
+            const isWrongPick = graded && chosen && !grade.correct;
+            return (
+              <Pressable
+                key={slot}
+                testID={`quiz-option-${field}-${slot}`}
+                // Empty slots keep their place in the tree and give up their space.
+                style={[
+                  styles.option,
+                  option == null && styles.hidden,
+                  chosen && !graded && styles.optionChosen,
+                  isAnswer && styles.optionCorrect,
+                  isWrongPick && styles.optionWrong,
+                ]}
+                onPress={() => option != null && onPick(option)}
+                disabled={graded || option == null}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: chosen, disabled: graded }}
+                accessibilityLabel={t('quiz.option.a11y', { label, option: option ?? '' })}
+              >
+                <Text
+                  style={[
+                    styles.optionText,
+                    chosen && !graded && styles.optionTextChosen,
+                    (isAnswer || isWrongPick) && styles.optionTextGraded,
+                  ]}
+                >
+                  {option ?? ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : isSet ? (
         <ChipInput
           ref={ref}
           testID={`quiz-input-${field}`}
@@ -193,6 +263,36 @@ const styles = StyleSheet.create({
   },
   inputCorrect: { borderColor: quizColors.correct, borderWidth: 1 },
   inputWrong: { borderColor: quizColors.wrong, borderWidth: 1 },
+  /**
+   * A 2x2 grid, which costs two rows of panel height where stacking costs four.
+   *
+   * `width: '48%'` against a fixed 8 dp gap rather than a third flex value: the 4% of
+   * slack is wider than the gap at any panel this app can produce, and a percentage
+   * width is the one way to get two per line that does not depend on the text inside.
+   * Wrapped lines stretch to their tallest card by default, so a name that takes two
+   * lines does not leave a short card beside it.
+   */
+  options: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  option: {
+    width: '48%',
+    backgroundColor: quizColors.field,
+    borderRadius: quizRadii.field,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: quizColors.border,
+    // Generous, and not only for looks: half a phone width is a small target, and these
+    // are the only controls in the quiz a whole round is played through.
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionChosen: { backgroundColor: quizColors.accent, borderColor: quizColors.accent },
+  optionCorrect: { backgroundColor: quizColors.correct, borderColor: quizColors.correct },
+  optionWrong: { backgroundColor: quizColors.wrong, borderColor: quizColors.wrong },
+  optionText: { color: quizColors.text, fontSize: 15, textAlign: 'center' },
+  optionTextChosen: { color: quizColors.textInverted, fontWeight: '600' },
+  optionTextGraded: { color: quizColors.textInverted, fontWeight: '600' },
   reveal: { fontSize: 12, color: 'transparent' },
   revealCorrect: { color: quizColors.correct },
   revealWrong: { color: quizColors.wrong },

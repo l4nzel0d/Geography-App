@@ -97,6 +97,7 @@ export const ru: Record<MessageKey, string> = {
   'quiz.setup.mode': 'Как вы хотите играть?',
   'quiz.setup.fields': 'Что нужно назвать?',
   'quiz.setup.who': 'О ком спрашивать?',
+  'quiz.setup.style': 'Как отвечать?',
   'quiz.setup.where': 'Какие части света?',
   'quiz.setup.scope.practice':
     'Ваши {count} самых слабых стран будут взяты из этих регионов. Не выбирайте ничего, чтобы брать из всех {total}.',
@@ -111,6 +112,10 @@ export const ru: Record<MessageKey, string> = {
   'quiz.mode.flag.label': 'Узнать по флагу',
   'quiz.mode.flag.hint': 'Вам показывают флаг, а вы вводите всё, что знаете о стране',
 
+  'quiz.style.type.label': 'Вводить ответ',
+  'quiz.style.type.hint': 'Написать ответ самому; описки и мелкие ошибки засчитываются',
+  'quiz.style.choice.label': 'Выбирать ответ',
+  'quiz.style.choice.hint': 'Выбрать из короткого списка соседних стран',
   'quiz.practice.all.label': 'Все страны',
   'quiz.practice.all.hint': 'Спрашивать о каждой стране в выбранных регионах',
   'quiz.practice.weak.label': 'Мои слабые места',
@@ -166,6 +171,7 @@ export const ru: Record<MessageKey, string> = {
   'quiz.chip.placeholder': 'Введите ответ, нажмите ввод, чтобы добавить',
   'quiz.chip.remove': 'Убрать {chip}',
   'quiz.flag.a11y': 'Флаг страны',
+  'quiz.option.a11y': '{label}, вариант {option}',
 
   'locate.find': 'Найдите',
   'locate.ready': 'Готово — нажмите Проверить',

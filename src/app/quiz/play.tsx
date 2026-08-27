@@ -24,11 +24,17 @@ import {
 import { INITIAL_CENTER, WorldMap } from '@/map/WorldMap';
 import { buildExitPrompt, type ExitAction } from '@/quiz/exitPrompt';
 import { gradeQuestion, type QuestionResult, toAnswerInput } from '@/quiz/gradeAnswer';
+import { gradeChoice } from '@/quiz/gradeChoice';
 import { gradeLocation } from '@/quiz/gradeLocation';
 import { buildQuiz, makeRng } from '@/quiz/quizBuilder';
 import { pickWeakSpots, PRACTICE_ROUND_SIZE } from '@/quiz/practicePool';
 import { countriesIn, countriesWithCodes } from '@/quiz/quizCountries';
-import { type FieldId, MODE_USES_MAP, parseQuizParams } from '@/quiz/quizConfig';
+import {
+  type FieldId,
+  MODE_ASKS_FIELDS,
+  MODE_USES_MAP,
+  parseQuizParams,
+} from '@/quiz/quizConfig';
 import { getQuizPanelLayout } from '@/quiz/quizPanelLayout';
 import { getMasterySnapshot, publishMastery, recordResult } from '@/mastery/masteryStore';
 import { setQuizResult } from '@/quiz/quizResultStore';
@@ -83,7 +89,7 @@ const FLY = 'fly' as const;
  */
 const REVEAL_DELAY_MS = 700;
 
-const EMPTY_ANSWERS: PanelAnswers = { text: {}, chips: {} };
+const EMPTY_ANSWERS: PanelAnswers = { text: {}, chips: {}, picks: {} };
 
 /** Keeps the pool draw off the same RNG stream as the question shuffle. */
 const PRACTICE_SALT = 0x5f3a71c9;
@@ -192,6 +198,16 @@ export default function QuizPlayScreen() {
    */
   const showsMap = MODE_USES_MAP[mode];
 
+  /**
+   * Whether the fields are answered by pressing one of four buttons.
+   *
+   * Constant for the life of the screen for the same reason `showsMap` is, and derived
+   * the same way. `MODE_ASKS_FIELDS` is what keeps a `locate` round out of it: `choice`
+   * is carried through such a round untouched so the setup screen can show it still
+   * selected, and a locate round has no field to offer buttons for.
+   */
+  const choice = config.choice && MODE_ASKS_FIELDS[mode];
+
   /** `locate` only: the country the player has tapped, cleared with each question. */
   const [picked, setPicked] = useState<string | null>(null);
 
@@ -214,7 +230,7 @@ export default function QuizPlayScreen() {
   // A `locate` round has no answer fields: in portrait its panel is content-height and
   // the map keeps everything else, which is most of the screen and the half that mode is
   // actually played in.
-  const layout = getQuizPanelLayout(screen, config.fields.length, mode);
+  const layout = getQuizPanelLayout(screen, config.fields.length, mode, choice);
 
   /**
    * Where the map is looking before any stop is issued: `WorldMap`'s own default.
@@ -377,6 +393,13 @@ export default function QuizPlayScreen() {
       // A correct guess leaves the camera exactly where the player put it: they found
       // the country, so there is nothing to show them.
       if (!graded.allCorrect) scheduleReveal(question.iso3);
+      return;
+    }
+
+    if (choice) {
+      // A pick is a canonical string off a button, so none of `gradeAnswer`'s spelling
+      // tolerance applies to it - the same argument `gradeLocation` makes about an ISO-3.
+      commit(gradeChoice(question, answers.picks));
       return;
     }
 
@@ -561,6 +584,10 @@ export default function QuizPlayScreen() {
             onChangeChips={(field, chips) =>
               setAnswers((prev) => ({ ...prev, chips: { ...prev.chips, [field]: chips } }))
             }
+            onPick={(field, value) =>
+              setAnswers((prev) => ({ ...prev, picks: { ...prev.picks, [field]: value } }))
+            }
+            choice={choice}
             result={result}
             onCheck={check}
             onNext={next}

@@ -124,6 +124,9 @@ export function buildRetryConfig(run: QuizRun, seed: number): QuizConfig | null 
     // anyway; a config that claimed to be a practice round while naming its countries
     // would just be a lie waiting to be read by something else.
     practice: false,
+    // Carried, not reset: a retry re-asks the same questions the same way. Answering by
+    // button and then being made to type the same misses would be a different round.
+    choice: run.config.choice,
     seed,
   };
 }

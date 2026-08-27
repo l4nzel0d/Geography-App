@@ -93,3 +93,48 @@ describe('a flag round', () => {
     expect(getQuizPanelLayout(LANDSCAPE, 3, 'flag')).toEqual(getQuizPanelLayout(LANDSCAPE, 3));
   });
 });
+
+describe('a choice round', () => {
+  /**
+   * Four full-width buttons per field where a typed round has one input.
+   *
+   * It still takes the `facts` branch, and that is the trap the flag round already
+   * documents above: a definite `panelHeight` is what `QuizPanel`'s body `ScrollView`
+   * resolves its `flex: 1` against, and the buttons collapse without one just as the
+   * inputs do.
+   */
+  it('gives the panel more room than the same round typed', () => {
+    expect(getQuizPanelLayout(PORTRAIT, 2, 'facts', true).panelHeight!).toBeGreaterThan(
+      getQuizPanelLayout(PORTRAIT, 2, 'facts', false).panelHeight!,
+    );
+  });
+
+  it('still hands the panel a definite height', () => {
+    expect(getQuizPanelLayout(PORTRAIT, 2, 'facts', true).panelHeight).toEqual(expect.any(Number));
+    expect(getQuizPanelLayout(PORTRAIT, 4, 'flag', true).panelHeight).toEqual(expect.any(Number));
+  });
+
+  it('still leaves the map its share, however many fields there are', () => {
+    const layout = getQuizPanelLayout(PORTRAIT, 4, 'facts', true);
+
+    expect(layout.panelHeight! / PORTRAIT.height).toBeLessThanOrEqual(PORTRAIT_MAX_FRACTION);
+    expect(layout.mapViewport.height).toBe(PORTRAIT.height - layout.panelHeight!);
+  });
+
+  it('changes nothing about a typed round', () => {
+    // The default has to reproduce today's numbers exactly, or every existing pinned
+    // layout moves for a feature that is switched off.
+    expect(getQuizPanelLayout(PORTRAIT, 3, 'facts', false)).toEqual(
+      getQuizPanelLayout(PORTRAIT, 3, 'facts'),
+    );
+    expect(getQuizPanelLayout(LANDSCAPE, 3, 'facts', true)).toEqual(
+      getQuizPanelLayout(LANDSCAPE, 3, 'facts'),
+    );
+  });
+
+  it('is ignored by a locate round, which has no fields to offer buttons for', () => {
+    expect(getQuizPanelLayout(PORTRAIT, 3, 'locate', true)).toEqual(
+      getQuizPanelLayout(PORTRAIT, 3, 'locate'),
+    );
+  });
+});

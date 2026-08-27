@@ -18,6 +18,18 @@ import { DEFAULT_MODE, type QuizMode } from './quizConfig';
 /** Share of the screen the panel takes in portrait, per field it has to show. */
 const PORTRAIT_HEIGHT_PER_FIELD = 0.1;
 
+/**
+ * The same, for a field answered by pressing one of four buttons rather than typing.
+ *
+ * The options are a 2x2 grid, so a field costs two generously padded rows where a typed
+ * round costs one input - not the four a stacked list would. It is deliberately not much
+ * more than that: `PORTRAIT_MAX_FRACTION` clamps anything past 58% regardless, and past
+ * two fields the panel is going to scroll whatever this number says. What the larger
+ * figure buys is that a one- or two-field round, which is most of them, shows its whole
+ * grid without scrolling.
+ */
+const PORTRAIT_HEIGHT_PER_CHOICE_FIELD = 0.16;
+
 /** Space for the progress row, the button and the panel's own padding. */
 const PORTRAIT_HEIGHT_BASE = 0.24;
 
@@ -74,6 +86,15 @@ export function getQuizPanelLayout(
    * to nothing. `LocatePanel` gets away with it only because it uses `flexGrow` instead.
    */
   mode: QuizMode = DEFAULT_MODE,
+  /**
+   * Whether the fields are answered by button rather than by typing.
+   *
+   * A fourth parameter rather than a shape change, because it moves exactly one number.
+   * A choice round still takes the `facts` branch below and still gets a DEFINITE
+   * `panelHeight` - `QuizPanel`'s body `ScrollView` resolves its own `flex: 1` against
+   * it, and an auto height collapses every row, buttons included.
+   */
+  choice = false,
 ): QuizPanelLayout {
   const { landscape, panelWidth } = getInfoSheetLayout(screen);
 
@@ -98,7 +119,8 @@ export function getQuizPanelLayout(
     };
   }
 
-  const preferred = PORTRAIT_HEIGHT_BASE + Math.max(0, fieldCount) * PORTRAIT_HEIGHT_PER_FIELD;
+  const perField = choice ? PORTRAIT_HEIGHT_PER_CHOICE_FIELD : PORTRAIT_HEIGHT_PER_FIELD;
+  const preferred = PORTRAIT_HEIGHT_BASE + Math.max(0, fieldCount) * perField;
   const fraction = Math.min(PORTRAIT_MAX_FRACTION, Math.max(PORTRAIT_MIN_FRACTION, preferred));
   const panelHeight = Math.round(screen.height * fraction);
 

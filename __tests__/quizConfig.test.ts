@@ -43,6 +43,8 @@ describe('parseQuizParams', () => {
       seed: 42,
       // Absent `practice` is a normal round, for the same reason as `mode`.
       practice: false,
+      // Absent `choice` means type it, for the same reason as `practice`.
+      choice: false,
     });
   });
 
@@ -69,6 +71,7 @@ describe('parseQuizParams', () => {
         fields: ['name' as const],
         only: [],
         seed: 7,
+        choice: false,
       };
 
       for (const practice of [true, false]) {
@@ -80,6 +83,59 @@ describe('parseQuizParams', () => {
     });
   });
 
+  describe('choice', () => {
+    it.each([
+      ['1', true],
+      ['true', true],
+      ['0', false],
+      ['no', false],
+      ['', false],
+      [undefined, false],
+    ])('reads %p as %p', (raw, expected) => {
+      // Absent is false, which is what every link written before multiple choice existed
+      // says by omission - the rule `mode` and `practice` already follow.
+      expect(parseQuizParams({ choice: raw }, seed).choice).toBe(expected);
+    });
+
+    it('takes the first value when the router hands back an array', () => {
+      expect(parseQuizParams({ choice: ['1', '0'] }, seed).choice).toBe(true);
+    });
+
+    it('round-trips through toQuizParams in both states', () => {
+      const base = {
+        mode: 'facts' as const,
+        subregions: [],
+        fields: ['name' as const],
+        only: [],
+        seed: 7,
+        practice: false,
+      };
+
+      for (const choice of [true, false]) {
+        const params = toQuizParams({ ...base, choice });
+        // Always emitted, so nothing depends on how expo-router treats an absent param.
+        expect(params.choice).toBe(choice ? '1' : '0');
+        expect(parseQuizParams(params, seed).choice).toBe(choice);
+      }
+    });
+
+    it('is carried through a locate round, which never reads it', () => {
+      // Same reason `fields` is: "Change settings" pops back to a setup screen that has
+      // to show what the player chose, and "Play again" round-trips the whole config.
+      const params = toQuizParams({
+        mode: 'locate',
+        subregions: [],
+        fields: ['name'],
+        only: [],
+        seed: 7,
+        practice: false,
+        choice: true,
+      });
+
+      expect(parseQuizParams(params, seed).choice).toBe(true);
+    });
+  });
+
   describe('only', () => {
     const BASE_CONFIG = {
       mode: 'facts' as const,
@@ -88,6 +144,8 @@ describe('parseQuizParams', () => {
       only: [],
       seed: 7,
       practice: false,
+      // Absent `choice` means type it, for the same reason as `practice`.
+      choice: false,
     };
 
     const target = (iso3: string, fields: FieldId[] = []) => ({ iso3, fields });
@@ -253,6 +311,7 @@ describe('toQuizParams', () => {
     only: [],
     seed: 99,
     practice: false,
+    choice: false,
   };
 
   it('round-trips through parseQuizParams', () => {

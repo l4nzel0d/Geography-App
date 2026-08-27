@@ -18,7 +18,7 @@ in the APK and referenced as `asset://` — see *Map labels*.
 
 ## Status
 
-Everything below is implemented and unit-tested (1077 Jest tests across 46 suites, typecheck clean).
+Everything below is implemented and unit-tested (1125 Jest tests across 48 suites, typecheck clean).
 Verification state, which is what actually varies:
 
 | | state |
@@ -27,7 +27,7 @@ Verification state, which is what actually varies:
 | Web (both locale trees, desktop browser) | verified |
 | **Offline acceptance test** | last passed at the *map-labels* commit; **not re-run** since flag labels, mastery, Russian or the raster flags |
 | **Galaxy S25 (SM-S931B)** | last verified long ago; not re-checked since 1:50m geometry, the font, mastery or the raster flags |
-| Maestro | seven flows pass; **no flow for locate mode, flag mode, or Russian**, and none re-run since the raster flags |
+| Maestro | seven flows pass; an eighth (`quiz-choice.yaml`) is **written but never run**; **no flow for locate mode, flag mode, or Russian**, and none re-run since the raster flags |
 
 Nothing added since the last offline run introduces a network call, but the gate is the gate, and two
 changes since are exactly the class it exists for: the web half changed how resources resolve (two
@@ -749,7 +749,13 @@ keep the tree stable" (which pays a full MapLibre init for nothing); and re-pars
 already forbidden because it would reseed `buildQuiz`.
 
 **`buildQuiz` needed no change for `flag` or for practice** — it already reads `config.mode ===
-'locate'`, and its second parameter is already an injectable pool.
+'locate'`, and its second parameter is already an injectable pool. Multiple choice is the first thing
+that did change it; see *Answering by button*.
+
+**Two flags sit beside the mode and are deliberately not modes**: `practice` (*who* is asked) and
+`choice` (*how* you answer). Both are orthogonal — `practice × choice × facts|locate|flag` are all
+coherent — and neither has an answer to give `MODE_USES_MAP`, which is exactly the test for whether
+something is a mode.
 
 ### The panel is a flex sibling, never an overlay
 
@@ -949,6 +955,91 @@ the pool was chosen, so a chain of retries tightens the score on exactly the wea
 The label counts (`results.retryMissed`, in the **plural** catalogues — Russian needs three forms).
 The count is in the button and not left to the review heading because the footer is pinned while that
 list scrolls, and 3 versus 87 is the one fact worth having before committing.
+
+### Answering by button
+
+`choice` on `QuizConfig` swaps every answer box for a 2×2 grid of four options — one right, three
+wrong. It composes with `facts` and `flag`; in `locate` it is **carried but ignored**, since the answer
+there is the tap. `play.tsx` derives `config.choice && MODE_ASKS_FIELDS[mode]` once, beside `showsMap`
+and under the same licence.
+
+**The distractors are the feature.** Two rules in `quizOptions.ts` carry it, and both fail silently:
+
+- **One wrong answer per ring, working outward** (`CHOICE_TIER_QUOTA`), so a Peru capital question
+  reads *Lima / Quito / Havana / Oslo*: the answer, a neighbour, one more from the same continent,
+  and one from nowhere near.
+
+  | slot | source |
+  |---|---|
+  | the answer | the country itself — same subregion, trivially |
+  | distractor 1 | the same **subregion** |
+  | distractor 2 | the same **region**, a different subregion |
+  | distractor 3 | a **different region** |
+
+  Both earlier shapes were worse in opposite directions: drawing everything nearest-first put all
+  four in one subregion, which is a coin flip with nothing to anchor it; reserving one far slot and
+  nothing else left two neighbours crowding the answer. **This is a deliberate difficulty
+  reduction** — the tightest discrimination drops from three same-subregion candidates to two — and
+  what it buys is a wrong answer that *teaches* ("that one is not even on this continent") rather
+  than one that is merely hard, which is the right trade for the mode that exists as the on-ramp to
+  typing. Satisfiable everywhere: the three subregions with under four UN members (Australia and
+  New Zealand 2, North America 3, Polynesia 3) each need exactly one neighbour and have one, and
+  every region has at least four subregions.
+
+  **The top-up when a ring comes up short is not dead code, and the reason is `currency`.** A ring
+  shrinks whenever its candidates are rejected for sharing a display string with the answer, and
+  every euro country in Western Europe leaves exactly one usable same-subregion currency (the Swiss
+  franc). `name` and `capital` never reach it on today's data, which is why those two are the
+  fields `quizOptions.test.ts` pins the exact distribution on, over all 193.
+- **No option may be a value that is ALSO true of the country.** South Africa shows one of three
+  capitals and a two-currency country shows one of two, so "not the displayed answer" is not enough —
+  the guard is over `nameAliases`, every capital and every currency, normalized. Without it a question
+  has two right buttons and nothing on screen says so. Display strings are deduped on top of that,
+  which is what stops two "Euro" buttons or two countries whose populations format identically.
+  `quizOptions.test.ts` sweeps all 193 × 4.
+
+**The catalogue is all 193, never the round's pool** — a two-country subregion and an `only=FRA` retry
+could not fill four buttons out of themselves. Who is asked and what the wrong answers are is not the
+same question; plausibility is the tiering's job.
+
+**Options are drawn from `makeRng(seed ^ CHOICE_SALT)`, a separate mulberry32 stream**, and that is
+load-bearing in the same way `PRACTICE_SALT` is: sharing the shuffle's stream would mean turning
+multiple choice on changed *which countries a seed asks and in what order*, breaking every pinned round
+and `.maestro/quiz.yaml`'s pinned-seed answer — and looking like a data change rather than a feature.
+`quizBuilder.test.ts` asserts the order is identical either way. `makeRng`/`shuffle` moved to
+`random.ts` so `quizOptions` could use them without a cycle; `quizBuilder` re-exports both.
+
+Each field re-ranks the catalogue, so the capital buttons are **not** the capitals of the countries in
+the name buttons — otherwise a two-field question is answerable twice over from one piece of knowledge.
+
+**Grading is `gradeChoice.ts`, a sibling of `gradeLocation.ts`, and `gradeAnswer.ts` is untouched.** A
+pick is already a canonical string, so none of the spelling tolerance applies; more to the point,
+routing picks through `gradeField` would mean relaxing `CURRENCIES_REQUIRED` for choice rounds — a
+change inside the grader that `grading.test.ts` and `gradingRu.test.ts` sweep 193 × 193. The result is
+an ordinary `QuestionResult`, so `summarize`, `recordResult`, the review list and `buildRetryConfig`
+all needed nothing. `buildRetryConfig` **carries `choice` through**: making a player type what they had
+just answered by button would be a different round.
+
+**A correct pick is a 1-in-4 guess and records in mastery identically to a typed answer**, so the map
+greens faster for someone who only plays choice rounds. Deliberate — `commit()` stays one seam for
+every mode, and `MASTERY_PRIOR` is what stops a lucky answer retiring a country. The smallest fix if it
+ever reads wrong is one branch in `commit()`, with no change to the table's shape.
+
+**The buttons are a fixed pool of `CHOICE_OPTION_COUNT` slots**, mounted once and hidden with
+`display: 'none'`, exactly like `ChipInput`'s `MAX_CHIPS` — they share a window with a live MapLibre
+surface, and only their *text* changes between countries. `AnswerField` branches on the round's
+`choice` prop and **not** on whether `options` happens to be set: a hidden row has no options, and
+branching on their absence would swap an input back in mid-round.
+
+A choice round takes the **`facts`** layout branch — a definite `panelHeight`, or `QuizPanel`'s body
+`ScrollView` resolves `flex: 1` against nothing and the buttons collapse just as the inputs would. The
+grid is 2×2 rather than four stacked rows because it halves the height that costs;
+`PORTRAIT_HEIGHT_PER_CHOICE_FIELD` is 0.16 against the typed 0.1, still clamped by
+`PORTRAIT_MAX_FRACTION`. `width: '48%'` against a fixed 8 dp gap, since 4% of any panel this app
+produces is wider than 8 dp. The currency row drops its "3 of 9" label in a choice round — that count
+is a promise about typing three chips, and a grid asks for one of four.
+
+No IME is ever summoned, so `autoFocusFirstField()` and the focus chain are skipped.
 
 ### Flag mode specifics
 
@@ -1654,7 +1745,7 @@ source existed.
 RNTL **v14 made `render` and `fireEvent` async** — they must be awaited or every query fails with "render
 function has not been called". `tsconfig.json` needs `"types": ["jest"]`.
 
-**Maestro** (`.maestro/`) drives the installed app; it does not rebuild. Seven flows, each pinning its own
+**Maestro** (`.maestro/`) drives the installed app; it does not rebuild. Eight flows, each pinning its own
 orientation with `setOrientation`:
 
 | Flow | Orientation | Journey |
@@ -1666,6 +1757,7 @@ orientation with `setOrientation`:
 | `search-country.yaml` | PORTRAIT | open search → browse → type → pick → map highlights and flies |
 | `mastery.yaml` | PORTRAIT | mastery fill mode → practice round → reset → structure only |
 | `quiz.yaml` | PORTRAIT + rotate | pick subregion/fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score → **retry the miss** |
+| `quiz-choice.yaml` | PORTRAIT + rotate | pick the option style → play both questions by button → grid repaints on grade → rotate → score → retry keeps the buttons |
 
 **No flow for locate mode, flag mode, or Russian** — the current gaps. Several flows exist purely as a
 **proof-of-parse** for expressions the native renderer would otherwise reject silently, which is the only
@@ -1703,6 +1795,13 @@ adb shell svc wifi enable
 
 - **The Russian build has never run on Android**, and the offline acceptance test has not been re-run
   since it — or since flag labels or mastery — landed.
+- **Multiple choice has not been seen on a device.** Three things Jest cannot reach: whether the 2×2
+  grid holds at `width: '48%'` in the narrower landscape panel, where the buttons are also the
+  longest-wrapping (Russian names in a docked panel is the worst case); whether four cards per field
+  leave the Check button reachable at four fields without the panel feeling like a scroll well; and
+  whether the graded palette reads — the right button goes green whether or not it was the one pressed,
+  which is the whole reveal, and RdYlGn is already noted as not colourblind-safe elsewhere.
+  `.maestro/quiz-choice.yaml` covers the structure and the repaint; it cannot see colour.
 - **The Russian dictionaries are ~590 hand-authored strings.** The build proves they are complete and that
   no English leaked in; it cannot prove they are *right*. A native-speaker read is owed.
 - **`app.json` is layered by `app.config.js`.** Anything reading the config sees the merged result. Do not

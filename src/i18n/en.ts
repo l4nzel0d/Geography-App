@@ -90,6 +90,7 @@ export const en = {
   'quiz.setup.mode': 'How do you want to play?',
   'quiz.setup.fields': 'What do you have to answer?',
   'quiz.setup.who': 'Who gets asked?',
+  'quiz.setup.style': 'How do you answer?',
   'quiz.setup.where': 'Which parts of the world?',
   'quiz.setup.scope.practice':
     'Your {count} weakest countries will be drawn from these regions. Leave everything unselected to draw from all {total}.',
@@ -104,6 +105,10 @@ export const en = {
   'quiz.mode.flag.label': 'Name it from the flag',
   'quiz.mode.flag.hint': 'You are shown a flag and type what you know about the country',
 
+  'quiz.style.type.label': 'Type it',
+  'quiz.style.type.hint': 'Write the answer out; near-misses and typos still count',
+  'quiz.style.choice.label': 'Pick the answer',
+  'quiz.style.choice.hint': 'Choose from a short list of nearby countries',
   'quiz.practice.all.label': 'Everything',
   'quiz.practice.all.hint': 'Ask about every country in the regions you pick',
   'quiz.practice.weak.label': 'My weak spots',
@@ -159,6 +164,7 @@ export const en = {
   'quiz.chip.placeholder': 'Type an answer, press return to add another',
   'quiz.chip.remove': 'Remove {chip}',
   'quiz.flag.a11y': "The country's flag",
+  'quiz.option.a11y': '{label}, option {option}',
 
   'locate.find': 'Find',
   'locate.ready': 'Ready — press Check',

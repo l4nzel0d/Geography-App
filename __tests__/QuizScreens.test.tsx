@@ -29,6 +29,7 @@ import { mapColors } from '@/map/offlineStyle';
 import { CURRENCIES_REQUIRED } from '@/quiz/gradeAnswer';
 import { buildQuiz } from '@/quiz/quizBuilder';
 import { parseQuizParams } from '@/quiz/quizConfig';
+import { CHOICE_OPTION_COUNT } from '@/quiz/quizOptions';
 import { countriesWithCodes } from '@/quiz/quizCountries';
 import { setQuizResult } from '@/quiz/quizResultStore';
 import {
@@ -163,6 +164,50 @@ describe('the setup screen', () => {
     });
   });
 
+  describe('choosing how to answer', () => {
+    it('starts on typing, and carries the choice into the params', async () => {
+      await render(<QuizSetupScreen />);
+
+      expect(screen.getByTestId('answer-style-picker')).toBeTruthy();
+      await fireEvent.press(screen.getByTestId('quiz-start'));
+      expect(mockPush).toHaveBeenCalledWith({
+        pathname: '/quiz/play',
+        params: expect.objectContaining({ choice: '0' }),
+      });
+
+      await fireEvent.press(screen.getByTestId('answer-style-choice'));
+      await fireEvent.press(screen.getByTestId('quiz-start'));
+      expect(mockPush).toHaveBeenLastCalledWith({
+        pathname: '/quiz/play',
+        params: expect.objectContaining({ choice: '1' }),
+      });
+    });
+
+    it('is hidden in a locate round, which has no field to answer', async () => {
+      // Behind the same gate as the field picker, and for the same reason: this chooses
+      // the input for those fields, and a locate round answers by tapping the map.
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('mode-locate'));
+
+      expect(screen.queryByTestId('answer-style-picker')).toBeNull();
+      expect(screen.queryByTestId('field-picker')).toBeNull();
+    });
+
+    it('keeps the setting while the player looks at locate mode', async () => {
+      // It rides through such a round untouched, so coming back shows it as it was left.
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('answer-style-choice'));
+      await fireEvent.press(screen.getByTestId('mode-locate'));
+      await fireEvent.press(screen.getByTestId('mode-facts'));
+      await fireEvent.press(screen.getByTestId('quiz-start'));
+
+      expect(mockPush).toHaveBeenLastCalledWith({
+        pathname: '/quiz/play',
+        params: expect.objectContaining({ choice: '1' }),
+      });
+    });
+  });
+
   it('selects a whole region at once', async () => {
     await render(<QuizSetupScreen />);
     await fireEvent.press(screen.getByTestId('region-toggle-Oceania'));
@@ -207,6 +252,10 @@ describe('the setup screen', () => {
       expect(screen.getByTestId('quiz-setup-title')).toHaveTextContent(/Тест/);
       expect(screen.getByTestId('mode-picker')).toHaveTextContent(/Назвать факты/);
       expect(screen.getByTestId('practice-picker')).toHaveTextContent(/Все страны/);
+      // Label AND hint, which is where the English literals keep surviving.
+      expect(screen.getByTestId('answer-style-picker')).toHaveTextContent(/Выбирать ответ/);
+      expect(screen.getByTestId('answer-style-picker')).toHaveTextContent(/короткого списка/);
+      expect(screen.getByTestId('answer-style-picker')).not.toHaveTextContent(/Pick the answer/);
     });
 
     it('agrees the country count with the Russian plural rules', async () => {
@@ -941,6 +990,97 @@ describe('the play screen', () => {
     });
   });
 
+  describe('a choice round', () => {
+    /** The same one-country round, answered by button. */
+    const choiceRound = (fields = 'name') => {
+      mockSearchParams = {
+        subregions: 'Australia and New Zealand',
+        fields,
+        seed: '1',
+        choice: '1',
+      };
+      return buildQuiz(parseQuizParams(mockSearchParams));
+    };
+
+    const optionSlots = (field: string) =>
+      screen.getAllByTestId(new RegExp(`^quiz-option-${field}-`), { includeHiddenElements: true });
+
+    /** Which slot holds the right answer this round. */
+    const answerSlot = (question: { options?: Record<string, { options: string[]; answer: string }> }) =>
+      question.options!.name.options.indexOf(question.options!.name.answer);
+
+    it('offers buttons instead of a box', async () => {
+      choiceRound();
+      await render(<QuizPlayScreen />);
+
+      expect(screen.getByTestId('quiz-options-name')).toBeTruthy();
+      expect(optionSlots('name')).toHaveLength(CHOICE_OPTION_COUNT);
+      expect(screen.queryByTestId('quiz-input-name')).toBeNull();
+    });
+
+    it('turns the country green and says so when the right button is pressed', async () => {
+      const questions = choiceRound();
+      await render(<QuizPlayScreen />);
+
+      await fireEvent.press(screen.getByTestId(`quiz-option-name-${answerSlot(questions[0])}`));
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+      expect(selectionPaint()).toBe(mapColors.quizCorrect);
+      expect(screen.getByTestId('quiz-reveal-name')).toHaveTextContent(/Correct/);
+      expect(screen.getByTestId('quiz-submit')).toHaveTextContent(/Next/);
+    });
+
+    it('turns it red and reveals the answer when a wrong button is pressed', async () => {
+      const questions = choiceRound();
+      await render(<QuizPlayScreen />);
+
+      const wrong = (answerSlot(questions[0]) + 1) % CHOICE_OPTION_COUNT;
+      await fireEvent.press(screen.getByTestId(`quiz-option-name-${wrong}`));
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+      expect(selectionPaint()).toBe(mapColors.quizWrong);
+      expect(screen.getByTestId('quiz-reveal-name')).toHaveTextContent(
+        new RegExp(questions[0].facts.name),
+      );
+    });
+
+    it('scores checking with nothing pressed as blank, not as wrong', async () => {
+      choiceRound();
+      await render(<QuizPlayScreen />);
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+      expect(selectionPaint()).toBe(mapColors.quizWrong);
+      expect(screen.getByTestId('quiz-detail-name')).not.toHaveTextContent(/You said/);
+    });
+
+    it('keeps the slot count constant across countries', async () => {
+      // The paint-bug guard, and the reason the slots are a fixed pool rather than a map
+      // over a variable-length array: these buttons sit beside a live MapLibre surface.
+      mockSearchParams = {
+        subregions: 'Micronesia',
+        fields: 'name,currency',
+        seed: '3',
+        choice: '1',
+      };
+      await render(<QuizPlayScreen />);
+      const first = optionSlots('currency').length;
+
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+      await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+      expect(optionSlots('currency')).toHaveLength(first);
+      expect(first).toBe(CHOICE_OPTION_COUNT);
+    });
+
+    it('leaves a typed round with its boxes', async () => {
+      soloRound();
+      await render(<QuizPlayScreen />);
+
+      expect(screen.getByTestId('quiz-input-name')).toBeTruthy();
+      expect(screen.queryByTestId('quiz-options-name')).toBeNull();
+    });
+  });
+
   describe('leaving mid-round', () => {
     const dialog = () => screen.queryByTestId('quiz-exit');
 
@@ -1414,6 +1554,7 @@ describe('the results screen', () => {
       only: [],
       seed: 1,
       practice: false,
+      choice: false,
     },
     total: 3,
     endedEarly: true,

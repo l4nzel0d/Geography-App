@@ -23,6 +23,7 @@ const config = (over: Partial<QuizConfig> = {}): QuizConfig => ({
   only: [],
   seed: 1,
   practice: false,
+  choice: false,
   ...over,
 });
 
@@ -172,6 +173,30 @@ describe('buildQuiz', () => {
     const fsm = micronesia.find((q) => q.iso3 === 'FSM');
     expect(fsm).toBeDefined();
     expect(fsm!.fields).toEqual(['name']);
+  });
+
+  it('asks the same countries in the same order whether or not it is a choice round', () => {
+    /**
+     * The salted-stream guarantee, and the highest-value assertion for multiple choice.
+     *
+     * The options are drawn from `makeRng(seed ^ CHOICE_SALT)`, not from the shuffle's
+     * own stream. Drawing them from the shuffle would mean turning multiple choice on
+     * changed WHICH countries a seed asks and in what order - which breaks every pinned
+     * round in this file and `.maestro/quiz.yaml`'s pinned-seed answer, in a way that
+     * looks like a data change rather than like a new feature.
+     */
+    const typed = buildQuiz(config({ seed: 4242 })).map((q) => q.iso3);
+    const chosen = buildQuiz(config({ seed: 4242, choice: true })).map((q) => q.iso3);
+
+    expect(chosen).toEqual(typed);
+  });
+
+  it('asks each country the same fields either way', () => {
+    const fields = ['name', 'capital', 'currency'] as const;
+    const typed = buildQuiz(config({ seed: 5, fields: [...fields] }));
+    const chosen = buildQuiz(config({ seed: 5, fields: [...fields], choice: true }));
+
+    expect(chosen.map((q) => q.fields)).toEqual(typed.map((q) => q.fields));
   });
 });
 

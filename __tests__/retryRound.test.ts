@@ -37,6 +37,7 @@ const config = (over: Partial<QuizConfig> = {}): QuizConfig => ({
   only: [],
   seed: 1,
   practice: false,
+  choice: false,
   ...over,
 });
 
@@ -132,6 +133,17 @@ describe('buildRetryConfig', () => {
     ]);
 
     expect(buildRetryConfig(finished, 7)?.only).toEqual([{ iso3: 'JPN', fields: ['name'] }]);
+  });
+
+  it('replays the round in the same answering style', () => {
+    // A retry that made the player type what they had just answered by button would be a
+    // different round, not the same one again.
+    const finished = run([question('JPN', [grade('name', false)])], {
+      config: config({ choice: true }),
+    });
+
+    expect(buildRetryConfig(finished, 7)?.choice).toBe(true);
+    expect(buildRetryConfig(run([question('JPN', [grade('name', false)])]), 7)?.choice).toBe(false);
   });
 
   it('narrows the fields to the ones actually missed', () => {

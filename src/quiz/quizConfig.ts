@@ -181,6 +181,22 @@ export type QuizConfig = {
    * replays identically, which every other round in the app still obeys.
    */
   practice: boolean;
+  /**
+   * Answer by picking one of four options rather than by typing.
+   *
+   * A flag rather than a fourth `QuizMode`, for exactly the reason `practice` gives
+   * above: it is orthogonal. `choice x facts` and `choice x flag` are both coherent
+   * rounds - the stimulus is untouched and only the input changes - so there is no "does
+   * it show a map?" for an exhaustive mode record to answer.
+   *
+   * **Ignored in `locate`**, where the answer IS the tap and there is no list to offer.
+   * Carried through such a round untouched all the same, exactly as `fields` is: "Change
+   * settings" pops back to a setup screen that still has it selected.
+   *
+   * Unlike `practice`, the seed DOES pin this: the options and their order come out of
+   * `buildQuiz`'s own salted stream, so a seeded choice round replays button for button.
+   */
+  choice: boolean;
 };
 
 export const DEFAULT_FIELDS: FieldId[] = ['name'];
@@ -248,12 +264,16 @@ export function toQuizParams(config: QuizConfig): {
   only: string;
   seed: string;
   practice: string;
+  choice: string;
 } {
   return {
     mode: config.mode,
     // Always emitted, rather than omitted when false, so nothing depends on how
     // expo-router treats an absent versus an empty param.
     practice: config.practice ? '1' : '0',
+    // Same discipline, and carried even in a `locate` round that never reads it - for
+    // the reason `fields` is: "Change settings" has to show what the player chose.
+    choice: config.choice ? '1' : '0',
     subregions: config.subregions.join(','),
     // Carried even in `locate` mode, where nothing reads it: "Change settings" pops back
     // to a setup screen that still has these ticked, and "Play again" round-trips the
@@ -307,9 +327,15 @@ export function parseQuizParams(
   const rawPractice = (Array.isArray(raw.practice) ? raw.practice[0] : raw.practice)?.trim();
   const practice = rawPractice === '1' || rawPractice === 'true';
 
+  // Absent is `false`, the same rule `practice` and `mode` follow - so every link written
+  // before multiple choice existed still means "type the answer".
+  const rawChoice = (Array.isArray(raw.choice) ? raw.choice[0] : raw.choice)?.trim();
+  const choice = rawChoice === '1' || rawChoice === 'true';
+
   return {
     mode,
     practice,
+    choice,
     subregions: [...new Set(toArray(raw.subregions))],
     // ISO-3 is uppercase everywhere it is compared - the geometry's `iso3` property and
     // `COUNTRY_FACTS`' keys - so a hand-typed `?only=fra` is folded rather than left to

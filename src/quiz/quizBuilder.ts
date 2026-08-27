@@ -1,7 +1,17 @@
 import type { CountryFacts } from '@/data/types';
+import { getLocale } from '@/i18n/locale';
+import type { Locale } from '@/i18n/localeTypes';
 
+import { makeRng, shuffle } from './random';
 import type { FieldId, QuizConfig } from './quizConfig';
-import { answerableFields, countriesIn, type QuizCountry } from './quizCountries';
+import {
+  answerableFields,
+  countriesIn,
+  QUIZ_COUNTRIES,
+  QUIZ_COUNTRIES_BY_LOCALE,
+  type QuizCountry,
+} from './quizCountries';
+import { buildFieldOptions, CHOICE_SALT, type FieldOptions } from './quizOptions';
 
 /**
  * Turning a config into an ordered list of questions.
@@ -22,36 +32,32 @@ export type QuizQuestion = {
    * sees one.
    */
   fields: FieldId[];
+  /**
+   * The options each field offers, in the order they are drawn.
+   *
+   * **Absent unless the round is a choice round**, which is what keeps a typed round
+   * identical to what it was before this existed. A field the country cannot be asked
+   * has no entry, which is why `QuizPanel` decides input-versus-buttons from the round's
+   * own flag rather than from whether this happens to be here.
+   */
+  options?: Partial<Record<FieldId, FieldOptions>>;
 };
 
 /**
- * mulberry32: 32-bit, seedable, no dependency, and identical on every JS engine - which
- * matters because Jest runs on Node and the quiz runs on Hermes.
+ * Both live in `random.ts` now, and are re-exported here because that is where every
+ * call site already imports them from. See that module for why they had to move.
  */
-export function makeRng(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Fisher-Yates, non-mutating, with every random draw coming from `rng`. */
-export function shuffle<T>(items: readonly T[], rng: () => number): T[] {
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
+export { makeRng, shuffle } from './random';
 
 export function buildQuiz(
   config: QuizConfig,
   pool: readonly QuizCountry[] = countriesIn(config.subregions),
+  /**
+   * Which language the options are written in. The facts already came in with the pool,
+   * which `play.tsx` resolves with the ambient locale, so this defaults to the same
+   * thing rather than being threaded from the call site.
+   */
+  locale: Locale = getLocale(),
 ): QuizQuestion[] {
   /**
    * Every country in the pool is askable in `locate` mode, and none of them needs a
@@ -92,5 +98,41 @@ export function buildQuiz(
     // Micronesia is the one real case.
     .filter((question) => locate || question.fields.length > 0);
 
-  return shuffle(questions, makeRng(config.seed));
+  const ordered = shuffle(questions, makeRng(config.seed));
+
+  // Nothing to offer buttons for in a locate round: the answer is the tap.
+  if (!config.choice || locate) return ordered;
+
+  /**
+   * Options are drawn from a SEPARATE mulberry32 stream, and that is load-bearing.
+   *
+   * Sharing the shuffle's stream would mean turning multiple choice on changed which
+   * countries a seed asks and in what order - silently breaking `quizBuilder.test.ts`'s
+   * pinned rounds and `.maestro/quiz.yaml`'s pinned-seed answer. Same discipline, and
+   * the same reason, as `PRACTICE_SALT` in `play.tsx`.
+   */
+  const optionsRng = makeRng(config.seed ^ CHOICE_SALT);
+
+  /**
+   * Distractors come from the WHOLE catalogue, never the round's pool.
+   *
+   * A round restricted to *Australia and New Zealand* has two countries in it and a
+   * retry round has one, and neither could fill four buttons. Who gets asked and what
+   * the wrong answers are is not the same question; plausibility is the subregion
+   * preference's job, not the pool's.
+   */
+  const catalogue = QUIZ_COUNTRIES_BY_LOCALE[locale] ?? QUIZ_COUNTRIES;
+  const byIso = new Map(catalogue.map((country) => [country.iso3, country]));
+
+  return ordered.map((question) => {
+    // `region`/`subregion` are the English identifiers, which live on the pool entry and
+    // not on the localized facts - so the tiering is read off the catalogue rather than
+    // off `question.facts`.
+    const target = byIso.get(question.iso3);
+    if (!target) return question;
+    return {
+      ...question,
+      options: buildFieldOptions(target, question.fields, catalogue, optionsRng, locale),
+    };
+  });
 }

@@ -14,6 +14,14 @@ import { useTranslator } from '@/i18n/useTranslator';
 export type PanelAnswers = {
   text: Partial<Record<FieldId, string>>;
   chips: Partial<Record<FieldId, string[]>>;
+  /**
+   * The option pressed per field, in a choice round.
+   *
+   * A third map rather than a reuse of `text`, which is the uncommitted typed draft: a
+   * pick is already a canonical string, and letting one reach `toAnswerInput` would put
+   * a formatted population figure through a parser meant for what a player typed.
+   */
+  picks: Partial<Record<FieldId, string>>;
 };
 
 type QuizPanelProps = {
@@ -23,6 +31,9 @@ type QuizPanelProps = {
   answers: PanelAnswers;
   onChangeText: (field: FieldId, value: string) => void;
   onChangeChips: (field: FieldId, chips: string[]) => void;
+  onPick: (field: FieldId, value: string) => void;
+  /** Whether the round is answered by button. Constant for the life of the round. */
+  choice: boolean;
   /** Null while the question is open; set once checked. */
   result: QuestionResult | null;
   onCheck: () => void;
@@ -66,6 +77,8 @@ export function QuizPanel({
   answers,
   onChangeText,
   onChangeChips,
+  onPick,
+  choice,
   result,
   onCheck,
   onNext,
@@ -90,6 +103,9 @@ export function QuizPanel({
   const graded = result != null;
 
   const requirementFor = (field: FieldId) => {
+    // "Currency (3 of 9)" is a promise about typing three chips. A choice round asks for
+    // one of four buttons, so the count would be describing a rule it does not follow.
+    if (choice) return undefined;
     if (field === 'currency') {
       return {
         required: Math.min(CURRENCIES_REQUIRED, question.facts.currencies.length),
@@ -109,7 +125,8 @@ export function QuizPanel({
    * the on-screen keyboard for every question. See `keyboardPlay.ts`.
    */
   useEffect(() => {
-    if (!autoFocusFirstField()) return;
+    // Nothing to focus and no keyboard to summon when the answers are buttons.
+    if (choice || !autoFocusFirstField()) return;
     inputs.current[visibleFields[0]]?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [question.iso3]);
@@ -177,6 +194,10 @@ export function QuizPanel({
             chips={answers.chips[field] ?? []}
             onChangeText={(text) => onChangeText(field, text)}
             onChangeChips={(chips) => onChangeChips(field, chips)}
+            choice={choice}
+            options={question.options?.[field]}
+            picked={answers.picks[field]}
+            onPick={(value) => onPick(field, value)}
             requirement={requirementFor(field)}
             grade={result?.grades.find((g) => g.field === field)}
             onSubmitEditing={() => focusNext(field)}

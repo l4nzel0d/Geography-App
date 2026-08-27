@@ -1,0 +1,162 @@
+# E2E: play a round answered by button rather than by typing.
+#
+# A sibling of `quiz.yaml` rather than another branch inside it, because the two prove
+# different things and one flow asserting both would stop at whichever failed first.
+# What is here and nowhere else:
+#
+#   1. that the option buttons PAINT beside a live MapLibre surface. They are a fixed
+#      pool of slots inside the flex-sibling panel, mounted once for the round with only
+#      their text changing - which is the discipline CLAUDE.md's paint bug demands, and
+#      the one thing no unit test can confirm;
+#   2. that `choice=1` survives a real route boundary. Jest mocks
+#      `useLocalSearchParams` wholesale, so every claim about that param stops at the
+#      edge of `parseQuizParams`;
+#   3. that a graded grid repaints - the pressed button and the right one both change
+#      colour, on a surface Jest replaces with a stub.
+#
+# No coordinate taps, for the reason `quiz.yaml` gives: the quiz camera moves on every
+# question, so a screen percentage means nothing. "Australia and New Zealand" is the
+# smallest subregion (2 UN members), so the round is short.
+#
+# The one thing this flow deliberately does NOT assert is whether the answer was right.
+# The seed is fresh, so which slot holds it is unknowable from here; `quizOptions.test.ts`
+# is what pins that exactly one of them does.
+#
+#   maestro --device <serial> test .maestro/quiz-choice.yaml
+appId: com.boris.geographyapp
+---
+- launchApp:
+    clearState: true
+
+- setOrientation: PORTRAIT
+
+- assertVisible:
+    id: 'world-map'
+
+- tapOn:
+    id: 'open-quiz'
+
+- assertVisible:
+    id: 'quiz-setup'
+
+# The third question on the setup screen, under the mode and the fields: how you answer.
+# It sits behind the same gate as the field picker, so it is on screen in a facts round.
+- assertVisible: 'How do you answer?'
+- assertVisible:
+    id: 'answer-style-picker'
+- tapOn:
+    id: 'answer-style-choice'
+
+- scrollUntilVisible:
+    element:
+      id: 'subregion-Australia and New Zealand'
+    direction: DOWN
+    centerElement: true
+    timeout: 20000
+
+- tapOn:
+    id: 'subregion-Australia and New Zealand'
+- assertVisible: 'Start — 2 countries'
+
+- tapOn:
+    id: 'quiz-start'
+
+# The map survived the camera move and the panel is beside it, exactly as in a typed
+# round - the choice panel takes the same `facts` split and the same definite height.
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'quiz-panel'
+- assertVisible: '1 / 2'
+
+# The grid, and the point of the whole flow: four slots, drawn, with no text box in
+# sight. Slot 3 is asserted specifically because an off-by-one in the fixed pool would
+# still leave the first three looking perfect.
+- assertVisible:
+    id: 'quiz-options-name'
+- assertVisible:
+    id: 'quiz-option-name-0'
+- assertVisible:
+    id: 'quiz-option-name-3'
+- assertNotVisible:
+    id: 'quiz-input-name'
+
+# No keyboard is summoned by a choice round, so the panel keeps its full height and the
+# Check button is reachable without hiding anything first.
+- tapOn:
+    id: 'quiz-option-name-0'
+- tapOn:
+    id: 'quiz-submit'
+
+# Graded: the reveal line painted, the button relabelled rather than being swapped for a
+# second one, and every option is still on screen - the right one is now green whether or
+# not it is the one that was pressed.
+- assertVisible:
+    id: 'quiz-reveal-name'
+- assertVisible: 'Next'
+- assertVisible:
+    id: 'quiz-option-name-0'
+- assertVisible:
+    id: 'quiz-option-name-3'
+
+# Rotating mid-question re-docks the panel to the right edge. The grid is two columns of
+# a narrower panel there, which is the layout most likely to overflow.
+- setOrientation: LANDSCAPE_LEFT
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'quiz-panel'
+- assertVisible:
+    id: 'quiz-option-name-3'
+- setOrientation: PORTRAIT
+
+# The next country reuses the same slots with different text on them. Nothing is mounted
+# or unmounted between questions, which is the whole basis for the fixed pool.
+- tapOn:
+    id: 'quiz-submit'
+- assertVisible: '2 / 2'
+- assertVisible:
+    id: 'quiz-option-name-3'
+- assertNotVisible: 'Next'
+
+- tapOn:
+    id: 'quiz-option-name-1'
+- tapOn:
+    id: 'quiz-submit'
+- tapOn:
+    id: 'quiz-submit'
+
+- assertVisible:
+    id: 'quiz-results'
+- assertVisible: 'Round over'
+- assertVisible:
+    id: 'quiz-score-countries'
+
+# A retry replays the round in the same answering style - `choice` is carried through
+# `buildRetryConfig` rather than reset, so the retry must offer buttons and not a box.
+# Whether there is anything to retry depends on which slots were pressed, so this is
+# guarded rather than asserted outright.
+- runFlow:
+    when:
+      visible:
+        id: 'quiz-retry-missed'
+    commands:
+      - tapOn:
+          id: 'quiz-retry-missed'
+      - assertVisible:
+          id: 'quiz-panel'
+      - assertVisible:
+          id: 'quiz-options-name'
+      - assertNotVisible:
+          id: 'quiz-input-name'
+      - tapOn:
+          id: 'quiz-end'
+      - assertVisible:
+          id: 'quiz-results'
+
+- tapOn:
+    id: 'quiz-back-to-map'
+- assertVisible:
+    id: 'world-map'
+- assertVisible:
+    id: 'open-quiz'
