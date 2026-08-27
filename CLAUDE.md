@@ -18,7 +18,7 @@ in the APK and referenced as `asset://` — see *Map labels*.
 
 ## Status
 
-Everything below is implemented and unit-tested (1125 Jest tests across 48 suites, typecheck clean).
+Everything below is implemented and unit-tested (1131 Jest tests across 48 suites, typecheck clean).
 Verification state, which is what actually varies:
 
 | | state |
@@ -850,6 +850,29 @@ two. Currency **codes are rejected**: "USD" is different knowledge from "United 
 The rules: name and capital are single answers (any one of South Africa's three capitals counts),
 currencies need **all** of them except Zimbabwe's nine, where **three** is the cap (`CURRENCIES_REQUIRED`),
 population is within **±20%**, parsed from `68,000,000`, `68m`, `68 million` or `1.4bn`.
+
+#### A correct answer names the answer
+
+Because every one of those rules is forgiving, **"Correct" alone is a wasted teaching moment** — the
+player never learns how the word is actually spelled or what the figure actually was. So the reveal
+line reads `Correct — France` on every single-value field, and on a set field only when the player had
+to name **the whole set** (Zimbabwe's three of nine stays a bare "Correct" rather than a wall of text).
+
+The one wrinkle is which string to name, and the two fields want opposite things:
+
+- **name**: always `accepted[0]`, the canonical one. Someone who typed "Holland" came for
+  "Netherlands"; echoing their own word teaches nothing.
+- **capital**: the entry that actually matched, because every entry is a right answer in its own
+  right. South Africa has three, and "Correct — Pretoria" under an answer of "Cape Town" reads like a
+  different city was accepted.
+
+`gradeSingle` takes an **`equalAlternatives`** flag for exactly that distinction, and `matchText` (the
+index-returning form of `matchesText`) is what lets it read the matched entry back out — index-preserving,
+because a plain `.filter(Boolean)` over the normalized forms renumbers them. A **wrong** answer still
+reveals `accepted[0]` either way: nothing matched, so there is nothing to prefer.
+
+A choice round shows the same line, where the pressed button was already canonical — redundant rather
+than wrong, and one rule across the modes beats a second branch in `AnswerField`.
 
 `gradeLocation.ts` is its own module rather than a sixth case in `gradeAnswer.ts`: everything there is
 about being forgiving with a *string*, and none of it has anything to say about an ISO-3 code out of

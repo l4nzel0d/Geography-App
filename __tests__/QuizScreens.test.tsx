@@ -792,6 +792,23 @@ describe('the play screen', () => {
     expect(screen.getByTestId('quiz-submit')).toHaveTextContent(/Next/);
   });
 
+  it('spells the country back on a correct answer, however it was typed', async () => {
+    // Name is graded through aliases and a typo budget, so a bare "Correct" can leave
+    // someone who typed "Austrlia" never seeing the word spelled - which is the one
+    // thing the question was about.
+    const questions = soloRound();
+    const name = questions[0].facts.name;
+    const typo = name.slice(0, 3) + name.slice(4);
+
+    await render(<QuizPlayScreen />);
+    await fireEvent.changeText(screen.getByTestId('quiz-input-name'), typo);
+    await fireEvent.press(screen.getByTestId('quiz-submit'));
+
+    const reveal = screen.getByTestId('quiz-reveal-name');
+    expect(reveal).toHaveTextContent(/Correct/);
+    expect(reveal).toHaveTextContent(new RegExp(name));
+  });
+
   it('turns it red and reveals the answer when it is wrong', async () => {
     const questions = soloRound();
     await render(<QuizPlayScreen />);

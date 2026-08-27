@@ -189,6 +189,41 @@ describe('capitals', () => {
   it('rejects a different city', () => {
     expect(gradeCapital('FRA', 'Lyon').correct).toBe(false);
   });
+
+  it('reveals the capital the player actually named, not just the first listed', () => {
+    // The panel names the answer on a CORRECT one now, and South Africa has three, every
+    // one of them right - so "Correct - Pretoria" under an answer of "Cape Town" reads
+    // like some other city was accepted. Through `gradeField`, which is what passes
+    // `equalAlternatives`; the bare `gradeSingle` helper above deliberately does not.
+    const capitals = facts('ZAF').capital;
+    expect(capitals.length).toBeGreaterThan(1);
+    for (const city of capitals) {
+      expect(gradeField('ZAF', facts('ZAF'), 'capital', { capital: city }).expected).toBe(city);
+    }
+
+    // A typo resolves to the spelling that matched it, which is the one worth showing.
+    expect(gradeField('ZAF', facts('ZAF'), 'capital', { capital: 'Cape Twon' }).expected).toBe(
+      'Cape Town',
+    );
+
+    // Nothing matched, so nothing to prefer: the primary is the one to teach.
+    expect(gradeField('ZAF', facts('ZAF'), 'capital', { capital: 'Lyon' }).expected).toBe(
+      capitals[0],
+    );
+    expect(gradeField('ZAF', facts('ZAF'), 'capital', { capital: '' }).expected).toBe(capitals[0]);
+  });
+});
+
+describe('what a correct answer is shown back as', () => {
+  // A country name is the opposite case to a capital: the entries after the first are
+  // ALIASES, not alternatives, so the reveal must stay canonical. Someone who typed
+  // "Holland" came for "Netherlands", and echoing their own word teaches nothing.
+  it('spells a country the dataset way, whichever alias or typo was typed', () => {
+    expect(gradeName('NLD', 'Holland').correct).toBe(true);
+    expect(gradeName('NLD', 'Holland').expected).toBe(facts('NLD').name);
+    expect(gradeName('FRA', 'Frnace').expected).toBe(facts('FRA').name);
+    expect(gradeName('FRA', 'france').expected).toBe(facts('FRA').name);
+  });
 });
 
 describe('currencies - up to three', () => {

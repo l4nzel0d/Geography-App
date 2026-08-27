@@ -110,7 +110,13 @@ function isBlank(input: string | string[] | undefined): boolean {
  * is itself the name of some other country. Answering "Gambia" is a wrong answer, not a
  * misspelled right one.
  */
-export function matchesText(
+export type TextMatch = {
+  kind: MatchKind;
+  /** Which entry of `accepted` matched, as an index into the ORIGINAL array. */
+  index: number;
+};
+
+export function matchText(
   input: string,
   accepted: readonly string[],
   reserved?: ReadonlyMap<string, string>,
@@ -123,16 +129,26 @@ export function matchesText(
    * the one field where a near miss means a *different country* is the wrong trade.
    */
   stem?: (text: string) => string,
-): MatchKind | null {
+): TextMatch | null {
   const guess = normalizeText(input);
   if (!guess) return null;
 
-  const normalized = accepted.map(normalizeText).filter(Boolean);
-  if (normalized.length === 0) return null;
+  /**
+   * Normalized, but carrying each entry's ORIGINAL index.
+   *
+   * A plain `.filter(Boolean)` renumbers the survivors, and the caller uses this index to
+   * read back out of `accepted` - see `equalAlternatives` in `gradeSingle`. Blank entries
+   * are still dropped rather than kept as holes, so entry 0 stays the first real one.
+   */
+  const candidates = accepted
+    .map((text, index) => ({ text: normalizeText(text), index }))
+    .filter((candidate) => candidate.text);
+  if (candidates.length === 0) return null;
 
   // The player's own spelling, exactly as the dataset's primary name.
-  if (guess === normalized[0]) return 'exact';
-  if (normalized.includes(guess)) return 'alias';
+  if (guess === candidates[0].text) return { kind: 'exact', index: candidates[0].index };
+  const alias = candidates.find((candidate) => candidate.text === guess);
+  if (alias) return { kind: 'alias', index: alias.index };
 
   // Naming a different country outright is wrong, however close the spelling.
   const claimed = reserved?.get(guess);
@@ -142,35 +158,71 @@ export function matchesText(
   // word in the wrong case, and the player knew the answer.
   if (stem) {
     const stemmed = stem(guess);
-    if (stemmed && normalized.some((candidate) => stem(candidate) === stemmed)) return 'alias';
+    if (stemmed) {
+      const folded = candidates.find((candidate) => stem(candidate.text) === stemmed);
+      if (folded) return { kind: 'alias', index: folded.index };
+    }
   }
 
-  for (const candidate of normalized) {
-    const budget = allowedEdits(candidate.length);
-    if (budget > 0 && editDistance(guess, candidate, budget) <= budget) return 'fuzzy';
+  for (const candidate of candidates) {
+    const budget = allowedEdits(candidate.text.length);
+    if (budget > 0 && editDistance(guess, candidate.text, budget) <= budget) {
+      return { kind: 'fuzzy', index: candidate.index };
+    }
   }
 
   return null;
+}
+
+/** `matchText` for the callers that only care THAT it matched. */
+export function matchesText(
+  input: string,
+  accepted: readonly string[],
+  reserved?: ReadonlyMap<string, string>,
+  ownIso3?: string,
+  stem?: (text: string) => string,
+): MatchKind | null {
+  return matchText(input, accepted, reserved, ownIso3, stem)?.kind ?? null;
 }
 
 export function gradeSingle(
   field: FieldId,
   input: string | undefined,
   accepted: readonly string[],
-  options: { reserved?: ReadonlyMap<string, string>; ownIso3?: string } = {},
+  options: {
+    reserved?: ReadonlyMap<string, string>;
+    ownIso3?: string;
+    /**
+     * Every entry of `accepted` is an answer in its own right, not an alias of the first.
+     *
+     * True for capitals, false for country names, and the difference decides what
+     * `expected` says on a CORRECT answer - which the panel now always shows. South
+     * Africa has three capitals and naming any of them is knowing the answer, so someone
+     * who typed "Cape Town" must not read "Correct - Pretoria"; the Netherlands has one
+     * name and several aliases, so someone who typed "Holland" SHOULD read "Correct -
+     * Netherlands", which is the spelling they came for.
+     *
+     * A wrong answer still reveals `accepted[0]` either way: there is no matched entry to
+     * prefer, and the primary is the one to teach.
+     */
+    equalAlternatives?: boolean;
+  } = {},
 ): FieldGrade {
-  const expected = accepted[0] ?? '';
+  const primary = accepted[0] ?? '';
   const given = (input ?? '').trim();
 
   if (!given) {
-    return { field, correct: false, how: 'blank', given: '', expected };
+    return { field, correct: false, how: 'blank', given: '', expected: primary };
   }
 
-  const how = matchesText(given, accepted, options.reserved, options.ownIso3);
+  const match = matchText(given, accepted, options.reserved, options.ownIso3);
+  const expected =
+    match && options.equalAlternatives ? (accepted[match.index] ?? primary) : primary;
+
   return {
     field,
-    correct: how !== null,
-    how: how ?? 'wrong',
+    correct: match !== null,
+    how: match?.kind ?? 'wrong',
     given,
     expected,
   };
@@ -410,8 +462,11 @@ export function gradeField(
 
     case 'capital':
       // Several countries have more than one capital - South Africa has three - and
-      // naming any of them is knowing the answer.
-      return gradeSingle(field, asString, facts.capital.length ? facts.capital : ['']);
+      // naming any of them is knowing the answer. `equalAlternatives` is what makes the
+      // reveal name the one the player actually got right rather than the first listed.
+      return gradeSingle(field, asString, facts.capital.length ? facts.capital : [''], {
+        equalAlternatives: true,
+      });
 
     case 'currency': {
       // Matched on the bare name, revealed with its code and symbol - the same shape the

@@ -109,13 +109,20 @@ export const AnswerField = forwardRef<TextInput, AnswerFieldProps>(function Answ
     isSet && requirement != null && requirement.required === requirement.available;
 
   /**
-   * Population is named on a correct answer too, for a sharper version of the same
-   * reason: it is marked right anywhere within 20% either way, so "Correct" confirms the
-   * player knew the size while withholding the one thing they came for. The figure IS
-   * the fact being taught, and it is the only field whose right answer is a band rather
-   * than a value.
+   * Every single-value field names its answer on a correct one too, for the same reason
+   * and a sharper one: NONE of them is graded on the string the player typed.
+   *
+   * A country or a capital is accepted through an alias or a Damerau typo, so "Holland",
+   * "Frnace" and "Kathmandhu" all mark right and the player never sees how the word is
+   * actually spelled - which is most of what they came for. Population is looser still,
+   * marked right anywhere within 20% either way, so the figure itself is the fact being
+   * taught. The one case that stays a bare "Correct" is a PARTIAL set, above.
+   *
+   * A choice round shows it too, where the pressed button is already the canonical
+   * string. Redundant rather than wrong, and one rule across the modes beats a second
+   * branch here for the sake of one line of duplicated text.
    */
-  const revealsExpected = namesTheWholeSet || field === 'population';
+  const revealsExpected = namesTheWholeSet || !isSet;
 
   const revealText = !graded
     ? ''
