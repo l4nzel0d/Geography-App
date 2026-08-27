@@ -20,7 +20,7 @@
 export const FLAG_ASPECTS: Record<string, number> = {
   ad: 1.4282,
   ae: 2,
-  af: 1.4993,
+  af: 2,
   ag: 1.4993,
   ai: 1.3333,
   al: 1.4008,
@@ -228,7 +228,7 @@ export const FLAG_ASPECTS: Record<string, number> = {
   st: 2,
   sv: 1.5015,
   sx: 1.3333,
-  sy: 1.4884,
+  sy: 1.4993,
   sz: 1.4993,
   tc: 1.3333,
   td: 1.5037,

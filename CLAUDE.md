@@ -1005,7 +1005,7 @@ The same split as `build:data` / `enrich:data`, for the same reason:
 
 | | |
 |---|---|
-| `npm run flags:import` | **one-off**, needs `temp/classic_big_1000` (189 MB, gitignored). Writes the committed masters `assets/flags/<iso2>.webp` — 1024 px on the long side, WebP q82, 2.78 MB — and `src/components/flagAspects.ts`. |
+| `npm run flags:import` | **one-off**, needs `temp/classic_big_1000` (189 MB, gitignored). Writes the committed masters `assets/flags/<iso2>.webp` — 1024 px on the long side, WebP q82, 2.77 MB — and `src/components/flagAspects.ts`. |
 | `npm run flags:data` | **offline**, needs only the committed masters. Derives the thumbs, both map raster scales, the `public/` copies and four generated require maps. |
 
 Four sources feed the import, in priority order, and an unresolved code **throws**:
@@ -1015,20 +1015,24 @@ Four sources feed the import, in priority order, and an unresolved code **throws
    The rest of the filename is documentation and is deliberately **not parsed**: the image's own
    dimensions are what the master is built from, so a filename disagreeing with its contents could
    only mislead. (`DE-O-1200.png` has a typo where its ratio should be, and imports correctly.)
-2. **The pack's JPEG**, 202 of them, after dropping 14 non-country files (`eu`, `nato`, `scotland`, …)
+2. **The pack's JPEG**, 200 of them, after dropping 14 non-country files (`eu`, `nato`, `scotland`, …)
    and repairing three filenames.
 3. **A loose SVG dropped into the pack** — Montenegro and South Sudan, simply absent from it and both
-   quiz questions.
+   quiz questions, and Syria, present but three governments out of date. Syria's is dropped in as an
+   override (`SY-0.67-600.svg`), so rule 1 and rule 3 compose rather than competing.
 4. **`flag-icons`' 4x3 SVG** for the **41 dependent territories** the pack does not carry — Puerto
    Rico, Kosovo, the Falklands, New Caledonia. Those 41 stay 4:3; none is ever a quiz question.
 
-`@resvg/resvg-js` now runs only for those 43 SVGs, and `sharp` (devDependency, prebuilt) does the rest.
+`@resvg/resvg-js` now runs only for those 44 SVGs, and `sharp` (devDependency, prebuilt) does the rest.
 
-**The four overrides are the two ways a flag pack goes wrong, one pair each.** *Shape*: Switzerland
-is drawn 3:2 and is square; Germany came out 1.6517 against an official 3:5. *Content*: Libya was the
-pre-2011 plain green flag and Mauritania predated the red stripes added in 2017 — no amount of care
-about ratios helps with a flag that is simply out of date, and nothing in this pipeline could have
-noticed. Same shape as `scripts/countryOverrides.mjs`, minus its "this override stopped differing"
+**The six overrides are the two ways a flag pack goes wrong.** *Shape*: Switzerland is drawn 3:2
+and is square; Germany came out 1.6517 against an official 3:5. *Content*: Libya was the pre-2011
+plain green flag, Mauritania predated the red stripes added in 2017, Afghanistan was the republic
+tricolour and Syria the pre-2024 one — no amount of care about ratios helps with a flag that is
+simply out of date, and nothing in this pipeline could have noticed. **A flag that changes can change
+shape with it**: Afghanistan's white Emirate flag is 2:1 where the tricolour was 3:2, which is why
+`FLAG_ASPECTS` is re-measured off the written master and never carried over — the map icon went
+27x18 to 36x18 with no line of code touched. Same shape as `scripts/countryOverrides.mjs`, minus its "this override stopped differing"
 check, because the pack is a frozen folder rather than a package that can be upgraded underneath us.
 
 **A master's ratio is its own pixels, and 1024 px on the long side quantises it.** Germany's 5:3
@@ -1041,7 +1045,7 @@ visible rather than a discrepancy waiting to be found.
 
 | tier | where | size | drawn at |
 |---|---|---|---|
-| master | `assets/flags`, `public/flags` | 1024 long side, WebP, 2.78 MB | the quiz's flag round, `fill` |
+| master | `assets/flags`, `public/flags` | 1024 long side, WebP, 2.77 MB | the quiz's flag round, `fill` |
 | thumb | `assets/flag-thumbs`, `public/flag-thumbs` | **96 px tall**, WebP, 0.33 MB | info sheet 30 dp, search row 21, results row 18 |
 | map | `assets/map-flags` (both scales), `public/map-flags` | **18 / 54 px tall** + border, PNG, 1.06 MB | the `country-flag` symbol layer |
 
@@ -1722,8 +1726,8 @@ adb shell svc wifi enable
   quiz question, but `pr`, `ky`, `vg`, `im` and `je` are visibly the wrong shape beside a true-ratio
   neighbour in search. Fixing it needs no code: drop true-ratio sources into the pack and re-run both
   scripts.
-- **The pack is a 2017 snapshot, and four flags were wrong enough to replace by hand** — see the
-  override lane below. Nothing systematically audits the other 204 for a flag that has changed since,
+- **The pack is a 2017 snapshot, and six flags were wrong enough to replace by hand** — see the
+  override lane below. Nothing systematically audits the other 202 for a flag that has changed since,
   and no test could: a current flag and an obsolete one are both well-formed images.
 - **MapLibre vs RN 0.86** — the library is developed against 0.85.3 and declares `>= 0.80`.
 - **Release APK is x86_64 only** as built so far, and **debug-signed** (Expo's default). A proper upload

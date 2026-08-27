@@ -20,7 +20,8 @@
  * 1. **The pack's JPEG.** 206 countries, after dropping 14 non-country files (`eu`,
  *    `nato`, `scotland`, ...) and repairing three filenames the pack gets wrong.
  * 2. **A loose SVG dropped into the pack.** Montenegro and South Sudan are simply absent
- *    from it, and both are asked as quiz questions, so they were sourced by hand.
+ *    from it, and both are asked as quiz questions, so they were sourced by hand. Syria's
+ *    is the same file placed as an override, because the pack carries the pre-2024 flag.
  * 3. **`flag-icons`' 4x3 SVG.** The 41 remaining codes are dependent territories the pack
  *    does not carry - Puerto Rico, Kosovo, the Falklands, New Caledonia. They keep the 4:3
  *    shape they have always had here. None is ever a quiz question; they are reachable
@@ -126,9 +127,16 @@ const FILENAME_ALIASES = { by_: 'by', uk: 'gb', tp: 'tl' };
  * - **Shape.** Switzerland is drawn 3:2 and is square; Germany comes out 1.6517 against
  *   an official 3:5. Every other ratio in the pack is faithful, which is what made these
  *   worth replacing one at a time rather than distrusting the set.
- * - **Content.** Libya is the pre-2011 plain green flag, and Mauritania predates the red
- *   stripes added in 2017. No amount of care about ratios helps with a flag that is out
- *   of date, and nothing in this pipeline could have noticed.
+ * - **Content.** Libya is the pre-2011 plain green flag, Mauritania predates the red
+ *   stripes added in 2017, Afghanistan is the pre-2021 republic tricolour and Syria the
+ *   pre-2024 one. No amount of care about ratios helps with a flag that is out of date,
+ *   and nothing in this pipeline could have noticed. Two of those four also changed
+ *   shape with their content - Afghanistan's 2:1 for the tricolour's 3:2 - which is why
+ *   the ratio is always re-measured off the written master rather than carried over.
+ *
+ * An override may be an SVG (`SY-0.67-600.svg`), in which case it takes the rasterising
+ * path and is still counted as hand-replaced: what the count documents is a correction,
+ * not a file format.
  *
  * This is the same shape as `scripts/countryOverrides.mjs`: a deliberate, listed
  * correction to a pinned upstream, kept where the next person will find it. Unlike that
@@ -228,7 +236,7 @@ export async function importFlagMasters() {
     let input;
     if (packFile && extname(packFile).toLowerCase() === '.svg') {
       input = rasterise(readFileSync(packFile, 'utf8'));
-      sources.svg += 1;
+      sources[overridden.has(code) ? 'override' : 'svg'] += 1;
     } else if (packFile) {
       input = readFileSync(packFile);
       sources[overridden.has(code) ? 'override' : 'pack'] += 1;
