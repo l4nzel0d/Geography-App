@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -24,15 +24,22 @@ import { useWindowSize } from "@/components/useWindowSize";
 import { SubregionPicker } from "@/components/quiz/SubregionPicker";
 import { PRACTICE_ROUND_SIZE } from "@/quiz/practicePool";
 import { getLocale } from "@/i18n/locale";
-import { countriesIn, QUIZ_COUNTRIES } from "@/quiz/quizCountries";
-import { useTranslator } from "@/i18n/useTranslator";
 import {
-  DEFAULT_MODE,
-  type FieldId,
+  countriesIn,
+  knownSubregions,
+  QUIZ_COUNTRIES,
+} from "@/quiz/quizCountries";
+import { useTranslator } from "@/i18n/useTranslator";
+import type { QuizSetupPrefs } from "@/quiz/setupPrefs";
+import {
+  getSetupPrefs,
+  saveSetupPrefs,
+  whenSetupPrefsReady,
+} from "@/quiz/setupPrefsStore";
+import {
   MODE_ASKS_FIELDS,
   newSeed,
   QUIZ_MODE_HINT_KEYS,
-  type QuizMode,
   toQuizParams,
 } from "@/quiz/quizConfig";
 
@@ -52,8 +59,6 @@ export default function QuizSetupScreen() {
     getInfoSheetLayout(useWindowSize()).tier === "desktop"
       ? styles.centred
       : null;
-  const [mode, setMode] = useState<QuizMode>(DEFAULT_MODE);
-
   /**
    * The translator for the active language.
    *
@@ -63,11 +68,66 @@ export default function QuizSetupScreen() {
    * render. See `useTranslator`.
    */
   const t = useTranslator();
-  const [subregions, setSubregions] = useState<string[]>([]);
-  const [fields, setFields] = useState<FieldId[]>(["name"]);
-  const [practice, setPractice] = useState(false);
-  const [choice, setChoice] = useState(false);
+
+  /**
+   * Every setting on this screen, in ONE piece of state, seeded from the last round the
+   * player configured.
+   *
+   * Collapsed from five `useState`s deliberately. It makes a picker's `onChange` the only
+   * writer, which is what removes - by construction rather than by care - the hazard in the
+   * smaller alternative: a `useEffect` watching five values fires on mount too, and would
+   * write the defaults over storage before the disk read had a chance to land.
+   *
+   * `confirmingReset` and the mastery snapshot below stay separate. They are screen state,
+   * not preferences, and nothing should persist them.
+   */
+  const [prefs, setPrefs] = useState(getSetupPrefs);
   const [confirmingReset, setConfirmingReset] = useState(false);
+
+  /**
+   * Whether the player has touched anything yet.
+   *
+   * The store's read is async. It has almost always resolved before anyone reaches this
+   * screen, but "almost always" is what makes the failure invisible on a fast device and
+   * real on a cold one: without this, someone who ticks a box in the first frames has their
+   * choice quietly undone when the disk answers.
+   *
+   * A ref written in an event handler rather than during render, the same rule the
+   * exit-prompt listener follows, because of `reactCompiler`.
+   */
+  const touched = useRef(false);
+
+  useEffect(() => {
+    let live = true;
+    void whenSetupPrefsReady().then(() => {
+      if (live && !touched.current) setPrefs(getSetupPrefs());
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /**
+   * Change one setting and remember it.
+   *
+   * Write-through with no debounce - the call `setLocale` makes. This fires once per tap on
+   * a picker, not 193 times a round, so there is nothing to batch.
+   */
+  const update = (patch: Partial<QuizSetupPrefs>) => {
+    touched.current = true;
+    const next = { ...prefs, ...patch };
+    setPrefs(next);
+    saveSetupPrefs(next);
+  };
+
+  /**
+   * A stored subregion that no longer exists is dropped here rather than in the codec, which
+   * has no catalogue to check against - see `knownSubregions`. Filtering at the point of use
+   * rather than on hydration keeps the stored value intact, so a name that came back (a
+   * renamed subregion, a data rebuild) starts working again on its own.
+   */
+  const subregions = knownSubregions(prefs.subregions);
+  const { mode, fields, practice, choice } = prefs;
 
   /**
    * How much history there is to clear.
@@ -156,7 +216,7 @@ export default function QuizSetupScreen() {
         ]}
       >
         <Text style={styles.section}>{t('quiz.setup.mode')}</Text>
-        <ModePicker selected={mode} onChange={setMode} />
+        <ModePicker selected={mode} onChange={(next) => update({ mode: next })} />
 
         {/*
           Ordinary conditional rendering, and correct here for the same reason it is on
@@ -167,7 +227,7 @@ export default function QuizSetupScreen() {
         {needsFields ? (
           <>
             <Text style={styles.section}>{t('quiz.setup.fields')}</Text>
-            <FieldPicker selected={fields} onChange={setFields} />
+            <FieldPicker selected={fields} onChange={(next) => update({ fields: next })} />
 
             {/*
               Behind the same gate as the field picker, and not by coincidence: this
@@ -176,12 +236,12 @@ export default function QuizSetupScreen() {
               coming back here shows it exactly as it was left.
             */}
             <Text style={styles.section}>{t('quiz.setup.style')}</Text>
-            <AnswerStylePicker choice={choice} onChange={setChoice} />
+            <AnswerStylePicker choice={choice} onChange={(next) => update({ choice: next })} />
           </>
         ) : null}
 
         <Text style={styles.section}>{t('quiz.setup.who')}</Text>
-        <PracticePicker practice={practice} onChange={setPractice} />
+        <PracticePicker practice={practice} onChange={(next) => update({ practice: next })} />
 
         <Text style={styles.section}>{t('quiz.setup.where')}</Text>
         {/*
@@ -199,7 +259,7 @@ export default function QuizSetupScreen() {
               })
             : t("quiz.setup.scope.all", { total: QUIZ_COUNTRIES.length })}
         </Text>
-        <SubregionPicker selected={subregions} onChange={setSubregions} />
+        <SubregionPicker selected={subregions} onChange={(next) => update({ subregions: next })} />
 
         {/*
           The one irreversible thing in the app, so it sits at the very end of the scroll -

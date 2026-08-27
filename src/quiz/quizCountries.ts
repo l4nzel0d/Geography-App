@@ -101,6 +101,25 @@ export const REGIONS: readonly { region: string; subregions: SubregionBucket[]; 
       .sort((a, b) => a.region.localeCompare(b.region));
   })();
 
+/**
+ * The subset of `list` that names a real subregion, in the order given.
+ *
+ * The counterpart to the rule `parseQuizParams` and `decodeSetupPrefs` both follow: neither
+ * validates a subregion name, because this module owns the catalogue and importing it into a
+ * string coercer would pull `countries.geo.json` in with it. So the check lives here, where
+ * the catalogue already is.
+ *
+ * A stored or hand-typed name that no longer exists is worse than a merely empty selection -
+ * it leaves every checkbox clear AND Start disabled, with nothing on screen saying why - so
+ * the setup screen filters through this when it seeds itself. A round started from a URL does
+ * not need it: an unknown name there simply matches nobody and lands on the `quiz.empty`
+ * screen, which is a state the player can see and back out of.
+ */
+export function knownSubregions(list: readonly string[]): string[] {
+  const known = new Set(SUBREGIONS.map((bucket) => bucket.subregion));
+  return list.filter((name) => known.has(name));
+}
+
 /** How many countries a given selection covers. Empty selection means all of them. */
 export function countriesIn(
   subregions: readonly string[],

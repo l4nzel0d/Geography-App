@@ -39,6 +39,21 @@ import {
   recordResult,
 } from '@/mastery/masteryStore';
 import { PRACTICE_ROUND_SIZE } from '@/quiz/practicePool';
+import {
+  DEFAULT_SETUP_PREFS,
+  decodeSetupPrefs,
+  mergeSetupPrefs,
+  SETUP_PREFS_KEY,
+} from '@/quiz/setupPrefs';
+import {
+  __resetSetupPrefs,
+  getSetupPrefs,
+  saveSetupPrefs,
+} from '@/quiz/setupPrefsStore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+/** The hand-rolled in-memory mock, for reading back what the screen actually wrote. */
+const storageMock = AsyncStorage as unknown as { __raw(key: string): string | null };
 
 const METRICS: Metrics = {
   frame: { x: 0, y: 0, width: 390, height: 844 },
@@ -110,6 +125,10 @@ beforeEach(() => {
   mockDismissAll.mockClear();
   mockBack.mockClear();
   mockCanGoBack.mockReset().mockReturnValue(true);
+  // The setup prefs are a module singleton, so without this a test that ticks a picker
+  // would seed the NEXT test's screen with its choices - and the failure would read as an
+  // unrelated test having the wrong defaults.
+  __resetSetupPrefs();
 });
 
 describe('the setup screen', () => {
@@ -213,6 +232,93 @@ describe('the setup screen', () => {
     await fireEvent.press(screen.getByTestId('region-toggle-Oceania'));
 
     expect(screen.getByTestId('quiz-start')).toHaveTextContent(/14 countries/);
+  });
+
+  /**
+   * Remembering what was picked last time.
+   *
+   * These cover the SCREEN half - that it seeds itself from the store and writes back
+   * through it. The disk round trip, the corrupt-blob fallback and the read/write race all
+   * live in `setupPrefsStore.test.ts`, against a fresh module registry; this file imports
+   * the store once for every test, so `__resetSetupPrefs()` in `beforeEach` is what keeps
+   * one test|s choices out of the next one|s defaults.
+   */
+  describe('remembering the setup', () => {
+    /** Whether a picker row reads as ticked, the way every one of them reports it. */
+    const checkedState = (testID: string) =>
+      screen.getByTestId(testID).props.accessibilityState.checked;
+
+    it('comes up holding the last config rather than the defaults', async () => {
+      saveSetupPrefs({
+        mode: 'flag',
+        subregions: ['Polynesia'],
+        fields: ['capital'],
+        practice: false,
+        choice: true,
+      });
+
+      await render(<QuizSetupScreen />);
+
+      expect(checkedState('mode-flag')).toBe(true);
+      expect(checkedState('field-capital')).toBe(true);
+      expect(checkedState('field-name')).toBe(false);
+      expect(checkedState('subregion-Polynesia')).toBe(true);
+      // 3 countries in Polynesia, so the restored selection reaches the footer too.
+      expect(screen.getByTestId('quiz-start')).toHaveTextContent(/3 countries/);
+    });
+
+    it('writes a picker change straight through to storage', async () => {
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('mode-locate'));
+      await fireEvent.press(screen.getByTestId('subregion-Western Europe'));
+
+      expect(getSetupPrefs()).toMatchObject({
+        mode: 'locate',
+        subregions: ['Western Europe'],
+      });
+
+      const stored = mergeSetupPrefs(
+        decodeSetupPrefs(storageMock.__raw(SETUP_PREFS_KEY)),
+      );
+      expect(stored).toMatchObject({ mode: 'locate', subregions: ['Western Europe'] });
+    });
+
+    it('remembers an empty field selection rather than re-ticking one', async () => {
+      // The state the codec goes out of its way to preserve. Coming back to a silently
+      // re-ticked "Country" would start a round the player never configured.
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('field-name'));
+
+      expect(getSetupPrefs().fields).toEqual([]);
+    });
+
+    it('ignores a stored subregion that no longer exists', async () => {
+      // A renamed or removed subregion must not leave every box clear AND Start disabled
+      // with nothing on screen saying why - `knownSubregions` is what drops it.
+      saveSetupPrefs({
+        ...DEFAULT_SETUP_PREFS,
+        subregions: ['Atlantis', 'Western Europe'],
+      });
+
+      await render(<QuizSetupScreen />);
+
+      expect(checkedState('subregion-Western Europe')).toBe(true);
+      expect(screen.getByTestId('quiz-start')).toHaveTextContent(/8 countries/);
+    });
+
+    it('still emits a fresh seed and an empty only list', async () => {
+      // Neither is in `QuizSetupPrefs`, so neither can arrive from storage - but the round
+      // has to keep supplying them, and a persisted seed would replay one order forever.
+      saveSetupPrefs({ ...DEFAULT_SETUP_PREFS, mode: 'flag' });
+
+      await render(<QuizSetupScreen />);
+      await fireEvent.press(screen.getByTestId('quiz-start'));
+
+      const params = mockPush.mock.calls[0][0].params as Record<string, string>;
+      expect(params.mode).toBe('flag');
+      expect(params.only).toBe('');
+      expect(Number(params.seed)).toBeGreaterThanOrEqual(0);
+    });
   });
 
   /**

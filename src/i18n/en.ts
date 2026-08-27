@@ -78,11 +78,17 @@ export const en = {
   // ------------------------------------------------------------------ search
   'search.open': 'Search for a country',
   'search.back': 'Back to the map',
-  'search.placeholder': 'Country name',
+  'search.placeholder': 'Country, capital or currency',
   'search.clear': 'Clear the search',
   'search.empty.title': 'No country matches “{query}”.',
-  'search.empty.hint': 'Try a shorter spelling — Holland, UK and Ivory Coast all work.',
-  'search.result.alias': '{name}, also known as {alias}',
+  'search.empty.hint':
+    'Try a shorter spelling, or a capital or currency — Holland, Lima and Kwacha all work.',
+  'search.match.alias': 'Also known as {text}',
+  'search.match.capital': 'Capital: {text}',
+  'search.match.currency': 'Currency: {text}',
+  'search.result.alias': '{name}, also known as {text}',
+  'search.result.capital': '{name}, capital {text}',
+  'search.result.currency': '{name}, currency {text}',
 
   // -------------------------------------------------------------- quiz setup
   'quiz.open.label': 'Quiz',

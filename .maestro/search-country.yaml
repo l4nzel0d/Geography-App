@@ -52,12 +52,48 @@ appId: com.boris.geographyapp
 - inputText: 'holland'
 
 # An alias resolves to the country, and the row says which alias it matched on.
+#
+# The detail line is now built from a `Record<MatchKind, MessageKey>`, so this row reads
+# "Also known as Holland" rather than the bare word. `assertVisible` is a substring match so
+# the assertion below still holds - but the rendered text DID change, so this flow is a
+# re-run rather than something to assume.
 - assertVisible:
     id: 'country-result-NLD'
 - assertVisible: 'Netherlands'
-- assertVisible: 'Holland'
+- assertVisible: 'Also known as Holland'
 
 # Clearing returns to the full index rather than a blank screen.
+- tapOn:
+    id: 'country-search-clear'
+- assertVisible:
+    id: 'country-result-AFG'
+
+# --- searching a capital and a currency ---------------------------------------------
+# The index carries more than names now. Both of these are drawn straight out of
+# `countryFacts.json`, already localised, so neither needed new data.
+- tapOn:
+    id: 'country-search-input'
+- inputText: 'Lima'
+- assertVisible:
+    id: 'country-result-PER'
+- assertVisible: 'Capital: Lima'
+
+- tapOn:
+    id: 'country-search-clear'
+- tapOn:
+    id: 'country-search-input'
+- inputText: 'Kwacha'
+# A currency is shared, so both countries that use it are offered - alphabetically, which
+# is the pre-sorted index's stable-sort tie-break still holding across the new tiers.
+- assertVisible:
+    id: 'country-result-MWI'
+- assertVisible:
+    id: 'country-result-ZMB'
+# The row names the currency in full, which is the whole point of the detail line: it says
+# WHY this row is here, not what was typed.
+- assertVisible: 'Currency: Malawian kwacha'
+- assertVisible: 'Currency: Zambian kwacha'
+
 - tapOn:
     id: 'country-search-clear'
 - assertVisible:

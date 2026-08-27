@@ -89,11 +89,17 @@ export const ru: Record<MessageKey, string> = {
   // ------------------------------------------------------------------ search
   'search.open': 'Найти страну',
   'search.back': 'Назад к карте',
-  'search.placeholder': 'Название страны',
+  'search.placeholder': 'Страна, столица или валюта',
   'search.clear': 'Очистить поиск',
   'search.empty.title': 'По запросу «{query}» ничего не найдено.',
-  'search.empty.hint': 'Попробуйте написать проще — Голландия, Бирма и Персия тоже работают.',
-  'search.result.alias': '{name}, также известна как {alias}',
+  'search.empty.hint':
+    'Попробуйте написать проще либо ввести столицу или валюту — Голландия, Лима и квача тоже работают.',
+  'search.match.alias': 'Также известна как {text}',
+  'search.match.capital': 'Столица: {text}',
+  'search.match.currency': 'Валюта: {text}',
+  'search.result.alias': '{name}, также известна как {text}',
+  'search.result.capital': '{name}, столица {text}',
+  'search.result.currency': '{name}, валюта {text}',
 
   // -------------------------------------------------------------- quiz setup
   'quiz.open.label': 'Тест',

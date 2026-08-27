@@ -14,7 +14,7 @@
  */
 import rawGeoJson from '@/data/countries.geo.json';
 import { allCountryFacts } from '@/data/countryFacts';
-import { searchCountries, SEARCH_INDEX } from '@/search/countrySearch';
+import { searchCountries, SEARCH_INDEX, SEARCH_RANK } from '@/search/countrySearch';
 
 const isoOrder = (query: string, limit?: number) =>
   searchCountries(query, limit).map((result) => result.iso3);
@@ -88,7 +88,10 @@ describe('ranking', () => {
     const byName = names.slice(0, 4);
 
     expect(byName).toEqual([...byName].sort((a, b) => a.localeCompare(b)));
-    expect(names.slice(4)).toEqual(['Mexico', 'Tanzania']);
+    // Then the two official-name aliases, in their own alphabetical block. Below THOSE
+    // comes a third block: every country whose currency is the United States dollar, which
+    // is a real match and correctly ranked under every name and alias hit.
+    expect(names.slice(4, 6)).toEqual(['Mexico', 'Tanzania']);
   });
 });
 
@@ -105,7 +108,7 @@ describe('aliases', () => {
     const [netherlands] = searchCountries('holland');
 
     expect(netherlands.name).toBe('Netherlands');
-    expect(netherlands.matchedAs).toBe('Holland');
+    expect(netherlands.matchedAs).toEqual({ kind: 'alias', text: 'Holland' });
   });
 
   it('reports no alias when the primary name is what matched', () => {
@@ -157,5 +160,106 @@ describe('spelling', () => {
 describe('no match', () => {
   it('returns nothing for a query that is not a country', () => {
     expect(searchCountries('qqqqzzzz')).toEqual([]);
+  });
+});
+
+describe('capitals and currencies', () => {
+  it('finds a country by its capital', () => {
+    const [peru] = searchCountries('Lima');
+
+    expect(peru.iso3).toBe('PER');
+    expect(peru.matchedAs).toEqual({ kind: 'capital', text: 'Lima' });
+  });
+
+  it('finds every country sharing a currency, alphabetically', () => {
+    // A currency is shared, unlike a capital - which is exactly why it ranks below one.
+    // The tie-break inside the tier still has to be the pre-sorted index's order.
+    const kwacha = searchCountries('Kwacha');
+
+    expect(kwacha.map((result) => result.iso3)).toEqual(['MWI', 'ZMB']);
+    expect(kwacha[0].matchedAs?.kind).toBe('currency');
+  });
+
+  it('ranks every name and alias tier above every capital and currency tier', () => {
+    // THE ordering pin, on real data. "george" prefix-matches Georgetown - Guyana's
+    // capital - and only substring-matches Georgia. A country whose own NAME contains the
+    // query still wins, because the block is not interleaved. This is the assertion that
+    // fails the moment someone decides a capital prefix ought to beat a name substring.
+    const results = searchCountries('george').map((result) => result.iso3);
+
+    expect(results.indexOf('GEO')).toBeLessThan(results.indexOf('GUY'));
+  });
+
+  it('pins the rank block itself, since the data may not always exercise it', () => {
+    // A constant-ordering assertion is the honest test when no query happens to reach the
+    // boundary today - and a literal hit on a real fact must always beat a spelling guess.
+    expect(SEARCH_RANK.AliasSubstring).toBeLessThan(SEARCH_RANK.ExactCapital);
+    expect(SEARCH_RANK.ExactCapital).toBeLessThan(SEARCH_RANK.ExactCurrency);
+    expect(SEARCH_RANK.CurrencySubstring).toBeLessThan(SEARCH_RANK.Fuzzy);
+  });
+
+  it('never lets a currency hit outrank a country whose name matched', () => {
+    // The real overlap case: "franc" is a name PREFIX of France and simultaneously the
+    // currency of two dozen countries. France has to open the list, because every name tier
+    // beats every currency tier - and the two dozen still belong below it.
+    const francs = searchCountries('franc');
+
+    expect(francs[0].iso3).toBe('FRA');
+    expect(francs[0].matchedAs).toBeNull();
+    expect(francs.length).toBeGreaterThan(5);
+  });
+
+  it('keeps a broad currency query inside the usual cap', () => {
+    // "euro" matches no country NAME at all, so every row here is a currency hit - which is
+    // the tail the cap exists to bound.
+    const euro = searchCountries('euro');
+
+    expect(euro.length).toBeGreaterThan(5);
+    expect(euro.length).toBeLessThanOrEqual(50);
+    expect(euro.every((result) => result.matchedAs?.kind === 'currency')).toBe(true);
+  });
+
+  it('says nothing about a capital that is also the country name', () => {
+    // Djibouti, Singapore, Monaco and Luxembourg are all their own capitals. The shared
+    // `seen` set drops the duplicate spelling, so the name still matches at rank 0 and no
+    // row ever explains itself with "Capital: Monaco" under the word Monaco.
+    for (const query of ['Djibouti', 'Singapore', 'Monaco', 'Luxembourg']) {
+      expect(searchCountries(query)[0].matchedAs).toBeNull();
+    }
+  });
+
+  it('indexes currency NAMES and not their codes', () => {
+    // "USD" is different knowledge from "United States dollar" - the same call
+    // `gradeAnswer` makes when it rejects a code as a currency answer.
+    expect(searchCountries('USD')).toHaveLength(0);
+  });
+
+  it('keeps every indexed spelling normalized and deduped against the name', () => {
+    for (const entry of SEARCH_INDEX) {
+      for (const spelling of [...entry.capitals, ...entry.currencies]) {
+        expect(spelling.raw.length).toBeGreaterThan(0);
+        expect(spelling.normalized).toBe(spelling.normalized.trim());
+        expect(spelling.normalized).not.toBe(entry.normalizedName);
+      }
+    }
+  });
+});
+
+describe('in Russian', () => {
+  it('finds a country by its Russian capital', () => {
+    // No new data made this work: `localize()` already swaps `capital` for
+    // `translations.ru.capital`, so the Russian index carries it for free.
+    const [peru] = searchCountries('Лима', undefined, 'ru');
+
+    expect(peru.iso3).toBe('PER');
+    expect(peru.name).toBe('Перу');
+    expect(peru.matchedAs).toEqual({ kind: 'capital', text: 'Лима' });
+  });
+
+  it('finds a country by its Russian currency', () => {
+    const kwacha = searchCountries('квача', undefined, 'ru');
+
+    expect(kwacha.map((result) => result.iso3).sort()).toEqual(['MWI', 'ZMB']);
+    expect(kwacha[0].matchedAs?.kind).toBe('currency');
   });
 });

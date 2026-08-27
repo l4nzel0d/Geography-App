@@ -1,0 +1,95 @@
+# E2E: the quiz setup survives being killed.
+#
+# **This is the one thing Jest structurally cannot verify.** `setupPrefs.test.ts` proves the
+# blob round-trips, `setupPrefsStore.test.ts` proves the store reads it back against a fresh
+# module registry, and `QuizScreens.test.tsx` proves the screen seeds from and writes to that
+# store. None of them can prove the bytes survive process death, because Jest never has a
+# process to kill - it is exactly the gap CLAUDE.md already records for the mastery table,
+# and this flow closes it for both, since they share a storage layer.
+#
+# The second `launchApp` deliberately has **no `clearState`**. That is the whole test: a cold
+# start against real on-device storage.
+#
+# Because this flow persists state, the suite-wide invariant applies - **every `launchApp` in
+# every flow needs `clearState: true`**, or a mid-run abort here leaves `locate` mode and a
+# subregion selected and the next flow fails on defaults it never chose. The final step below
+# clears up after itself for the same reason.
+#
+# No coordinate taps, so this flow is immune to a camera change - the property that makes
+# quiz.yaml the robust one.
+#
+#   maestro --device <serial> test .maestro/quiz-prefs.yaml
+appId: com.boris.geographyapp
+---
+- launchApp:
+    clearState: true
+
+- setOrientation: PORTRAIT
+
+# --- a fresh install starts on the documented defaults -----------------------------
+- tapOn:
+    id: 'open-quiz'
+- assertVisible:
+    id: 'quiz-setup'
+
+# `DEFAULT_SETUP_PREFS` in the flesh: facts mode, name only, the whole world.
+- assertVisible: 'Start — 193 countries'
+
+# --- choose something distinctive --------------------------------------------------
+# `locate` rather than `flag`, because it also proves the FIELD picker is hidden on the way
+# back in: `MODE_ASKS_FIELDS['locate']` is false, so a restored mode that failed to apply
+# would leave the fields section on screen.
+- tapOn:
+    id: 'mode-locate'
+- assertNotVisible:
+    id: 'field-picker'
+
+# The smallest subregion at two countries, which is what makes the restored count below an
+# unambiguous number rather than one that could come from a stale default.
+- scrollUntilVisible:
+    element:
+      id: 'subregion-Australia and New Zealand'
+    direction: DOWN
+- tapOn:
+    id: 'subregion-Australia and New Zealand'
+- assertVisible: 'Start — 2 countries'
+
+# Leave WITHOUT starting a round. Nothing about a round should be needed to persist a
+# preference - the write happens on the tap, not on Start.
+- tapOn:
+    id: 'quiz-setup-close'
+- assertVisible:
+    id: 'world-map'
+
+# --- kill it, and come back ---------------------------------------------------------
+# No `clearState`, so this is a genuine cold start against what the previous run wrote.
+- launchApp
+
+- setOrientation: PORTRAIT
+- assertVisible:
+    id: 'world-map'
+
+- tapOn:
+    id: 'open-quiz'
+- assertVisible:
+    id: 'quiz-setup'
+
+# Every one of the three is a separate part of the payload: the mode, the derived UI that
+# depends on it, and the subregion list.
+- assertVisible: 'Start — 2 countries'
+- assertNotVisible:
+    id: 'field-picker'
+- scrollUntilVisible:
+    element:
+      id: 'subregion-Australia and New Zealand'
+    direction: DOWN
+
+# The subtitle is driven by the restored mode, so it catches a mode that came back as a
+# string the picker ignored.
+- assertVisible: 'You are given a name and have to find the country on the map'
+
+# --- leave the device as we found it -------------------------------------------------
+# Belt to braces. Every other flow already clears state on launch, but a suite that stops
+# here should not leave a locate round configured for whoever runs the next one by hand.
+- launchApp:
+    clearState: true

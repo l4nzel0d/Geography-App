@@ -3,11 +3,12 @@ import { factsFor } from '@/data/countryFacts';
 import { nameAliases } from '@/quiz/answerAliases';
 import { getLocale } from '@/i18n/locale';
 import { byLocale, DEFAULT_LOCALE, type Locale } from '@/i18n/localeTypes';
+import type { MessageKey } from '@/i18n/t';
 import { allowedEdits, editDistance } from '@/quiz/editDistance';
 import { normalizeText } from '@/quiz/normalizeText';
 
 /**
- * Finding a country by typing its name.
+ * Finding a country by typing its name, its capital or its currency.
  *
  * Deliberately more forgiving than `gradeAnswer.ts`, which is the other consumer of these
  * same helpers. Grading has to reject a near-miss, because accepting "Gambia" for Zambia
@@ -29,16 +30,44 @@ const MIN_FUZZY_QUERY = 4;
  */
 const DEFAULT_LIMIT = 50;
 
+/**
+ * What kind of fact put this row in the list, when it was not the primary name.
+ *
+ * A discriminated union rather than a second `matchedKind` field beside the text: one
+ * object cannot desync from itself, and the discriminant turns the row's lookup into a
+ * `Record<MatchKind, MessageKey>` - the `FIELD_LABEL_KEYS` / `MODE_USES_MAP` pattern used
+ * throughout this codebase, which fails to COMPILE when a fourth kind is added rather than
+ * silently rendering a blank line.
+ */
+export type MatchKind = 'alias' | 'capital' | 'currency';
+
+export type MatchedAs = { kind: MatchKind; text: string };
+
+/** The line under the country's name, saying why the row is here. */
+export const MATCH_DETAIL_KEYS: Record<MatchKind, MessageKey> = {
+  alias: 'search.match.alias',
+  capital: 'search.match.capital',
+  currency: 'search.match.currency',
+};
+
+/** The same fact, as a screen reader hears it. */
+export const MATCH_A11Y_KEYS: Record<MatchKind, MessageKey> = {
+  alias: 'search.result.alias',
+  capital: 'search.result.capital',
+  currency: 'search.result.currency',
+};
+
 export type CountrySearchResult = {
   iso3: string;
   name: string;
   flag: string | null;
   subregion: string;
   /**
-   * The alias that matched, when it was not the primary name - the row renders it as
-   * "Holland" above "Netherlands", so a hit on a name the user typed is never mysterious.
+   * What matched, when it was not the primary name - the row renders it as "Holland" or
+   * "Capital: Lima" above the country, so a hit on something the user typed is never
+   * mysterious. Null when the country's own name matched.
    */
-  matchedAs: string | null;
+  matchedAs: MatchedAs | null;
 };
 
 type Alias = { raw: string; normalized: string; squashed: string };
@@ -62,6 +91,10 @@ type Entry = {
   squashedName: string;
   /** Every accepted spelling except the primary name, deduped and pre-normalized. */
   aliases: Alias[];
+  /** Every capital the country has - South Africa has three. */
+  capitals: Alias[];
+  /** Currency NAMES, never codes: "USD" is a different thing to know from "dollar". */
+  currencies: Alias[];
 };
 
 /**
@@ -80,6 +113,28 @@ const mappedIso3 = new Set(
 );
 
 /**
+ * Normalize a list of spellings, dropping anything already claimed by a better one.
+ *
+ * `seen` is shared across the name, the aliases, the capitals and the currencies of ONE
+ * country, which is what makes Djibouti, Singapore, Monaco and Luxembourg - where the
+ * capital is the country's own name - cost exactly nothing. Their capital is skipped, the
+ * name still matches at rank 0, and `matchedAs` stays null, so no row ever explains itself
+ * with "Capital: Monaco" under the word Monaco. No special case needed.
+ */
+function spellings(raws: readonly string[], seen: Set<string>): Alias[] {
+  const list: Alias[] = [];
+
+  for (const raw of raws) {
+    const normalized = normalizeText(raw);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    list.push({ raw, normalized, squashed: squash(normalized) });
+  }
+
+  return list;
+}
+
+/**
  * The index in every language.
  *
  * **Unlike the quiz pool, this one IS re-sorted per language**, and the difference is the
@@ -90,6 +145,18 @@ const mappedIso3 = new Set(
  * `localeCompare(name, locale)` rather than the bare call it used to make: the host's
  * default collation is not the app's language, and on this project's own Windows box those
  * two disagree.
+ *
+ * **The capitals and currencies come out of `factsFor(locale)` already translated**, and
+ * that is the whole reason searching them costs no new data: `localize()` in
+ * `countryFacts.ts` swaps `capital` for `translations.ru.capital` and each currency's
+ * `name` for its Russian one, so a Russian index carries Лима and квача with no new join
+ * and nothing added to `src/data/ru/`.
+ *
+ * Only the ACTIVE locale's strings are indexed, not the union of both. `nameAliases`
+ * returns a bilingual superset, but its stated justification is that a superset makes the
+ * grader's confusable guard stricter - and search has no confusable guard, so the argument
+ * does not carry over. Indexing English capitals in a Russian list would put English text
+ * in a Russian row for nothing.
  */
 export const SEARCH_INDEX_BY_LOCALE: Record<Locale, readonly Entry[]> = byLocale((locale) =>
   Object.entries(factsFor(locale))
@@ -97,14 +164,6 @@ export const SEARCH_INDEX_BY_LOCALE: Record<Locale, readonly Entry[]> = byLocale
     .map(([iso3, facts]) => {
       const normalizedName = normalizeText(facts.name);
       const seen = new Set([normalizedName]);
-      const aliases: Alias[] = [];
-
-      for (const raw of nameAliases(iso3, facts, locale)) {
-        const normalized = normalizeText(raw);
-        if (!normalized || seen.has(normalized)) continue;
-        seen.add(normalized);
-        aliases.push({ raw, normalized, squashed: squash(normalized) });
-      }
 
       return {
         iso3,
@@ -113,7 +172,12 @@ export const SEARCH_INDEX_BY_LOCALE: Record<Locale, readonly Entry[]> = byLocale
         subregion: facts.subregion,
         normalizedName,
         squashedName: squash(normalizedName),
-        aliases,
+        aliases: spellings(nameAliases(iso3, facts, locale), seen),
+        capitals: spellings(facts.capital, seen),
+        currencies: spellings(
+          facts.currencies.map((currency) => currency.name),
+          seen,
+        ),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name, locale)),
@@ -125,6 +189,21 @@ export const SEARCH_INDEX: readonly Entry[] = SEARCH_INDEX_BY_LOCALE[DEFAULT_LOC
  * How good a match is, best first. Ranked rather than scored because the tiers are
  * genuinely ordinal: an exact name is better than any prefix, and every prefix is better
  * than any substring, whatever the lengths involved.
+ *
+ * **Every name or alias tier beats every capital or currency tier**, and the block is not
+ * interleaved. That single sentence is what keeps the ordering explainable: typing
+ * "Guinea" lists Guinea, Equatorial Guinea, Guinea-Bissau and Papua New Guinea before
+ * anything whose *capital* merely contains the word. Interleaving would make "is a capital
+ * hit better than a name substring?" a case-by-case judgement, and the stable-sort
+ * tie-break would stop being explainable with it.
+ *
+ * The block sits ABOVE `Fuzzy`, because a literal hit on a real fact is better evidence
+ * than a spelling guess - and structurally that is free, since `score()` already falls
+ * through to `scoreFuzzy` only when nothing matched literally.
+ *
+ * **Capital outranks currency at equal tier.** A capital identifies essentially one
+ * country; a currency is shared - the euro is twenty countries and the CFA franc fourteen -
+ * so a currency hit is intrinsically less discriminating.
  */
 const Rank = {
   ExactName: 0,
@@ -135,17 +214,30 @@ const Rank = {
   AliasWord: 5,
   NameSubstring: 6,
   AliasSubstring: 7,
-  Fuzzy: 8,
+
+  ExactCapital: 8,
+  ExactCurrency: 9,
+  CapitalPrefix: 10,
+  CurrencyPrefix: 11,
+  CapitalWord: 12,
+  CurrencyWord: 13,
+  CapitalSubstring: 14,
+  CurrencySubstring: 15,
+
+  Fuzzy: 16,
 } as const;
 
 type Rank = (typeof Rank)[keyof typeof Rank];
+
+/** Exported for the ordering tests, which pin the block rather than a data-dependent case. */
+export const SEARCH_RANK = Rank;
 
 /** Does `haystack` contain `needle` at the start of one of its words? */
 function startsWord(haystack: string, needle: string): boolean {
   return haystack.includes(` ${needle}`);
 }
 
-type Scored = { rank: Rank; matchedAs: string | null };
+type Scored = { rank: Rank; matchedAs: MatchedAs | null };
 
 /** The query, in the two forms every spelling is indexed in. */
 type Query = { normalized: string; squashed: string };
@@ -164,25 +256,78 @@ function tierOf(normalized: string, squashed: string, query: Query): 0 | 1 | 2 |
   return null;
 }
 
-const NAME_RANKS = [Rank.ExactName, Rank.NamePrefix, Rank.NameWord, Rank.NameSubstring] as const;
-const ALIAS_RANKS = [Rank.ExactAlias, Rank.AliasPrefix, Rank.AliasWord, Rank.AliasSubstring] as const;
+/** Each list's four tiers, indexed by what `tierOf` returns. */
+type RankTiers = readonly [Rank, Rank, Rank, Rank];
+
+const NAME_RANKS: RankTiers = [
+  Rank.ExactName,
+  Rank.NamePrefix,
+  Rank.NameWord,
+  Rank.NameSubstring,
+];
+const ALIAS_RANKS: RankTiers = [
+  Rank.ExactAlias,
+  Rank.AliasPrefix,
+  Rank.AliasWord,
+  Rank.AliasSubstring,
+];
+const CAPITAL_RANKS: RankTiers = [
+  Rank.ExactCapital,
+  Rank.CapitalPrefix,
+  Rank.CapitalWord,
+  Rank.CapitalSubstring,
+];
+const CURRENCY_RANKS: RankTiers = [
+  Rank.ExactCurrency,
+  Rank.CurrencyPrefix,
+  Rank.CurrencyWord,
+  Rank.CurrencySubstring,
+];
 
 function scoreName(entry: Entry, query: Query): Scored | null {
   const tier = tierOf(entry.normalizedName, entry.squashedName, query);
   return tier === null ? null : { rank: NAME_RANKS[tier], matchedAs: null };
 }
 
-function scoreAlias(alias: Alias, query: Query): Scored | null {
-  const tier = tierOf(alias.normalized, alias.squashed, query);
-  return tier === null ? null : { rank: ALIAS_RANKS[tier], matchedAs: alias.raw };
+/**
+ * The best tier any spelling in `list` manages, tagged with what kind of thing it was.
+ *
+ * `tierOf` is reused untouched, which is exactly why the two new fields were cheap: the
+ * matching rules do not change at all, only which list they are applied to and what rank
+ * comes out.
+ */
+function scoreIn(
+  list: readonly Alias[],
+  query: Query,
+  ranks: RankTiers,
+  kind: MatchKind,
+): Scored | null {
+  let best: Scored | null = null;
+
+  for (const spelling of list) {
+    const tier = tierOf(spelling.normalized, spelling.squashed, query);
+    if (tier === null) continue;
+
+    const scored: Scored = {
+      rank: ranks[tier],
+      matchedAs: { kind, text: spelling.raw },
+    };
+    if (!best || scored.rank < best.rank) best = scored;
+  }
+
+  return best;
 }
 
 /**
- * A typo away from any accepted spelling.
+ * A typo away from any accepted NAME or alias.
  *
  * Only reached when nothing matched literally, and only for queries long enough to be
  * worth it: `allowedEdits` returns 0 below five characters, so a short query can never
  * match fuzzily anyway and would just pay for the comparison.
+ *
+ * **Deliberately not extended to capitals or currencies.** Fuzzy is already the noisiest
+ * tier under a cap of fifty, and a fuzzy currency match would surface twenty euro countries
+ * for one mistyped letter. A named omission, not an oversight.
  *
  * Note the budget comes from the CANDIDATE's length, not the query's, and that
  * `editDistance` returns `max + 1` once the budget is blown - it may only be compared
@@ -199,7 +344,7 @@ function scoreFuzzy(entry: Entry, { normalized: query }: Query): Scored | null {
   for (const alias of entry.aliases) {
     const aliasBudget = allowedEdits(alias.normalized.length);
     if (aliasBudget > 0 && editDistance(query, alias.normalized, aliasBudget) <= aliasBudget) {
-      return { rank: Rank.Fuzzy, matchedAs: alias.raw };
+      return { rank: Rank.Fuzzy, matchedAs: { kind: 'alias', text: alias.raw } };
     }
   }
 
@@ -209,15 +354,18 @@ function scoreFuzzy(entry: Entry, { normalized: query }: Query): Scored | null {
 function score(entry: Entry, query: Query): Scored | null {
   let best = scoreName(entry, query);
 
-  for (const alias of entry.aliases) {
-    const scored = scoreAlias(alias, query);
+  for (const scored of [
+    scoreIn(entry.aliases, query, ALIAS_RANKS, 'alias'),
+    scoreIn(entry.capitals, query, CAPITAL_RANKS, 'capital'),
+    scoreIn(entry.currencies, query, CURRENCY_RANKS, 'currency'),
+  ]) {
     if (scored && (!best || scored.rank < best.rank)) best = scored;
   }
 
   return best ?? scoreFuzzy(entry, query);
 }
 
-const toResult = (entry: Entry, matchedAs: string | null): CountrySearchResult => ({
+const toResult = (entry: Entry, matchedAs: MatchedAs | null): CountrySearchResult => ({
   iso3: entry.iso3,
   name: entry.name,
   flag: entry.flag,

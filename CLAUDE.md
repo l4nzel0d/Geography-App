@@ -18,7 +18,7 @@ in the APK and referenced as `asset://` — see *Map labels*.
 
 ## Status
 
-Everything below is implemented and unit-tested (1132 Jest tests across 48 suites, typecheck clean).
+Everything below is implemented and unit-tested (1185 Jest tests across 50 suites, typecheck clean).
 Verification state, which is what actually varies:
 
 | | state |
@@ -27,7 +27,7 @@ Verification state, which is what actually varies:
 | Web (both locale trees, desktop browser) | verified |
 | **Offline acceptance test** | last passed at the *map-labels* commit; **not re-run** since flag labels, mastery, Russian or the raster flags |
 | **Galaxy S25 (SM-S931B)** | last verified long ago; not re-checked since 1:50m geometry, the font, mastery or the raster flags |
-| Maestro | seven flows pass; an eighth (`quiz-choice.yaml`) is **written but never run**; **no flow for locate mode, flag mode, or Russian**, and none re-run since the raster flags |
+| Maestro | seven flows pass; two more (`quiz-choice.yaml`, `quiz-prefs.yaml`) are **written but never run**; **no flow for locate mode, flag mode, or Russian**, and none re-run since the raster flags |
 
 Nothing added since the last offline run introduces a network call, but the gate is the gate, and two
 changes since are exactly the class it exists for: the web half changed how resources resolve (two
@@ -91,6 +91,7 @@ src/
   quiz/       quizConfig  quizCountries  quizBuilder  normalizeText  editDistance
               answerAliases  gradeAnswer  gradeLocation  quizScore  quizPanelLayout
               exitPrompt  resetPrompt  quizResultStore  practicePool
+              setupPrefs  setupPrefsStore  setupPrefsStorage(.web)
   mastery/    masteryStore  masteryCodec  masteryStorage(.web)  masteryScore
   search/     countrySearch.ts  pendingCountry.ts
 scripts/  countryOverrides  manifest  build-label-points  copy-web-assets
@@ -658,8 +659,9 @@ confusable guard here, and partial input is the normal case.
 
 Ranked in ordinal tiers, ties broken alphabetically (the index is pre-sorted and `sort` is stable):
 exact name, exact alias, name prefix, alias prefix, name word-start, alias word-start, name substring,
-alias substring, fuzzy. Ordinal rather than scored, because `editDistance(a, b, max)` returns `max + 1`
-once the budget blows — it may only be compared against a threshold, never used as a score.
+alias substring, **then the capital/currency block**, then fuzzy. Ordinal rather than scored, because
+`editDistance(a, b, max)` returns `max + 1` once the budget blows — it may only be compared against a
+threshold, never used as a score.
 
 - **Both the spaced and space-free forms are compared.** `normalizeText` *deletes* hyphens, so
   "Guinea-Bissau" indexes as `guineabissau` while a player types `guinea bissau`.
@@ -672,8 +674,44 @@ The pool is **237**: every ISO-3 in *both* JSON files — wider than the quiz's 
 Greenland, Puerto Rico and Western Sahara. The three excluded are the geometry-only `FACTLESS_ALLOWLIST`
 entries, which would open an empty info sheet.
 
-`matchedAs` carries the alias that matched so the row can show it — offering "Netherlands" for "holland"
-with no explanation reads like a bug, and that line is the only place alias support is discoverable.
+`matchedAs` carries **what** matched and **what kind of thing it was** — `{ kind, text }`, a
+discriminated union rather than a string plus a parallel `matchedKind` field, because one object cannot
+desync from itself and the discriminant makes the row's lookup a `Record<MatchKind, MessageKey>` that
+fails to *compile* when a fourth kind is added. Offering "Netherlands" for "holland" with no
+explanation reads like a bug, and that line is the only place alias support is discoverable.
+
+### Capitals and currencies are searchable too
+
+Typing "Lima" finds Peru and "Kwacha" finds Zambia and Malawi. **This needed no new data**: the index
+is built over `factsFor(locale)`, and `localize()` already swaps `capital` for
+`translations.ru.capital` and each currency's `name` for its Russian one — so the Russian index carries
+Лима and квача with nothing added to `src/data/ru/`.
+
+Three ordering decisions, each of which is the whole design:
+
+- **The block sits BELOW every name and alias tier, not interleaved.** "Guinea" must list Guinea,
+  Equatorial Guinea, Guinea-Bissau and Papua New Guinea before anything whose *capital* merely contains
+  the word. The rule reduces to one sentence — *every name or alias tier beats every capital or currency
+  tier* — and interleaving would make "is a capital prefix better than a name substring?" a
+  case-by-case judgement with an unexplainable tie-break. `countrySearch.test.ts` pins it on real data:
+  **"george" must list Georgia above Guyana**, whose capital is Georgetown.
+- **It sits ABOVE fuzzy**, because a literal hit on a real fact beats a spelling guess. Structurally
+  free — `score()` already reads `best ?? scoreFuzzy(...)`.
+- **Capital outranks currency at equal tier.** A capital identifies essentially one country; the euro
+  is twenty countries and the CFA franc fourteen.
+
+**No fuzzy tier for capitals or currencies** — a fuzzy currency match would surface twenty euro
+countries for one mistyped letter. A named omission, not an oversight. **Currency codes are not indexed
+either**, the same call `gradeAnswer` makes: "USD" is different knowledge from "United States dollar".
+
+`tierOf` is reused untouched, which is why the two new fields were cheap: `scoreAlias` generalised into
+`scoreIn(list, query, RANKS, kind)` and the new tiers are 4-tuples beside the existing two. The shared
+`seen` set is what makes Djibouti, Singapore, Monaco and Luxembourg — their own capitals — cost nothing:
+the duplicate spelling is dropped, the name still wins at rank 0, and no row ever explains itself with
+"Capital: Monaco" under the word Monaco.
+
+One visible consequence worth expecting: **"united" now also lists every US-dollar country**, below the
+six name and alias hits. Correct, and pinned.
 
 ### Framing around the info sheet
 
@@ -1410,6 +1448,53 @@ subscribes **inline**, not through a hook, for the `reactCompiler` reason below.
 a practice round picked** — the pool is a function of device state, not the seed. That is a permanent
 reduction in what E2E can prove here, unlike `quiz.yaml`, which pins a seed precisely so it can.
 
+## The quiz setup is remembered
+
+Mode, fields, answer style, practice and subregions survive a cold start, the way locale and mastery
+already did. Four files, following three different precedents on purpose:
+
+- `setupPrefs.ts` — pure, versioned, **never throws**, validates per field. **Named keys, not
+  `masteryCodec`'s positional tuples**: that file packs its fields because it writes the same shape 1158
+  times; this writes five keys once per tap, so readability wins.
+- `setupPrefsStorage.ts` / `.web.ts` — **the web sibling takes `masteryStorage.web.ts`'s shape, NOT
+  `localeStorage.web.ts`'s.** The locale's is a deliberate no-op because on the web the language is a
+  property of the deployment (`/` vs `/ru`); a quiz setup is not. Copying the wrong precedent leaves the
+  feature silently dead on one platform.
+- `setupPrefsStore.ts` — import-time read plus a synchronous getter, and **deliberately no
+  subscribe/notify**: the setup screen is the only reader and the only writer, so a listener set with
+  one subscriber is machinery for nothing. No write debounce either — this is the once-per-tap call
+  `setLocale` makes, not `recordResult`'s 193-per-round.
+
+**`seed` and `only` are excluded by the TYPE** — `Pick<QuizConfig, …>` — not by a runtime delete. A
+persisted seed would replay one question order forever and read as the app being broken; `only` is
+*invisible state*, so a stored one would quietly start a three-country round with nothing on screen
+explaining why or offering to clear it.
+
+Two guards, both for the same async race:
+
+- The **store** ignores the disk read once anything has been written — the same shape as
+  `masteryStore`'s `cleared` flag.
+- The **screen** keeps a `touched` ref, so a player who ticks a box in the first frames is not undone
+  by the read landing. Written in an event handler, never during render, because of `reactCompiler`.
+
+The five `useState`s collapsed into **one `prefs` object**, which is the invasive half and is what makes
+a picker's `onChange` the only writer — removing by construction the hazard in the smaller version, where
+a `useEffect` over five deps fires on mount and writes the defaults over storage *before* hydration lands.
+
+**An empty `fields` selection persists rather than being re-ticked.** A player can untick everything and
+`canStart` already says so with a disabled button; silently reinstating "Country" would start a name
+round nobody configured. Mechanically, `fields` is *present* in the decoded partial whenever the stored
+value was an array — even when filtering emptied it — and absent only when it was not an array, which is
+what lets `mergeSetupPrefs` supply `DEFAULT_FIELDS` for a missing key without clobbering a deliberate
+empty. Both halves are pinned, or the distinction is untested.
+
+Subregion names are **not** validated in the codec (that would drag `countries.geo.json` into a pure
+module) but **are** filtered by `knownSubregions` at the point of use — a stored name that no longer
+exists would otherwise leave every checkbox clear *and* Start disabled with nothing saying why.
+
+This also quietly fixes `goToSetup`'s fallback: a deep-linked round with no setup screen to pop to now
+mounts one holding the player's last config rather than bare defaults.
+
 ## Localization
 
 English and Russian, and "fully" means the data too: every country name, capital, language, currency and
@@ -1784,7 +1869,7 @@ source existed.
 RNTL **v14 made `render` and `fireEvent` async** — they must be awaited or every query fails with "render
 function has not been called". `tsconfig.json` needs `"types": ["jest"]`.
 
-**Maestro** (`.maestro/`) drives the installed app; it does not rebuild. Eight flows, each pinning its own
+**Maestro** (`.maestro/`) drives the installed app; it does not rebuild. Nine flows, each pinning its own
 orientation with `setOrientation`:
 
 | Flow | Orientation | Journey |
@@ -1797,8 +1882,10 @@ orientation with `setOrientation`:
 | `mastery.yaml` | PORTRAIT | mastery fill mode → practice round → reset → structure only |
 | `quiz.yaml` | PORTRAIT + rotate | pick subregion/fields → back-press → discard → restart → answer → reveal → back-press → cancel → rotate → end → score → **retry the miss** |
 | `quiz-choice.yaml` | PORTRAIT + rotate | pick the option style → play both questions by button → grid repaints on grade → rotate → score → retry keeps the buttons |
+| `quiz-prefs.yaml` | PORTRAIT | pick a mode and a subregion → **relaunch with no `clearState`** → they are still there |
 
-**No flow for locate mode, flag mode, or Russian** — the current gaps. Several flows exist purely as a
+**No flow for locate mode, flag mode, or Russian** — the current gaps, and `quiz-choice.yaml` and
+`quiz-prefs.yaml` are written but have never been run. Several flows exist purely as a
 **proof-of-parse** for expressions the native renderer would otherwise reject silently, which is the only
 automated defence against a malformed paint/layout expression. **Maestro cannot see the labels themselves**
 — they are drawn inside the GL surface, so no `assertVisible: 'Paris'` will ever match. Confirming text
@@ -1834,6 +1921,12 @@ adb shell svc wifi enable
 
 - **The Russian build has never run on Android**, and the offline acceptance test has not been re-run
   since it — or since flag labels or mastery — landed.
+- **The persisted setup and the widened search have not been seen on a device.** Both are pure JS over
+  data the app already had, so neither touches the offline gate — the web export builds unchanged at
+  5.21 MB. What is unproven is fit and persistence: whether the search detail line survives
+  `numberOfLines={1}` in Russian, where `Восточнокарибский доллар` is the worst case, and — the one
+  thing no unit test can reach — that AsyncStorage really carries the setup prefs across process death.
+  `.maestro/quiz-prefs.yaml` is written for exactly that and has never been run.
 - **Multiple choice has not been seen on a device.** Three things Jest cannot reach: whether the 2×2
   grid holds at `width: '48%'` in the narrower landscape panel, where the buttons are also the
   longest-wrapping (Russian names in a docked panel is the worst case); whether four cards per field

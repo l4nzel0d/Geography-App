@@ -1,7 +1,11 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { CountrySearchResult } from '@/search/countrySearch';
+import {
+  type CountrySearchResult,
+  MATCH_A11Y_KEYS,
+  MATCH_DETAIL_KEYS,
+} from '@/search/countrySearch';
 
 import { CountryFlag } from '../CountryFlag';
 import { FLAG_SIZES } from '../flagSizes';
@@ -34,9 +38,18 @@ export const CountryResultRow = memo(function CountryResultRow({
 
   const { iso3, name, flag, subregion, matchedAs } = result;
 
-  // The dataset leaves `subregion` empty for the four Antarctic records, and an empty
-  // Text still takes a line's height.
-  const detail = matchedAs ?? subregionLabel(subregion, getLocale());
+  /**
+   * Why this row is here, or where the country is when it matched on its own name.
+   *
+   * The wording comes from a `Record<MatchKind, MessageKey>` rather than a branch, so a
+   * fourth kind of match fails to compile instead of silently rendering a blank line.
+   *
+   * The dataset leaves `subregion` empty for the four Antarctic records, and an empty Text
+   * still takes a line's height - hence the guard below rather than an always-rendered row.
+   */
+  const detail = matchedAs
+    ? t(MATCH_DETAIL_KEYS[matchedAs.kind], { text: matchedAs.text })
+    : subregionLabel(subregion, getLocale());
 
   return (
     <Pressable
@@ -45,7 +58,9 @@ export const CountryResultRow = memo(function CountryResultRow({
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       accessibilityRole="button"
       accessibilityLabel={
-        matchedAs ? t('search.result.alias', { name, alias: matchedAs }) : name
+        matchedAs
+          ? t(MATCH_A11Y_KEYS[matchedAs.kind], { name, text: matchedAs.text })
+          : name
       }
     >
       {/*
