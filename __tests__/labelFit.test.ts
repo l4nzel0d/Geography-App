@@ -16,6 +16,9 @@ import {
   getLabelMinZoom,
   LABEL_FONT_SIZE,
   MAP_FLAG_HEIGHT_DP,
+  MAP_FLAG_MAX_HEIGHT_DP,
+  MAP_FLAG_MIN_HEIGHT_DP,
+  MAP_FLAG_ZOOMED_HEIGHT_DP,
   MAX_LABEL_ZOOM,
   TEXT_MAX_WIDTH_EM,
 } from '@/map/labelFit';
@@ -97,6 +100,35 @@ describe('getLabelMinZoom', () => {
     }
     expect(getLabelMinZoom('', 10)).toBe(MAX_LABEL_ZOOM);
     expect(Number.isFinite(getLabelMinZoom('Nauru', 0.0001))).toBe(true);
+  });
+});
+
+describe('the flag size constants', () => {
+  /**
+   * The fit nominal and the drawn size are four independent numbers in one file, and only
+   * this says how they relate. `MAP_FLAG_HEIGHT_DP` is what decides WHICH countries get a
+   * flag; the other three are what one is DRAWN at. Nothing else would notice if the nominal
+   * drifted outside the range of sizes it is meant to stand for - the fit test would go on
+   * agreeing with itself while judging flags against a width the map never uses.
+   */
+  it('keeps the fit nominal inside the ramp it stands for', () => {
+    expect(MAP_FLAG_MIN_HEIGHT_DP).toBeLessThan(MAP_FLAG_MAX_HEIGHT_DP);
+    expect(MAP_FLAG_MAX_HEIGHT_DP).toBeLessThan(MAP_FLAG_ZOOMED_HEIGHT_DP);
+
+    expect(MAP_FLAG_HEIGHT_DP).toBeGreaterThanOrEqual(MAP_FLAG_MIN_HEIGHT_DP);
+    expect(MAP_FLAG_HEIGHT_DP).toBeLessThanOrEqual(MAP_FLAG_ZOOMED_HEIGHT_DP);
+  });
+
+  /**
+   * Deliberately near the LOW end, not the middle - see the comment on `MAP_FLAG_HEIGHT_DP`.
+   * Over-estimating hides flags at low zoom that would have fitted; under-estimating costs
+   * nothing high up, where a country big enough for a 30 dp flag has room for one. Pinned
+   * because "put the nominal in the middle of the ramp" is the plausible-looking change that
+   * would quietly unlabel small countries at world zoom.
+   */
+  it('calibrates the fit test against the small end of the ramp', () => {
+    const midpoint = (MAP_FLAG_MIN_HEIGHT_DP + MAP_FLAG_ZOOMED_HEIGHT_DP) / 2;
+    expect(MAP_FLAG_HEIGHT_DP).toBeLessThan(midpoint);
   });
 });
 

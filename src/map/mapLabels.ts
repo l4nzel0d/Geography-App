@@ -7,6 +7,8 @@ import {
   MAP_FLAG_INTRINSIC_DP,
   MAP_FLAG_MAX_HEIGHT_DP,
   MAP_FLAG_MIN_HEIGHT_DP,
+  MAP_FLAG_ZOOMED_HEIGHT_DP,
+  MAX_LABEL_ZOOM,
 } from './labelFit';
 
 /**
@@ -181,22 +183,29 @@ export const FLAG_ICON_IMAGE = ['get', FLAG_ICON_PROPERTY] as unknown as Express
 /**
  * `icon-size` for the flag layer - how far the 18 px-TALL image is scaled at each zoom.
  *
- * The mirror of the text layer's `text-size` ramp, which runs 11 -> 14 about a nominal 12: this
- * runs **13.5 dp of HEIGHT at world zoom to 18 dp from zoom 6**, about the nominal
- * `MAP_FLAG_HEIGHT_DP` of 15 that the fit test uses. Growing a little with zoom is the same
- * judgement in both cases - small enough that a crowded world view still reads, roomier once
- * there is space for it.
+ * **Three stops, and the middle one is a knee.** 13.5 dp of HEIGHT at world zoom, 18 dp at
+ * zoom 6, and 30 dp at `MAX_LABEL_ZOOM`, which is the explore map's own ceiling. The first
+ * leg is the mirror of the text layer's `text-size` ramp (11 -> 14 about a nominal 12) and is
+ * unchanged, so no flag moved at or below zoom 6. The second leg is the one that makes the
+ * flag behave like a label on the map instead of chrome over it: a flag used to stop growing
+ * at 6 while the map went on to 10, so zooming into a region grew the country around a flag
+ * that stayed exactly where it was.
  *
  * **Height, because width is now per flag.** One scalar `icon-size` multiplies both axes, so
  * anchoring the one axis all 249 images share is the only way a single expression can be right
- * for a 28:11 Qatar and a pennant-shaped Nepal at once. These are exactly the heights the old
- * width-anchored ramp produced at 4:3, so nothing on the map got taller or shorter.
+ * for a 28:11 Qatar and a pennant-shaped Nepal at once.
  *
  * Expressed as a fraction of `MAP_FLAG_INTRINSIC_DP` rather than as bare numbers, because that
  * is the one thing here that could be wrong on a device: if the image arrives at a different
  * pixel ratio than the rasteriser intended, every flag is scaled by the same wrong factor and
- * this is where it gets corrected. At zoom 6 the ratio is exactly 1, so the flag is drawn
- * texel-for-texel from the @3x raster on a 3x screen.
+ * this is where it gets corrected. **At zoom 6 the ratio is exactly 1**, so the flag is drawn
+ * texel-for-texel from the @3x raster on a 3x screen - which is why 6 stays a stop rather than
+ * being smoothed away into one straight line from 0 to 10.
+ *
+ * Above 6 the icon is UPSCALED from that raster, ~1.7x at the top. Accepted deliberately: a
+ * flag is flat colour blocks and tolerates it, and the alternative is re-rendering all 498
+ * PNGs taller for ~0.7 MB of APK. If it ever reads as mushy the lever is the raster tier in
+ * `scripts/build-flag-assets.mjs` plus `MAP_FLAG_INTRINSIC_DP` - **not** turning this down.
  */
 export const FLAG_ICON_SIZE = [
   'interpolate',
@@ -206,6 +215,8 @@ export const FLAG_ICON_SIZE = [
   MAP_FLAG_MIN_HEIGHT_DP / MAP_FLAG_INTRINSIC_DP,
   6,
   MAP_FLAG_MAX_HEIGHT_DP / MAP_FLAG_INTRINSIC_DP,
+  MAX_LABEL_ZOOM,
+  MAP_FLAG_ZOOMED_HEIGHT_DP / MAP_FLAG_INTRINSIC_DP,
 ] as unknown as ExpressionSpecification;
 
 /**

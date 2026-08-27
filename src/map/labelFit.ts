@@ -85,8 +85,15 @@ export const FIT_TOLERANCE = 0.55;
 export const MAX_LABEL_ZOOM = 10;
 
 /**
- * How TALL a flag icon is drawn, in dp - the nominal middle of the layer's `icon-size` ramp,
- * exactly as `LABEL_FONT_SIZE` is the middle of its `text-size` one.
+ * How TALL a flag icon is drawn, in dp, for the purposes of the FIT TEST - a different
+ * number from the size actually drawn, and deliberately near the LOW end of the ramp below
+ * rather than its middle.
+ *
+ * The ramp runs 13.5 dp at world zoom to 30 dp at the map's ceiling, so no single number is
+ * right everywhere and the one worth calibrating against is the small end. Over-estimating
+ * hides flags at low zoom that would have fitted; under-estimating costs nothing at high
+ * zoom, because a country big enough to be worth a 30 dp flag has room for one. That is the
+ * argument `LABEL_FONT_SIZE` makes about its own ramp, reached from the other side.
  *
  * **Height, and that is the whole point.** This used to be a width, because every flag was
  * 4:3 and a width was therefore also a statement about height. The shipped flags now carry
@@ -104,9 +111,19 @@ export const MAX_LABEL_ZOOM = 10;
  */
 export const MAP_FLAG_HEIGHT_DP = 15;
 
-/** The ends of the `icon-size` ramp, in dp of HEIGHT. See `FLAG_ICON_SIZE`. */
+/**
+ * The stops of the `icon-size` ramp, in dp of HEIGHT. See `FLAG_ICON_SIZE`.
+ *
+ * Three, not two, and the middle one is a knee rather than an end: 13.5 dp at world zoom,
+ * 18 dp at zoom 6 - where the icon is drawn texel-for-texel from the @3x raster - and 30 dp
+ * at `MAX_LABEL_ZOOM`. The top stop is what makes a flag read as a label ON the map rather
+ * than as fixed chrome over it: without it the flag is the one thing on screen that does not
+ * change size across the top four zoom levels, which are the ones you are in whenever you
+ * have actually zoomed into somewhere.
+ */
 export const MAP_FLAG_MIN_HEIGHT_DP = 13.5;
 export const MAP_FLAG_MAX_HEIGHT_DP = 18;
+export const MAP_FLAG_ZOOMED_HEIGHT_DP = 30;
 
 /**
  * What MapLibre thinks a flag image is TALL, in dp, before `icon-size` scales it.

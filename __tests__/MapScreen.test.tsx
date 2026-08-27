@@ -18,6 +18,7 @@ import { getWorldFitZoom } from '@/map/cameraFit';
 import { getCountryBounds } from '@/map/countryBounds';
 import { getCountryCameraStop } from '@/map/quizCamera';
 import { DENSITY_RAMP, MASTERY_RAMP, POPULATION_RAMP } from '@/map/choropleth';
+import { MAX_LABEL_ZOOM } from '@/map/labelFit';
 import { MAP_FLAG_IMAGES } from '@/map/mapFlagImages';
 import { FLAG_ICON_PROPERTY, type LabelField } from '@/map/mapLabels';
 import { INITIAL_CENTER, INITIAL_ZOOM } from '@/map/WorldMap';
@@ -737,15 +738,28 @@ describe('map labels', () => {
     expect(layout['icon-size'][0]).toBe('interpolate');
     // And the numbers must be numbers: an undefined constant would make these NaN, which
     // Jest would otherwise wave through as a well-shaped expression.
-    for (const stop of [layout['icon-size'][4], layout['icon-size'][6]]) {
-      expect(Number.isFinite(stop)).toBe(true);
-      expect(stop).toBeGreaterThan(0);
-    }
+    const zooms = [layout['icon-size'][3], layout['icon-size'][5], layout['icon-size'][7]];
+    const sizes = [layout['icon-size'][4], layout['icon-size'][6], layout['icon-size'][8]];
+    for (const stop of [...zooms, ...sizes]) expect(Number.isFinite(stop)).toBe(true);
+    for (const size of sizes) expect(size).toBeGreaterThan(0);
+
+    /*
+      The property the feature actually IS: a flag gets bigger the further you zoom in, all
+      the way to the ceiling. Stated as an ordering rather than only as pinned numbers,
+      because the bug this replaced was not a wrong value - it was a ramp that simply STOPPED
+      at zoom 6 while the map went on to 10, which every value assertion below still passed.
+    */
+    expect(zooms).toEqual([...zooms].sort((a, b) => a - b));
+    expect(new Set(zooms).size).toBe(zooms.length);
+    expect(sizes).toEqual([...sizes].sort((a, b) => a - b));
+    expect(new Set(sizes).size).toBe(sizes.length);
+    expect(zooms[2]).toBe(MAX_LABEL_ZOOM);
 
     /*
       Pinned, not merely finite. The rasters are 18 dp tall and the ramp draws them 13.5 dp
-      tall at world zoom and 18 dp from zoom 6 - so these two are 0.75 and exactly 1, and the
-      1 is what makes a 3x screen draw the @3x file texel-for-texel.
+      tall at world zoom, 18 dp at zoom 6 and 30 dp at the ceiling - so these are 0.75,
+      exactly 1, and 5/3. The 1 is what makes a 3x screen draw the @3x file texel-for-texel,
+      which is why zoom 6 stays a stop; above it the icon is knowingly upscaled.
 
       "Finite and positive" would wave through a wrong `MAP_FLAG_INTRINSIC_DP`, which is
       precisely the constant that exists to be corrected if flags come out the wrong size on
@@ -753,6 +767,7 @@ describe('map labels', () => {
     */
     expect(layout['icon-size'][4]).toBeCloseTo(0.75, 10);
     expect(layout['icon-size'][6]).toBe(1);
+    expect(layout['icon-size'][8]).toBeCloseTo(30 / 18, 10);
   });
 
   it('never gives icon-padding a scalar, which crashes Android outright', async () => {
