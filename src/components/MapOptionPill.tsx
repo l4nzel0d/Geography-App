@@ -27,6 +27,7 @@ export function MapOptionPill({
   testID,
   label,
   active = false,
+  accent = false,
   compact = false,
   expanded,
   accessibilityLabel,
@@ -41,6 +42,16 @@ export function MapOptionPill({
    * one of two languages, so "active" has nothing to mean there.
    */
   active?: boolean;
+  /**
+   * Label in the chrome's accent yellow rather than the muted grey.
+   *
+   * For a pill that has no off state and so can never be `active`: the language pill
+   * always names one of two languages, so muted grey read as disabled beside the search
+   * and quiz buttons it shares a row with, which have always been accent-coloured.
+   * Colour only - the size and padding are untouched, because `chromeWidth.test.ts`
+   * measures that row against a 379 dp budget with only ~24 dp of slack in Russian.
+   */
+  accent?: boolean;
   /**
    * Four dp less padding a side, for a label that is a two-letter code rather than a word.
    *
@@ -61,7 +72,9 @@ export function MapOptionPill({
       accessibilityState={{ expanded }}
       accessibilityLabel={accessibilityLabel}
     >
-      <Text style={[styles.text, active && styles.textActive]}>{label}</Text>
+      <Text style={[styles.text, accent && styles.textAccent, active && styles.textActive]}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -89,6 +102,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     lineHeight: 16,
+  },
+  textAccent: {
+    color: quizColors.accent,
   },
   textActive: {
     color: quizColors.textInverted,

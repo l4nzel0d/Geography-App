@@ -240,10 +240,15 @@ export function MapControls({
             It names the language the app is IN, like every other pill here names its
             own current setting. The toggle it replaced named the language you would
             switch TO - the right convention for a button that acts on one press, and
-            the wrong one for a pill that opens a list. */}
+            the wrong one for a pill that opens a list.
+
+            Its label is `accent` rather than muted, because it is the one pill with no
+            off state to be `active` about: sat between search and quiz, both of which
+            have always been accent-coloured, the muted grey read as disabled. */}
         <MapOptionPill
           testID="toggle-language"
           label={locale.toUpperCase()}
+          accent
           compact
           expanded={openPanel === 'language'}
           accessibilityLabel={t('map.language.a11y', {
