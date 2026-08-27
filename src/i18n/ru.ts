@@ -18,6 +18,10 @@ import type { MessageKey } from './t';
  * which alone would push the top-right row into the left one. `chromeWidth.test.ts` is
  * what stops that regressing; CLAUDE.md records the overlap actually shipping once.
  *
+ * The `map.language.*` names are the exception that proves the rule: they only ever appear
+ * as rows inside a panel, so they are free to be as long as they like. The pill in front of
+ * that panel shows a two-letter code, which is what keeps the right row inside the budget.
+ *
  * **Not spoiling the answer.** `quiz.flag.a11y` and the `locate.*` pre-check strings exist
  * specifically so a screen reader or a find-in-page cannot name the country before it has
  * been guessed. The Russian must keep that property, which is why `locate.ready` says
@@ -65,7 +69,9 @@ export const ru: Record<MessageKey, string> = {
   'map.language.panelTitle': 'Язык',
   'map.language.a11y': 'Язык: {language}. Выберите язык приложения',
   'map.language.en': 'English',
+  'map.language.en.description': 'Показывать приложение на английском',
   'map.language.ru': 'Русский',
+  'map.language.ru.description': 'Показывать приложение на русском',
 
   'map.legend.noData': 'нет данных',
   'map.legend.population.title': 'Людей в стране',

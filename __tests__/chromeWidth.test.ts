@@ -59,8 +59,9 @@ function leftRowWidth(locale: Locale): number {
 /** Search glyph, quiz word, and the two-letter language toggle. */
 function rightRowWidth(locale: Locale): number {
   const quiz = pillWidth(t('quiz.open.label', locale), locale);
-  // The switcher shows the OTHER language's code - always two characters - in a compact
-  // pill. That is what keeps it under ~40 dp instead of ~52.
+  // The language pill shows a two-character code in the compact padding, never the
+  // language's name: "English" and "Русский" are ~47 dp wider than the row has spare. The
+  // full names live in the panel behind it, where nothing competes for width.
   const language = pillWidth('EN', locale, true);
   return SEARCH_BUTTON_DP + GAP + quiz + GAP + language;
 }

@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, type LayoutChangeEvent, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { setLocale } from '@/i18n/locale';
+import { LOCALES } from '@/i18n/localeTypes';
 import { useTranslator } from '@/i18n/useTranslator';
 import { CHOROPLETH_RAMPS, FILL_MODES, POPULATION_RAMP } from '@/map/choropleth';
 import { LABEL_FIELDS, type LabelField } from '@/map/mapLabels';
 import type { FillMode } from '@/map/WorldMap';
 
 import { ChoroplethLegend } from './ChoroplethLegend';
-import { LocaleToggleButton } from './LocaleToggleButton';
 import { MapOptionPanel } from './MapOptionPanel';
 import { MapOptionPill } from './MapOptionPill';
 import { QuizLaunchButton } from './quiz/QuizLaunchButton';
@@ -43,10 +44,10 @@ const SLIDE_DURATION = 800;
 const PANEL_SLIDE_DURATION = 220;
 
 /** Which option panel is open. Only ever one - see the note in the component. */
-type OpenPanel = 'fill' | 'labels' | null;
+type OpenPanel = 'fill' | 'labels' | 'language' | null;
 
 /**
- * The map's chrome: two option pills, the choropleth legend, and the two launch buttons.
+ * The map's chrome: three option pills, the choropleth legend, and the two launch buttons.
  *
  * ## Why both settings are pills rather than always-visible controls
  *
@@ -70,9 +71,24 @@ type OpenPanel = 'fill' | 'labels' | null;
  * - **Neither row may grow downward.** The portrait Greenland tap in `tap-country.yaml`
  *   is at 19%,13% - about 74,110 dp - a little below the left row, and the legend already
  *   occupies the space under it. The nearest tap to the right row is Russia at 81%,20%.
- * - **Both panels are closed by default**, which is what keeps every existing Maestro
+ * - **Every panel is closed by default**, which is what keeps every existing Maestro
  *   percentage tap valid: they only cover the map while open.
- * - Only one panel is open at a time, so the left column never has two menus in it.
+ * - Only one panel is open at a time, so neither column ever has two menus in it.
+ *
+ * ## The language switcher is the same shape, on the other side
+ *
+ * It used to be a bare two-state toggle showing the language you would switch *to*,
+ * which made it the odd control out: the two settings beside it name their current
+ * choice and open a list of the alternatives. It is now a pill and a panel like the
+ * others, naming the language the app is in, and its panel opens downward on the
+ * **right**, under the pill it belongs to.
+ *
+ * What did not change is its width. The pill still says `EN`/`RU` rather than
+ * "English"/"Русский" and still uses the compact padding: `chromeWidth.test.ts`
+ * measures the Russian chrome at ~355 of the 379 dp a 411 dp phone has, and spelling
+ * the language out costs about twice the slack that leaves. A two-letter code in the
+ * pill with the full name one tap away in the panel is what buys the pattern for
+ * nothing.
  *
  * ## The rule that governs all of it
  *
@@ -107,6 +123,16 @@ export function MapControls({
   const right = insets.right + 16;
   const showLegend = fillMode !== 'flat';
 
+  /**
+   * The active language, read off the translator rather than subscribed to separately.
+   *
+   * `useTranslator` already holds the only subscription this component needs, and its
+   * identity changes exactly when the language does - so `t.locale` is a value the
+   * React compiler can track, which a bare `getLocale()` call in the body would not be.
+   * Same trap as the `t('...')` calls themselves; see `useTranslator.ts`.
+   */
+  const locale = t.locale;
+
   const currentFill = FILL_MODES.find((option) => option.mode === fillMode) ?? FILL_MODES[0];
   const currentLabel =
     LABEL_FIELDS.find((option) => option.field === labelField) ?? LABEL_FIELDS[0];
@@ -127,6 +153,7 @@ export function MapControls({
   const legendSlide = useRef(new Animated.Value(showLegend ? 1 : 0)).current;
   const fillSlide = useRef(new Animated.Value(0)).current;
   const labelSlide = useRef(new Animated.Value(0)).current;
+  const languageSlide = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(legendSlide, {
@@ -151,6 +178,14 @@ export function MapControls({
       useNativeDriver: false,
     }).start();
   }, [openPanel, labelSlide]);
+
+  useEffect(() => {
+    Animated.timing(languageSlide, {
+      toValue: openPanel === 'language' ? 1 : 0,
+      duration: PANEL_SLIDE_DURATION,
+      useNativeDriver: false,
+    }).start();
+  }, [openPanel, languageSlide]);
 
   const onPillLayout = (event: LayoutChangeEvent) =>
     setPillHeight(event.nativeEvent.layout.height);
@@ -196,11 +231,26 @@ export function MapControls({
       <View style={[styles.anchor, styles.row, { top, right }]}>
         <SearchLaunchButton />
         <QuizLaunchButton />
-        {/* The language toggle joins this row rather than the left one, which is already
+        {/* The language pill joins this row rather than the left one, which is already
             the tighter of the two - both its pills carry a word that changes with the
             selection. `chromeWidth.test.ts` measures both rows in both languages against
-            the 379 dp budget, and Russian clears it by ~24 dp. */}
-        <LocaleToggleButton />
+            the 379 dp budget, and Russian clears it by ~24 dp, which is why this one
+            stays a compact two-letter code however many languages its panel lists.
+
+            It names the language the app is IN, like every other pill here names its
+            own current setting. The toggle it replaced named the language you would
+            switch TO - the right convention for a button that acts on one press, and
+            the wrong one for a pill that opens a list. */}
+        <MapOptionPill
+          testID="toggle-language"
+          label={locale.toUpperCase()}
+          compact
+          expanded={openPanel === 'language'}
+          accessibilityLabel={t('map.language.a11y', {
+            language: t(`map.language.${locale}`),
+          })}
+          onPress={() => toggle('language')}
+        />
       </View>
 
       {/* Both panels share the left column with the legend and cover it while open.
@@ -271,6 +321,43 @@ export function MapControls({
         />
       </Animated.View>
 
+      {/* The one panel that opens on the right, because that is where its pill is. It
+          animates `right` rather than `left` for exactly the reason the others animate
+          `left`: a layout property driven on the JS thread is what supplies the
+          re-layout that makes a view over the MapLibre surface paint at all. */}
+      <Animated.View
+        style={[
+          styles.anchor,
+          styles.anchorRight,
+          styles.panel,
+          {
+            top: belowPills,
+            right: languageSlide.interpolate({
+              inputRange: [0, 1],
+              outputRange: [OFFSCREEN_PANEL, right],
+            }),
+            opacity: languageSlide,
+          },
+        ]}
+      >
+        <MapOptionPanel
+          testID="language-panel"
+          optionTestIdPrefix="language"
+          title={t('map.language.panelTitle')}
+          options={LOCALES.map((option) => ({
+            id: option,
+            label: t(`map.language.${option}`),
+            description: t(`map.language.${option}.description`),
+          }))}
+          selected={locale}
+          visible={openPanel === 'language'}
+          onChange={(next) => {
+            setLocale(next);
+            setOpenPanel(null);
+          }}
+        />
+      </Animated.View>
+
       <Animated.View
         style={[
           styles.anchor,
@@ -301,6 +388,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  // The right-hand column's panel hangs off the right edge, so its card grows leftward
+  // out of the pill it belongs to rather than off the side of the screen.
+  anchorRight: {
+    alignItems: 'flex-end',
   },
   // Above the legend, which shares the left column.
   panel: {

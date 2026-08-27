@@ -26,15 +26,28 @@ import { quizColors, quizRadii } from './palette';
 export function MapOptionPill({
   testID,
   label,
-  active,
+  active = false,
+  compact = false,
   expanded,
   accessibilityLabel,
   onPress,
 }: {
   testID: string;
   label: string;
-  /** Filled rather than outlined, to show the setting is doing something. */
-  active: boolean;
+  /**
+   * Filled rather than outlined, to show the setting is doing something.
+   *
+   * Optional because not every setting has an off state: the language pill always shows
+   * one of two languages, so "active" has nothing to mean there.
+   */
+  active?: boolean;
+  /**
+   * Four dp less padding a side, for a label that is a two-letter code rather than a word.
+   *
+   * The language pill needs it: `chromeWidth.test.ts` measures the Russian chrome at ~355
+   * of the 379 dp available at 411 dp, and those eight dp are part of what keeps it there.
+   */
+  compact?: boolean;
   expanded: boolean;
   accessibilityLabel: string;
   onPress: () => void;
@@ -43,7 +56,7 @@ export function MapOptionPill({
     <Pressable
       testID={testID}
       onPress={onPress}
-      style={[styles.pill, active && styles.pillActive]}
+      style={[styles.pill, compact && styles.pillCompact, active && styles.pillActive]}
       accessibilityRole="button"
       accessibilityState={{ expanded }}
       accessibilityLabel={accessibilityLabel}
@@ -63,6 +76,9 @@ const styles = StyleSheet.create({
     backgroundColor: quizColors.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: quizColors.border,
+  },
+  pillCompact: {
+    paddingHorizontal: 10,
   },
   pillActive: {
     backgroundColor: quizColors.text,

@@ -58,7 +58,9 @@ export const en = {
   'map.language.panelTitle': 'Language',
   'map.language.a11y': 'Language: {language}. Choose the app language',
   'map.language.en': 'English',
+  'map.language.en.description': 'Show the app in English',
   'map.language.ru': 'Русский',
+  'map.language.ru.description': 'Show the app in Russian',
 
   'map.legend.noData': 'no data',
   'map.legend.population.title': 'People per country',

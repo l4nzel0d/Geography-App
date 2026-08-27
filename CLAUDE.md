@@ -18,7 +18,7 @@ in the APK and referenced as `asset://` — see *Map labels*.
 
 ## Status
 
-Everything below is implemented and unit-tested (1131 Jest tests across 48 suites, typecheck clean).
+Everything below is implemented and unit-tested (1132 Jest tests across 48 suites, typecheck clean).
 Verification state, which is what actually varies:
 
 | | state |
@@ -85,7 +85,7 @@ src/
               placeNames.ts  ru/  labelPoints.json  labelGeoJson.ts  worldGeoJson.ts  types.ts
   components/ CountryInfoSheet  ConfirmDialog  infoSheetLayout  palette  formatters
               MapControls  MapOptionPill  MapOptionPanel  ChoroplethLegend
-              CountryFlag(.web)  flagSizes  LocaleToggleButton
+              CountryFlag(.web)  flagSizes
               flagAssets / flagThumbs / flagAspects .ts (all GENERATED)
               quiz/  search/
   quiz/       quizConfig  quizCountries  quizBuilder  normalizeText  editDistance
@@ -559,16 +559,30 @@ were never covered while they were SVGs either. See *A release build can package
 
 ### The chrome
 
-Both appearance settings (fill mode, labels) are **pills opening an always-mounted panel**, sharing the
-top-left row; search and quiz share one row top-right. The fill mode was a three-segment control until
-labels landed and the two rows **overlapped on screen** at 411 dp.
+Every setting on the map is a **pill opening an always-mounted panel**: fill mode and labels share the
+top-left row, and the language pill sits in the top-right one beside search and quiz. The fill mode was
+a three-segment control until labels landed and the two rows **overlapped on screen** at 411 dp.
+
+**The language switcher was the odd one out and is not any more.** It was a bare toggle naming the
+language you would switch *to*, which is the right convention for a button that acts on one press and
+the wrong one for a control sitting between two pills that name their own current setting. It is now a
+third `MapOptionPill` + `MapOptionPanel`, naming the language the app is **in**, and it is the one panel
+that opens on the **right** — animating `right` rather than `left`, for the same reason the others
+animate `left`. `LocaleToggleButton` is gone; `MapControls` reads the active locale off `t.locale`
+rather than taking a second subscription, since `useTranslator`'s identity already changes exactly when
+the language does.
+
+**The pill still says `EN`/`RU`, and that is a width decision, not a style one** — see the budget below.
+"English"/"Русский" in the pill costs about twice the slack the row has. The full names live in the
+panel, where nothing competes for width, which is exactly what makes the pattern affordable here.
 
 - Choosing a fill mode is **two taps**, which is why `choropleth-modes.yaml` opens `toggle-fill-mode`
   before every `mode-*` tap, and why `MapScreen.test.tsx`'s `selectMode` helper does the same — and
   must `await` both, because RNTL v14's `fireEvent` is async and the rows are hidden until the opening
   press re-renders.
-- **Only one panel is open at a time**, and **both are closed by default**, which is what kept every
-  existing Maestro flow valid — no percentage tap moved.
+- **Only one panel is open at a time**, and **all three are closed by default**, which is what kept
+  every existing Maestro flow valid — no percentage tap moved. The slot is shared across the two
+  columns, so opening the language panel closes a fill or label one on the other side of the screen.
 - The panels are drawn over the legend while open, deliberately: parking the legend below a panel's
   full height would push it into the Greenland tap permanently.
 - Top-right is *not* free in both orientations: with the info card open in landscape it docks right
@@ -583,9 +597,11 @@ Width budget, measured by the project's own estimator against the 379 dp availab
 | English | 186 | 147 | 333 |
 | Russian | 204 | 151 | **355** |
 
-24 dp of slack in Russian, and only because the language toggle is a **compact two-letter pill** and
-the quiz button says **`Тест`, not `Викторина`** — which alone would overflow. `chromeWidth.test.ts`
-sweeps every fill mode × label field × locale against the budget.
+24 dp of slack in Russian, and only because the language pill is a **compact two-letter code** —
+`MapOptionPill`'s `compact` prop, 10 dp of horizontal padding rather than 14 — and the quiz button says
+**`Тест`, not `Викторина`**, which alone would overflow. `chromeWidth.test.ts` sweeps every fill mode ×
+label field × locale against the budget. Nothing in the *panels* is measured, and nothing needs to be:
+a panel is a free-standing card that grows to its own content.
 
 ## The info card
 

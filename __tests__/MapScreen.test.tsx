@@ -26,6 +26,7 @@ import { selectCountry } from '@/search/pendingCountry';
 import { worldGeoJson } from '@/data/worldGeoJson';
 import { publishMastery, recordResult, __resetMasteryStore } from '@/mastery/masteryStore';
 import { setLocale, __resetLocale } from '@/i18n/locale';
+import type { Locale } from '@/i18n/localeTypes';
 
 /**
  * `_layout.tsx` supplies the SafeAreaProvider in the real app; these tests render
@@ -79,6 +80,12 @@ const selectMode = async (mode: 'flat' | 'population' | 'density' | 'mastery') =
 const selectLabelField = async (field: LabelField) => {
   await fireEvent.press(screen.getByTestId('toggle-label-field'));
   await fireEvent.press(screen.getByTestId(`label-field-${field}`));
+};
+
+/** And for the language picker, which was a bare toggle until it became a third pill. */
+const selectLanguage = async (locale: Locale) => {
+  await fireEvent.press(screen.getByTestId('toggle-language'));
+  await fireEvent.press(screen.getByTestId(`language-${locale}`));
 };
 
 const labelLayer = () => screen.getByTestId('layer-country-label');
@@ -259,14 +266,33 @@ describe('MapScreen', () => {
       expect(screen.getByTestId('toggle-fill-mode')).toHaveTextContent('Flat');
       expect(screen.getByTestId('toggle-label-field')).toHaveTextContent('Labels');
       expect(screen.getByTestId('open-quiz')).toHaveTextContent('Quiz');
-      expect(screen.getByTestId('toggle-language')).toHaveTextContent('RU');
+      // The language pill names the language the app is IN, like every pill beside it
+      // names its own current setting. The toggle it replaced named the other one.
+      expect(screen.getByTestId('toggle-language')).toHaveTextContent('EN');
 
       await switchLanguage();
 
       expect(screen.getByTestId('toggle-fill-mode')).toHaveTextContent('Обычная');
       expect(screen.getByTestId('toggle-label-field')).toHaveTextContent('Метки');
       expect(screen.getByTestId('open-quiz')).toHaveTextContent('Тест');
-      expect(screen.getByTestId('toggle-language')).toHaveTextContent('EN');
+      expect(screen.getByTestId('toggle-language')).toHaveTextContent('RU');
+    });
+
+    /**
+     * The pill and its panel, driven the way a person drives them.
+     *
+     * Every other assertion here calls `setLocale` directly, which proves the app reacts
+     * to a language change but says nothing about the control that causes one. Two
+     * presses, exactly like `selectMode` - the panel is always mounted and merely parked,
+     * so reaching a row without opening it would prove nothing about the pill.
+     */
+    it('switches language from the pill and its panel', async () => {
+      await render();
+
+      await selectLanguage('ru');
+
+      expect(screen.getByTestId('toggle-language')).toHaveTextContent('RU');
+      expect(screen.getByTestId('toggle-fill-mode')).toHaveTextContent('Обычная');
     });
 
     /** The panels behind the pills, which are always mounted and merely parked. */
@@ -285,6 +311,12 @@ describe('MapScreen', () => {
         .toHaveTextContent(/Подписывать страны/);
       expect(screen.getByTestId('label-field-panel', { includeHiddenElements: true }))
         .toHaveTextContent(/Столица/);
+      // The language panel's title translates; its rows deliberately do not, because a
+      // language is named in its own language in every locale.
+      expect(screen.getByTestId('language-panel', { includeHiddenElements: true }))
+        .toHaveTextContent(/Язык/);
+      expect(screen.getByTestId('language-panel', { includeHiddenElements: true }))
+        .toHaveTextContent(/Русский/);
     });
 
     it('renames an open info sheet rather than leaving it in the old language', async () => {
@@ -810,6 +842,18 @@ describe('map labels', () => {
     expect(panelShown()).toBe(false);
     expect(
       screen.getByTestId('fill-mode-panel', { includeHiddenElements: true }).props
+        .accessibilityElementsHidden,
+    ).toBe(false);
+
+    // The language panel shares the slot despite opening from the other side of the
+    // screen, which is the case a `left`/`right` split could plausibly have missed.
+    await fireEvent.press(screen.getByTestId('toggle-language'));
+    expect(
+      screen.getByTestId('fill-mode-panel', { includeHiddenElements: true }).props
+        .accessibilityElementsHidden,
+    ).toBe(true);
+    expect(
+      screen.getByTestId('language-panel', { includeHiddenElements: true }).props
         .accessibilityElementsHidden,
     ).toBe(false);
   });
