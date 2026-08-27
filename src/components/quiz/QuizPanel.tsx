@@ -31,6 +31,21 @@ type QuizPanelProps = {
   total: number;
   onEnd: () => void;
   landscape: boolean;
+  /**
+   * Space under the Check button, in dp - the safe-area inset plus the panel's own gutter.
+   *
+   * **It has to be padding on THIS view, not on the slot that holds it.** The slot has no
+   * background of its own, so padding there takes its space out of the panel's surface: the
+   * button ends up flush against the panel's bottom edge with a strip of ocean below it,
+   * which is the opposite of what the space was for. Both quiz footers - `quiz/index.tsx`
+   * and `results.tsx` - put `insets.bottom + N` on the surface itself for this reason, and
+   * this is the same shape.
+   *
+   * A prop rather than a constant because only the screen knows the inset, and it drops to
+   * a bare gutter while the keyboard is up - the screen has already reserved the IME's
+   * height there, and adding the navigation bar's inset on top would leave a gap.
+   */
+  bottomInset: number;
 };
 
 /**
@@ -58,6 +73,7 @@ export function QuizPanel({
   total,
   onEnd,
   landscape,
+  bottomInset,
 }: QuizPanelProps) {
   const t = useTranslator();
 
@@ -123,7 +139,11 @@ export function QuizPanel({
   return (
     <View
       testID="quiz-panel"
-      style={[styles.panel, landscape ? styles.panelLandscape : styles.panelPortrait]}
+      style={[
+        styles.panel,
+        landscape ? styles.panelLandscape : styles.panelPortrait,
+        { paddingBottom: bottomInset },
+      ]}
     >
       <View style={styles.header}>
         <Text testID="quiz-progress" style={styles.progress}>
@@ -194,16 +214,8 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderColor: quizColors.border,
   },
-  panelPortrait: {
-    borderTopLeftRadius: quizRadii.panel,
-    borderTopRightRadius: quizRadii.panel,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  panelLandscape: {
-    borderTopLeftRadius: quizRadii.panel,
-    borderBottomLeftRadius: quizRadii.panel,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-  },
+  panelPortrait: { borderTopWidth: StyleSheet.hairlineWidth },
+  panelLandscape: { borderLeftWidth: StyleSheet.hairlineWidth },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -44,6 +44,15 @@ import { useTranslator } from '@/i18n/useTranslator';
 const QUIZ_MAX_ZOOM = 10;
 
 /**
+ * The panel's own breathing room under the Check button, in dp.
+ *
+ * Matches the `paddingTop` both panels already carry, so the surface is inset by the same
+ * amount top and bottom, and matches what the setup and results footers spend on the same
+ * job (16 there, against their roomier 20 dp gutters).
+ */
+const PANEL_GUTTER = 12;
+
+/**
  * Every camera move is a `fly` whose duration is computed from how far it travels.
  *
  * Both halves of that replaced a flat 900 ms `ease`, and they are one change rather than
@@ -88,6 +97,21 @@ export default function QuizPlayScreen() {
   // memoises - which silently strands the panel in its portrait layout. See quizScreenBox.
   const screen = quizScreenBox(useWindowDimensions());
   const keyboardHeight = useKeyboardHeight();
+
+  /**
+   * Space under the panel's Check button - handed to the panel, which pads its own surface.
+   *
+   * It used to be `paddingBottom` on the slot below, which has no background of its own, so
+   * the space came out of the panel's surface instead of sitting inside it: the button was
+   * flush against the panel's bottom edge with a strip of ocean under it. The two quiz
+   * footers - `quiz/index.tsx` and `results.tsx` - have always put `insets.bottom + N` on
+   * the surface itself, and this now matches them.
+   *
+   * Only the gutter while the keyboard is up: the screen's own `paddingBottom` above has
+   * already reserved the IME's height AND the navigation bar behind it, so counting the
+   * inset a second time here would open a gap over the keyboard.
+   */
+  const panelBottomInset = PANEL_GUTTER + (keyboardHeight > 0 ? 0 : insets.bottom);
 
   // Params are only read once: re-parsing on every render would hand `buildQuiz` a new
   // seed the moment expo-router hands back a differently-shaped params object.
@@ -510,7 +534,6 @@ export default function QuizPlayScreen() {
           layout.landscape
             ? { width: layout.panelWidth ?? undefined }
             : { height: layout.panelHeight ?? undefined },
-          { paddingBottom: keyboardHeight > 0 ? 0 : insets.bottom + 12 },
         ]}
       >
         {locate ? (
@@ -525,6 +548,7 @@ export default function QuizPlayScreen() {
             total={questions.length}
             onEnd={end}
             landscape={layout.landscape}
+            bottomInset={panelBottomInset}
           />
         ) : (
           <QuizPanel
@@ -544,6 +568,7 @@ export default function QuizPlayScreen() {
             total={questions.length}
             onEnd={end}
             landscape={layout.landscape}
+            bottomInset={panelBottomInset}
           />
         )}
       </View>

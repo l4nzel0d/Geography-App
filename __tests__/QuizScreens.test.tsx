@@ -680,6 +680,26 @@ describe('the play screen', () => {
     expect(screen.getByTestId('quiz-progress')).toHaveTextContent(/1 \/ 2/);
   });
 
+  /**
+   * The Check button sits at the foot of the panel, so the safe-area inset under it has to
+   * be padding on the panel's OWN surface. It used to be padding on the slot around it,
+   * which paints nothing - so the space came out from under the panel instead of sitting
+   * inside it, and the button ended up flush against the panel's bottom edge with a strip
+   * of the screen's own background below.
+   *
+   * Asserted together, because either half alone is satisfied by the arrangement this
+   * replaced: the padding existed, it was simply on a view with no background.
+   */
+  it('keeps the Check button clear of the panel edge, on the panel itself', async () => {
+    soloRound();
+    await render(<QuizPlayScreen />);
+
+    const panel = StyleSheet.flatten(screen.getByTestId('quiz-panel').props.style);
+
+    expect(panel.backgroundColor).toBeTruthy();
+    expect(panel.paddingBottom).toBeGreaterThan(METRICS.insets.bottom);
+  });
+
   it('highlights the country being asked, in the question colour', async () => {
     const questions = soloRound();
     await render(<QuizPlayScreen />);

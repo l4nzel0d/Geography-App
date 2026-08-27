@@ -29,6 +29,8 @@ type LocatePanelProps = {
   total: number;
   onEnd: () => void;
   landscape: boolean;
+  /** Space under the Check button. See the same prop on `QuizPanel`. */
+  bottomInset: number;
 };
 
 /**
@@ -55,6 +57,7 @@ export function LocatePanel({
   total,
   onEnd,
   landscape,
+  bottomInset,
 }: LocatePanelProps) {
   const t = useTranslator();
 
@@ -78,7 +81,11 @@ export function LocatePanel({
   return (
     <View
       testID="quiz-panel"
-      style={[styles.panel, landscape ? styles.panelLandscape : styles.panelPortrait]}
+      style={[
+        styles.panel,
+        landscape ? styles.panelLandscape : styles.panelPortrait,
+        { paddingBottom: bottomInset },
+      ]}
     >
       <View style={styles.header}>
         <Text testID="quiz-progress" style={styles.progress}>
@@ -169,16 +176,8 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderColor: quizColors.border,
   },
-  panelPortrait: {
-    borderTopLeftRadius: quizRadii.panel,
-    borderTopRightRadius: quizRadii.panel,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  panelLandscape: {
-    borderTopLeftRadius: quizRadii.panel,
-    borderBottomLeftRadius: quizRadii.panel,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-  },
+  panelPortrait: { borderTopWidth: StyleSheet.hairlineWidth },
+  panelLandscape: { borderLeftWidth: StyleSheet.hairlineWidth },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
