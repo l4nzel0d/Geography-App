@@ -25,6 +25,8 @@ import {
   formatPopulation,
 } from './formatters';
 import { CountryFlag } from './CountryFlag';
+import { FlagLightbox } from './FlagLightbox';
+import { flagLetters } from './flagEmoji';
 import { getInfoSheetLayout, PORTRAIT_MAX_HEIGHT_FRACTION } from './infoSheetLayout';
 import { dismissDrag, dragProgress, shouldCaptureDrag, shouldDismiss } from './sheetDismiss';
 import { useTranslator } from '@/i18n/useTranslator';
@@ -95,6 +97,13 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
   // screen readers afterwards.
   const [visibleFacts, setVisibleFacts] = useState(facts);
 
+  /**
+   * Is the flag showing full size?
+   *
+   * Closed again by the effect below, on every change of selection - see the note there.
+   */
+  const [flagOpen, setFlagOpen] = useState(false);
+
   // Measured so the card slides exactly its own size off-screen along whichever axis
   // it travels. `maxHeight: 55%` is 429 dp on a 780 dp-tall phone, so any fixed guess
   // risks leaving a sliver of card on screen at the moment it unmounts.
@@ -108,6 +117,13 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
 
   useEffect(() => {
     if (facts) setVisibleFacts(facts);
+
+    // The enlarged flag belongs to the country that was selected when it was opened, so a
+    // change of selection closes it. That covers both halves of the same hazard: picking a
+    // different country while the flag is up, and clearing the selection - on the web
+    // Escape reaches `useDismissKey` in `MapScreen`, and without this the flag would sit
+    // there through the card's whole close animation before going with it.
+    setFlagOpen(false);
 
     const animation = Animated.timing(slide, {
       toValue: facts ? 1 : 0,
@@ -230,7 +246,29 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
       />
 
       <View style={[styles.header, desktop && styles.headerDesktop]}>
-        <CountryFlag flag={visibleFacts.flag} />
+        {/*
+          Tap the flag to see it full size. A tap is safe inside the card's PanResponder:
+          `shouldCaptureDrag` wants 8 dp of movement along the dismiss axis before it
+          claims anything, which is why the ✕ beside it already works.
+
+          Inert for a record with no flag at all - BES alone, where `flagLetters` returns
+          null and `CountryFlag` draws the white-flag glyph. There is nothing to enlarge,
+          so there is no control either, rather than a button that opens an empty frame.
+        */}
+        {flagLetters(visibleFacts.flag) ? (
+          <Pressable
+            testID="open-flag-lightbox"
+            onPress={() => setFlagOpen(true)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={t('info.flag.open')}
+            style={styles.flagButton}
+          >
+            <CountryFlag flag={visibleFacts.flag} />
+          </Pressable>
+        ) : (
+          <CountryFlag flag={visibleFacts.flag} />
+        )}
         <View style={styles.headerText}>
           <Text testID="country-name" style={[styles.name, desktop && styles.nameDesktop]}>
             {visibleFacts.name}
@@ -285,6 +323,18 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
         />
         <Fact testID="fact-area" label={t('info.fact.area')} value={formatArea(visibleFacts.area)} />
       </ScrollView>
+
+      {/*
+        Where this sits in the tree is irrelevant - a `Modal` is its own Android window and
+        a portal on the web, so it is not laid out inside the card and the card's
+        `pointerEvents` while sliding out does not reach it. See `ConfirmDialog`.
+      */}
+      <FlagLightbox
+        visible={flagOpen}
+        flag={visibleFacts.flag}
+        name={visibleFacts.name}
+        onDismiss={() => setFlagOpen(false)}
+      />
     </Animated.View>
   );
 }
@@ -380,6 +430,9 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerText: { flex: 1 },
+  // `cursor` is a real ViewStyle property in RN 0.86 and a no-op on native; it is what
+  // tells a desktop browser the flag is a control rather than decoration.
+  flagButton: { cursor: 'pointer' },
   name: { color: '#f6f7f2', fontSize: 22, fontWeight: '700' },
   official: { color: '#8fa9bd', fontSize: 13, marginTop: 2 },
   close: { padding: 4 },

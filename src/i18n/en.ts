@@ -70,6 +70,9 @@ export const en = {
 
   // -------------------------------------------------------------- info sheet
   'info.close': 'Close country details',
+  'info.flag.open': 'Show the flag full size',
+  'info.flag.close': 'Close the enlarged flag',
+  'info.flag.large': 'Flag of {name}',
   'info.fact.population': 'Population',
   'info.fact.capital': 'Capital',
   'info.fact.area': 'Area',

@@ -44,6 +44,31 @@ appId: com.boris.geographyapp
 - assertVisible: 'Nuuk'
 - assertNotVisible: 'Moscow'
 
+# Tap the flag to see it full size, over a dimmed screen.
+#
+# Worth a flow rather than leaving it to Jest: this is a `Modal` composited over a live
+# MapLibre surface, and "lays out correctly, paints nothing" over that surface is the most
+# expensive bug in the project. Unlike the map labels these are ordinary RN views, so
+# Maestro really can see them.
+- assertNotVisible:
+    id: 'flag-lightbox-frame'
+- tapOn:
+    id: 'open-flag-lightbox'
+- assertVisible:
+    id: 'flag-lightbox-frame'
+
+# Tap the scrim by POINT, not by id: Maestro taps an element's centre, and the scrim's
+# centre is covered by the flag. Greenland's flag is 2:1, so at this width it occupies
+# roughly the middle fifth of the screen and 12% is well clear above it.
+- tapOn:
+    point: '50%,12%'
+- assertNotVisible:
+    id: 'flag-lightbox-frame'
+# Only the flag closed. The card underneath is untouched.
+- assertVisible:
+    id: 'country-info-sheet'
+- assertVisible: 'Nuuk'
+
 # Explicit close.
 - tapOn:
     id: 'close-info-sheet'

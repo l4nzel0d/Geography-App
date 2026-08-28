@@ -81,6 +81,9 @@ export const ru: Record<MessageKey, string> = {
 
   // -------------------------------------------------------------- info sheet
   'info.close': 'Закрыть сведения о стране',
+  'info.flag.open': 'Показать флаг во весь экран',
+  'info.flag.close': 'Закрыть увеличенный флаг',
+  'info.flag.large': 'Флаг страны {name}',
   'info.fact.population': 'Население',
   'info.fact.capital': 'Столица',
   'info.fact.area': 'Площадь',

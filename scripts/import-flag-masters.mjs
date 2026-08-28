@@ -77,13 +77,50 @@ const MASTER_QUALITY = 82;
 /**
  * Flattened onto white before encoding.
  *
- * WebP could carry the alpha, but nothing downstream wants it: the map rasters composite
- * onto white anyway (a dark border drawn around empty space reads as a broken image), and
- * a transparent Nepal in the quiz's frame would show the panel's navy through the pennant
- * rather than a flag. The pack's own JPEGs are already opaque white; this only matters for
- * the SVG sources.
+ * WebP could carry the alpha, but almost nothing downstream wants it: the map rasters
+ * composite onto white anyway - a dark border drawn around empty space reads as a broken
+ * image - and every flag but one fills its own box, so there is nothing for an alpha
+ * channel to say. The pack's own JPEGs are already opaque white; this only matters for the
+ * SVG sources.
+ *
+ * `NON_RECTANGULAR` is the exception, and the white is keyed back out again after this.
  */
 const BACKGROUND = '#ffffff';
+
+/**
+ * Flags that are not rectangles, whose background is therefore not part of the picture.
+ *
+ * **Nepal is the only one**, and it is the only one there can be: it is the only national
+ * flag on Earth that is not a quadrilateral. Its master is a JPEG out of the pack, so the
+ * empty area beside the pennant arrives as baked white pixels rather than as absence -
+ * which drew a white card behind the pennant everywhere the flag appears large.
+ *
+ * This used to be argued the other way round, on the grounds that navy showing through the
+ * pennant in the quiz's frame is not a flag. That was wrong, and the way to see it is to
+ * look at the two side by side: the plaque behind is a surface the flag sits ON, exactly as
+ * the info card and the search row are, and a pennant reading as a pennant against it is
+ * the shape the country actually flies. The white card was the picture claiming a shape the
+ * flag does not have - the same mistake, one level down, that 4:3-normalised SVGs made
+ * across the whole set.
+ *
+ * The map icons are unaffected: `build-flag-assets.mjs` flattens onto white before it
+ * composites the border, which its own comment already called belt and braces for a source
+ * that stops being flattened. This is that source.
+ */
+const NON_RECTANGULAR = new Set(['np']);
+
+/**
+ * A channel value at or above which a pixel counts as background, and the level below
+ * which a pixel on the cut edge is kept.
+ *
+ * 200 rather than something nearer 255 because the source is a JPEG: the ringing along the
+ * pennant's border runs a good way down from white, and anything left behind is a pale
+ * fringe against a dark plaque. The number is not delicate - the fill clears the same
+ * 41.8% of the image anywhere between 200 and 236, because what stops it is the flag's own
+ * navy border rather than the threshold. The crimson's lightest channel is far below either.
+ */
+const KEY_LEVEL = 200;
+const KEY_EDGE_LEVEL = 120;
 
 /** Not countries. The pack ships flags for unions, nations and, for some reason, pirates. */
 const NOT_A_COUNTRY = new Set([
@@ -220,16 +257,135 @@ function rasterise(svg) {
   return new Resvg(svg, { fitTo: { mode, value: MASTER_LONG_EDGE } }).render().asPng();
 }
 
-export async function importFlagMasters() {
-  const codes = requiredCodes();
+/**
+ * The white around a non-rectangular flag, turned back into absence.
+ *
+ * A flood fill inward from every edge pixel, through anything at or above `KEY_LEVEL`.
+ * **The fill is what makes this safe**, rather than a threshold over the whole image: a
+ * plain "make white transparent" pass would punch out the moon and the sun as well, and
+ * would destroy Japan, Finland and Nigeria if this ever ran on them. Those emblems are
+ * enclosed by the flag's own crimson, so no path from the edge reaches them.
+ *
+ * Then one erosion pass, because the source is a JPEG and its ringing leaves pixels along
+ * the pennant's border that are lighter than the border but darker than `KEY_LEVEL`. They
+ * survive the fill and read as a pale outline against a dark plaque; dropping the ones
+ * lighter than `KEY_EDGE_LEVEL` that touch cleared ground costs half a pixel of a border
+ * drawn at 1024 px and removes the fringe exactly.
+ */
+function keyOutBackground(rgb, width, height) {
+  const alpha = new Uint8Array(width * height).fill(255);
+  const background = (i) =>
+    rgb[i * 3] >= KEY_LEVEL && rgb[i * 3 + 1] >= KEY_LEVEL && rgb[i * 3 + 2] >= KEY_LEVEL;
+
+  // Seeded from all four edges rather than one corner: a flag whose empty area touches the
+  // frame in two disjoint places - Nepal's two notches do - would otherwise keep the one
+  // that happened not to hold the seed.
+  const stack = [];
+  for (let x = 0; x < width; x++) stack.push(x, (height - 1) * width + x);
+  for (let y = 0; y < height; y++) stack.push(y * width, y * width + width - 1);
+
+  while (stack.length) {
+    const i = stack.pop();
+    if (alpha[i] === 0 || !background(i)) continue;
+    alpha[i] = 0;
+
+    const x = i % width;
+    const y = (i / width) | 0;
+    if (x > 0) stack.push(i - 1);
+    if (x < width - 1) stack.push(i + 1);
+    if (y > 0) stack.push(i - width);
+    if (y < height - 1) stack.push(i + width);
+  }
+
+  // Read from `alpha` and written to a copy, so the erosion is one pass over the original
+  // edge rather than a fill that eats its way inward one pixel at a time.
+  const eroded = Uint8Array.from(alpha);
+  for (let i = 0; i < width * height; i++) {
+    if (alpha[i] === 0) continue;
+
+    const x = i % width;
+    const y = (i / width) | 0;
+    const touchesCleared =
+      (x > 0 && alpha[i - 1] === 0) ||
+      (x < width - 1 && alpha[i + 1] === 0) ||
+      (y > 0 && alpha[i - width] === 0) ||
+      (y < height - 1 && alpha[i + width] === 0);
+
+    const lightest = Math.min(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
+    if (touchesCleared && lightest > KEY_EDGE_LEVEL) eroded[i] = 0;
+  }
+
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    rgba[i * 4] = rgb[i * 3];
+    rgba[i * 4 + 1] = rgb[i * 3 + 1];
+    rgba[i * 4 + 2] = rgb[i * 3 + 2];
+    rgba[i * 4 + 3] = eroded[i];
+  }
+
+  const cleared = eroded.reduce((n, a) => n + (a === 0 ? 1 : 0), 0);
+  return { rgba, cleared };
+}
+
+/**
+ * A filtered run may change PIXELS but never the table.
+ *
+ * `writeAspects` rewrites the whole file from what this run measured, so calling it after
+ * rebuilding one flag would silently drop the other 248 entries. Rather than teach it to
+ * merge - a second way to write a generated file, and the one nobody would test - a
+ * filtered run asserts its measurements against what is already committed and refuses if
+ * they disagree. A flag whose ratio actually moved needs the full import, which is the
+ * only thing entitled to rewrite the table.
+ */
+function assertAspectsUnchanged(measured) {
+  const committed = new Map(
+    [...readFileSync(ASPECTS_FILE, 'utf8').matchAll(/^ {2}([a-z]{2}): ([\d.]+),$/gm)].map(
+      ([, code, aspect]) => [code, Number(aspect)],
+    ),
+  );
+
+  for (const [code, aspect] of Object.entries(measured)) {
+    const was = committed.get(code);
+    if (was === aspect) continue;
+
+    throw new Error(
+      `${code}: aspect ${was ?? 'missing'} -> ${aspect}. A filtered run may not rewrite ` +
+        `${ASPECTS_FILE.slice(root.length + 1)}; run the full \`npm run flags:import\`.`,
+    );
+  }
+}
+
+/**
+ * @param only Rebuild just these alpha-2 codes - `node scripts/import-flag-masters.mjs np`.
+ *
+ * The point of the filter is what it does NOT do: it leaves the other 248 masters on disk
+ * untouched rather than rewriting every one to change one. The encode is deterministic, so
+ * a full run would very probably produce identical bytes for the rest - but "probably
+ * identical" over the repo's entire committed asset set is a diff nobody can read, and it
+ * would also re-derive any flag whose source is mid-edit. A filtered run is provably
+ * confined to what it names, and `assertAspectsUnchanged` keeps it out of the table.
+ */
+export async function importFlagMasters(only = []) {
+  const all = requiredCodes();
+  const wanted = new Set(only.map((code) => code.toLowerCase()));
+
+  for (const code of wanted) {
+    // The same rule as an unresolved source: say so, rather than doing nothing quietly.
+    if (!all.includes(code)) throw new Error(`Not a flag this app ships: ${code}`);
+  }
+
+  const partial = wanted.size > 0;
+  const codes = partial ? all.filter((code) => wanted.has(code)) : all;
   const { files: pack, overridden } = indexPack();
 
-  // Rebuilt from scratch, so a flag that leaves the dataset leaves the APK with it.
-  rmSync(MASTER_DIR, { recursive: true, force: true });
+  // Rebuilt from scratch, so a flag that leaves the dataset leaves the APK with it. Not
+  // when filtering, where wiping the directory would delete the 248 this run cannot write.
+  if (!partial) rmSync(MASTER_DIR, { recursive: true, force: true });
   mkdirSync(MASTER_DIR, { recursive: true });
 
   const aspects = {};
   const sources = { pack: 0, override: 0, svg: 0, fallback: 0 };
+  const keyed = new Map();
   let bytes = 0;
 
   for (const code of codes) {
@@ -251,9 +407,22 @@ export async function importFlagMasters() {
     }
 
     const to = join(MASTER_DIR, `${code}.webp`);
-    const { width, height } = await sharp(input)
+
+    // Flattened either way, including for the one flag whose background is then keyed back
+    // out: it is what guarantees three channels to read, whatever the source was.
+    const flat = sharp(input)
       .resize(MASTER_LONG_EDGE, MASTER_LONG_EDGE, { fit: 'inside', withoutEnlargement: true })
-      .flatten({ background: BACKGROUND })
+      .flatten({ background: BACKGROUND });
+
+    let encode = flat;
+    if (NON_RECTANGULAR.has(code)) {
+      const { data, info } = await flat.raw().toBuffer({ resolveWithObject: true });
+      const { rgba, cleared } = keyOutBackground(data, info.width, info.height);
+      keyed.set(code, (cleared / (info.width * info.height)) * 100);
+      encode = sharp(rgba, { raw: { width: info.width, height: info.height, channels: 4 } });
+    }
+
+    const { width, height } = await encode
       .webp({ quality: MASTER_QUALITY, effort: 6 })
       .toFile(to);
 
@@ -263,14 +432,21 @@ export async function importFlagMasters() {
     bytes += statSync(to).size;
   }
 
-  writeAspects(aspects);
+  // A filtered run may change pixels, never the table. See `assertAspectsUnchanged`.
+  if (partial) assertAspectsUnchanged(aspects);
+  else writeAspects(aspects);
+
+  for (const [code, percent] of keyed) {
+    console.log(`  ${code}  background keyed out, ${percent.toFixed(1)}% of the image`);
+  }
 
   console.log(
     `  assets/flags  ${codes.length} files, ${(bytes / 1048576).toFixed(2)} MB` +
       `  (${sources.pack} pack, ${sources.override} hand-replaced,` +
       ` ${sources.svg} pack svg, ${sources.fallback} flag-icons)`,
   );
-  console.log(`  ${ASPECTS_FILE.slice(root.length + 1)}  ${codes.length} entries`);
+  if (partial) console.log(`  ${ASPECTS_FILE.slice(root.length + 1)}  unchanged, as asserted`);
+  else console.log(`  ${ASPECTS_FILE.slice(root.length + 1)}  ${codes.length} entries`);
   return codes;
 }
 
@@ -320,4 +496,5 @@ export const DEFAULT_FLAG_ASPECT = 4 / 3;
 // `pathToFileURL`, not string surgery: on Windows `argv[1]` is a backslashed drive path,
 // and `file://` + it yields two slashes where a file URL needs three - so the guard never
 // fires and running the script does nothing at all, silently.
-if (import.meta.url === pathToFileURL(process.argv[1]).href) await importFlagMasters();
+if (import.meta.url === pathToFileURL(process.argv[1]).href)
+  await importFlagMasters(process.argv.slice(2));

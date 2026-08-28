@@ -18,7 +18,7 @@ in the APK and referenced as `asset://` — see *Map labels*.
 
 ## Status
 
-Everything below is implemented and unit-tested (1185 Jest tests across 50 suites, typecheck clean).
+Everything below is implemented and unit-tested (1193 Jest tests across 50 suites, typecheck clean).
 Verification state, which is what actually varies:
 
 | | state |
@@ -123,8 +123,8 @@ Four escapes, and every UI decision in this app picks one of them:
 2. **A flex sibling, never an overlay** — the quiz panel splits the screen with the map.
 3. **A separate route with no map on it** — `/search`, `/quiz`, and a `flag` quiz round.
 4. **A `Modal`** — RN's Android backend hosts it in its own `Dialog` window, composited over the app.
-   `ConfirmDialog` is the one genuinely unavoidable case (a dialog must cover the map *and* appear on
-   demand).
+   Two cases are genuinely unavoidable, both of which must cover the map *and* appear on demand:
+   `ConfirmDialog`, and `FlagLightbox` (see *The info card*).
 
 **The corollary matters as much:** inside 2, 3 and 4, ordinary conditional rendering is correct.
 Copying the always-mounted discipline into `/search` would mount 237 rows forever for nothing. The
@@ -540,8 +540,9 @@ check the `else` branch of its setter in `MLRNStyleFactory.kt` before trusting a
   box stays exactly the flag's own aspect box, and every border pixel is opaque `13,43,69,255` by
   construction at both scales rather than by the luck of a clipped stroke. Extending the canvas instead
   would inset the picture by two pixels in eighteen and make every map flag a slightly different shape
-  from the same flag in the info sheet. Flags are composited **onto white** first, which now matters
-  only for the flag-icons fallbacks — the raster masters are already flat on white.
+  from the same flag in the info sheet. Flags are composited **onto white** first, which its own
+  comment called belt and braces for a source that stops being flat — and Nepal is now that source,
+  so the map icon is the one tier the transparency below does not reach.
 - **`flag` is a `LabelField` but deliberately NOT a `LabelFieldId`**, the same trade `location` makes
   against `FieldId`: everything iterating `LABEL_FIELD_IDS` is about a string.
 - Fit reuses `FIT_TOLERANCE` via a shared `getFitMinZoom`, and `getFlagMinZoom` now takes the flag's
@@ -629,6 +630,35 @@ so a hardcoded 400 left a visible sliver.
 Dismissal is a close button plus tapping the ocean, not a swipe. `@gorhom/bottom-sheet` was the
 original plan; hand-rolling on `Animated` keeps the native rebuild surface unchanged. Adding it later
 is JS-only (reanimated and gesture-handler are installed) but check reanimated 4 compatibility.
+
+### Tapping the header flag enlarges it
+
+The header flag is a `Pressable` opening `FlagLightbox`: the full-size flag centred over a dimmed
+screen, dismissed by tapping anywhere outside it. Three things about it are load-bearing.
+
+**It is the second consumer of the 1024 px masters**, and the only one outside the quiz's flag round.
+The header itself draws the 96 px thumb; `CountryFlag`'s `fill` prop is the whole switch between the
+two committed tiers, and the enlarged flag passing `fill` is what the test pins — a thumb blown up to
+500 dp is the regression that would otherwise be invisible. The frame takes its `aspectRatio` from
+`FLAG_ASPECTS`, so Qatar, Nepal and the Vatican come out their own shape.
+
+**The backdrop is a flat scrim, and the reason is the same one that makes this a `Modal` at all.** A
+`BlurView` blurs what is behind it *in its own window*, and escape 4 works precisely by putting this
+in a different window from the map — so there is nothing behind it to blur. Android's cross-window
+`setBackgroundBlurRadius` is unsupported on most devices. A real blur would mean an in-tree overlay
+above the map surface, which is the paint bug. So there is no blur, no `expo-blur`, and no rebuild.
+
+**Its scrim carries `accessibilityRole="button"` where `ConfirmDialog`'s deliberately does not.** That
+file leaves the role off because its action buttons are descendants of the scrim and react-native-web
+turns the role into a real `<button>`, nesting them. Here the scrim's only descendant is a role-less
+`Pressable` around an image, and it is the *only* way out on the web — so the role is both safe and
+needed. Android's back key reaches `onRequestClose`, as it must: the Modal holds window focus, so the
+key never reaches the card underneath.
+
+The open state is reset by the same effect that syncs the card to its selection, which covers both
+picking another country and clearing the selection — on the web Escape reaches `MapScreen`'s `useDismissKey`, and without the
+reset the enlarged flag would sit through the card's whole close animation. A record with no flag at
+all (BES) gets no control rather than a button that opens an empty frame.
 
 ## Country search
 
@@ -1173,7 +1203,7 @@ The same split as `build:data` / `enrich:data`, for the same reason:
 
 | | |
 |---|---|
-| `npm run flags:import` | **one-off**, needs `temp/classic_big_1000` (189 MB, gitignored). Writes the committed masters `assets/flags/<iso2>.webp` — 1024 px on the long side, WebP q82, 2.77 MB — and `src/components/flagAspects.ts`. |
+| `npm run flags:import` | **one-off**, needs `temp/classic_big_1000` (189 MB, gitignored). Writes the committed masters `assets/flags/<iso2>.webp` — 1024 px on the long side, WebP q82, 2.77 MB — and `src/components/flagAspects.ts`. Takes optional codes — `node scripts/import-flag-masters.mjs np` — which rebuild only those masters, do **not** wipe the directory, and **assert** rather than rewrite `flagAspects.ts`: a filtered run may change pixels, never the table. |
 | `npm run flags:data` | **offline**, needs only the committed masters. Derives the thumbs, both map raster scales, the `public/` copies and four generated require maps. |
 
 Four sources feed the import, in priority order, and an unresolved code **throws**:
@@ -1228,6 +1258,37 @@ which it never could while `public/map-flags` was a second render.
 
 **The require maps are generated because Metro cannot do a dynamic `require`** — there is no way to
 write a template-literal require path. 249 literals per map is the honest way to say that.
+
+#### Nepal is the one flag with a transparent background
+
+`NON_RECTANGULAR` in the importer is a set of one, and there can only ever be one: Nepal flies the
+only national flag on Earth that is not a quadrilateral. Its source is a pack JPEG, so the space
+beside the pennant arrived as **baked white pixels rather than as absence**, and every tier that drew
+the flag large drew a white card behind it.
+
+`keyOutBackground` floods inward from all four edges through anything at or above `KEY_LEVEL` (200).
+**The flood is what makes it safe.** A plain "make white transparent" pass would punch out the moon
+and the sun, and would erase Japan, Finland and Nigeria outright if it were ever pointed at them; the
+emblems are enclosed by the flag's own crimson, so no path from the edge reaches them. The threshold
+is not delicate either — the fill clears the same 41.8% anywhere between 200 and 236, because what
+stops it is the navy border rather than the number. One erosion pass then drops edge pixels lighter
+than `KEY_EDGE_LEVEL`, which is JPEG ringing along that border: it survives the fill and reads as a
+pale outline against a dark plaque, and removing it costs half a pixel of a border drawn at 1024.
+
+Seeded from **all four edges**, not one corner — Nepal's empty area touches the frame in two disjoint
+notches, and one seed keeps whichever it did not start in.
+
+Two things this deliberately does not disturb. The canvas stays 840x1024, so `FLAG_ASPECTS.np` is
+unchanged and nothing downstream re-measures. And the map icons stay opaque, because
+`build-flag-assets.mjs` flattens before compositing the border — a dark border around empty space
+reads as a broken image. The thumbs do carry the alpha, which is what puts the pennant on the navy in
+the search rows and the info card header.
+
+**This reverses what the `BACKGROUND` comment used to argue**, which was that navy showing through the
+pennant in the quiz's frame is not a flag. Look at the two side by side and the opposite is true: the
+plaque is a surface the flag sits ON, and a pennant reading as a pennant against it is the shape the
+country actually flies. The white card was the picture claiming a shape the flag does not have — the
+same mistake, one level down, that 4:3-normalised SVGs made across the whole set.
 
 #### Sizing: heights, and each flag's own width
 
