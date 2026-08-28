@@ -1186,18 +1186,19 @@ Four sources feed the import, in priority order, and an unresolved code **throws
 2. **The pack's JPEG**, 200 of them, after dropping 14 non-country files (`eu`, `nato`, `scotland`, …)
    and repairing three filenames.
 3. **A loose SVG dropped into the pack** — Montenegro and South Sudan, simply absent from it and both
-   quiz questions, and Syria, present but three governments out of date. Syria's is dropped in as an
-   override (`SY-0.67-600.svg`), so rule 1 and rule 3 compose rather than competing.
+   quiz questions, and Syria and Iraq, present but out of date. Both are dropped in as overrides
+   (`SY-0.67-600.svg`, `IQ-0.67-600.svg`), so rule 1 and rule 3 compose rather than competing.
 4. **`flag-icons`' 4x3 SVG** for the **41 dependent territories** the pack does not carry — Puerto
    Rico, Kosovo, the Falklands, New Caledonia. Those 41 stay 4:3; none is ever a quiz question.
 
 `@resvg/resvg-js` now runs only for those 44 SVGs, and `sharp` (devDependency, prebuilt) does the rest.
 
-**The six overrides are the two ways a flag pack goes wrong.** *Shape*: Switzerland is drawn 3:2
+**The seven overrides are the two ways a flag pack goes wrong.** *Shape*: Switzerland is drawn 3:2
 and is square; Germany came out 1.6517 against an official 3:5. *Content*: Libya was the pre-2011
 plain green flag, Mauritania predated the red stripes added in 2017, Afghanistan was the republic
-tricolour and Syria the pre-2024 one — no amount of care about ratios helps with a flag that is
-simply out of date, and nothing in this pipeline could have noticed. **A flag that changes can change
+tricolour, Syria the pre-2024 one, and Iraq the 1991 flag — three stars and the takbir in Saddam's
+own handwriting, two revisions behind the 2008 Kufic one — no amount of care about ratios helps with
+a flag that is simply out of date, and nothing in this pipeline could have noticed. **A flag that changes can change
 shape with it**: Afghanistan's white Emirate flag is 2:1 where the tricolour was 3:2, which is why
 `FLAG_ASPECTS` is re-measured off the written master and never carried over — the map icon went
 27x18 to 36x18 with no line of code touched. Same shape as `scripts/countryOverrides.mjs`, minus its "this override stopped differing"

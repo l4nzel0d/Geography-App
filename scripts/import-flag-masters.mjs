@@ -21,7 +21,8 @@
  *    `nato`, `scotland`, ...) and repairing three filenames the pack gets wrong.
  * 2. **A loose SVG dropped into the pack.** Montenegro and South Sudan are simply absent
  *    from it, and both are asked as quiz questions, so they were sourced by hand. Syria's
- *    is the same file placed as an override, because the pack carries the pre-2024 flag.
+ *    and Iraq's are the same file placed as an override, because the pack carries the
+ *    pre-2024 Syrian flag and the 1991 Iraqi one.
  * 3. **`flag-icons`' 4x3 SVG.** The 41 remaining codes are dependent territories the pack
  *    does not carry - Puerto Rico, Kosovo, the Falklands, New Caledonia. They keep the 4:3
  *    shape they have always had here. None is ever a quiz question; they are reachable
@@ -128,15 +129,17 @@ const FILENAME_ALIASES = { by_: 'by', uk: 'gb', tp: 'tl' };
  *   an official 3:5. Every other ratio in the pack is faithful, which is what made these
  *   worth replacing one at a time rather than distrusting the set.
  * - **Content.** Libya is the pre-2011 plain green flag, Mauritania predates the red
- *   stripes added in 2017, Afghanistan is the pre-2021 republic tricolour and Syria the
- *   pre-2024 one. No amount of care about ratios helps with a flag that is out of date,
- *   and nothing in this pipeline could have noticed. Two of those four also changed
- *   shape with their content - Afghanistan's 2:1 for the tricolour's 3:2 - which is why
- *   the ratio is always re-measured off the written master rather than carried over.
+ *   stripes added in 2017, Afghanistan is the pre-2021 republic tricolour, Syria the
+ *   pre-2024 one, and Iraq is the 1991 flag - three green stars and the takbir in
+ *   Saddam's own hand, two revisions behind the 2008 Kufic one. No amount of care about
+ *   ratios helps with a flag that is out of date, and nothing in this pipeline could have
+ *   noticed. Two of those five also changed shape with their content - Afghanistan's 2:1
+ *   for the tricolour's 3:2 - which is why the ratio is always re-measured off the
+ *   written master rather than carried over. Iraq did not: 3:2 before and after.
  *
- * An override may be an SVG (`SY-0.67-600.svg`), in which case it takes the rasterising
- * path and is still counted as hand-replaced: what the count documents is a correction,
- * not a file format.
+ * An override may be an SVG (`SY-0.67-600.svg`, `IQ-0.67-600.svg`), in which case it takes
+ * the rasterising path and is still counted as hand-replaced: what the count documents is a
+ * correction, not a file format.
  *
  * This is the same shape as `scripts/countryOverrides.mjs`: a deliberate, listed
  * correction to a pinned upstream, kept where the next person will find it. Unlike that
