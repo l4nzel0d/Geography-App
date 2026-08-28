@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,8 +17,6 @@ import { mapColors } from '@/map/offlineStyle';
 import { getFocusedCameraStop, type MapCameraStop } from '@/map/quizCamera';
 import { type FillMode, WorldMap } from '@/map/WorldMap';
 import { subscribeToCountrySelection } from '@/search/pendingCountry';
-import { getLocale } from '@/i18n/locale';
-import { useTranslator } from '@/i18n/useTranslator';
 
 /** Matches `WorldMap`'s own ceiling, so the stop is never clamped by the native camera. */
 const EXPLORE_MAX_ZOOM = 10;
@@ -80,23 +78,22 @@ export default function MapScreen() {
   /**
    * How well the player knows each country, for the mastery fill mode.
    *
-   * Subscribed INLINE rather than through a `useMastery()` hook, and that is deliberate:
-   * `reactCompiler` is on, and CLAUDE.md records that moving a subscription into a custom
-   * hook changed what the compiler memoised and left the quiz holding a stale layout
-   * through a rotation. This is a byte-for-byte sibling of the search subscription below.
-   */
-  /**
-   * The translator for the active language.
+   * `useSyncExternalStore`, not `useState` + `useEffect`: the pair reads the store
+   * during render and only subscribes in a passive effect, so a notify landing in that
+   * gap is lost for the life of the process. `masteryStore` fires exactly one such
+   * notify, from the read it kicks off at import - which on a cold start is the first
+   * time the map has any scores to paint at all. The identical race in the locale store
+   * shipped and left the app in two languages at once; see `useTranslator.ts`.
    *
-   * A hook rather than the module-level `t`, because `reactCompiler: true` will
-   * memoise a call with no reactive inputs and never recompute it - which is how a
-   * language switch left half the chrome in English until something else forced a
-   * render. See `useTranslator`.
+   * Still INLINE rather than behind a `useMastery()` hook: `reactCompiler` is on, and
+   * CLAUDE.md records that moving a subscription into a custom hook changed what the
+   * compiler memoised and left the quiz holding a stale layout through a rotation.
    */
-  const t = useTranslator();
-
-  const [mastery, setMastery] = useState(getMasterySnapshot);
-  useEffect(() => subscribeToMastery(setMastery), []);
+  const mastery = useSyncExternalStore(
+    subscribeToMastery,
+    getMasterySnapshot,
+    getMasterySnapshot,
+  );
 
   /**
    * The outlines, with mastery folded on.

@@ -18,7 +18,7 @@ in the APK and referenced as `asset://` — see *Map labels*.
 
 ## Status
 
-Everything below is implemented and unit-tested (1193 Jest tests across 50 suites, typecheck clean).
+Everything below is implemented and unit-tested (1195 Jest tests across 50 suites, typecheck clean).
 Verification state, which is what actually varies:
 
 | | state |
@@ -1590,6 +1590,45 @@ something the compiler tracks.
   to stay somewhere the compiler can see it invalidate a render.** Reading the singleton directly is the
   shape that goes stale.
 
+#### And every subscription is `useSyncExternalStore`, not `useState` + `useEffect`
+
+**The second half of the same story, and it shipped.** The pair reads the store during render and
+only subscribes in a passive effect, so **a notify landing in the gap between those two is lost — for
+the life of the process.** `locale.ts` fires exactly one such notify, from the AsyncStorage read it
+kicks off at import, and on a **Galaxy S25 that read won the race every time**.
+
+The symptom is the memorable part: **the app came up in two languages at once.** Everything mounted at
+startup — the map, its chrome, the info card — froze on the device's English, while `/search` and the
+quiz mounted later and read the stored Russian straight out of the singleton. And because the pill
+said `EN`, the row a player reaches for is `Русский` — which `setLocale` correctly no-ops on, the
+singleton already being `ru`. So **the switcher looked completely dead**: rotating, backgrounding and
+relaunching all changed nothing, because the race resolves the same way on every launch.
+
+**Choosing English — the language the pill claimed to already be in — is what unstuck it**, and is what
+identified the bug. That is also the workaround on any build without the fix.
+
+`useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)` closes the gap by contract: React
+re-reads the snapshot after subscribing and re-renders if it moved.
+
+- **The third argument is not optional.** `web.output: "static"` pre-renders every route in Node, and
+  a missing `getServerSnapshot` throws there rather than degrading. Both stores' `getSnapshot` is safe
+  to call in Node, so it is passed twice.
+- **This is not the hook extraction the trap above warns about.** It is a first-class React hook the
+  compiler models, and the four call sites stay exactly where they were —
+  `useTranslator`, `WorldMap`, `CountryInfoSheet`, and `MapScreen`'s mastery subscription.
+- **`masteryStore` had the identical latent bug**, fixed in the same pass: its import-time read is the
+  first time the map has any scores to paint, so losing that notify left the choropleth grey until the
+  player finished another round. `pendingCountry` does not — it is an event bus with no snapshot, and
+  a search cannot announce before the map that pushed it is mounted.
+- **`setupPrefsStore` is a different shape and is deliberately left alone**: it has no listeners at
+  all, only a synchronous getter the setup screen reads at mount. It is exposed to the same race in
+  principle — a cold start deep-linked straight onto `/quiz` — and pays for it with defaults for one
+  visit rather than a wedged app.
+
+Both races are pinned in `MapScreen.test.tsx` by a `Racer` component rendered **after** the screen in
+the same pass, which moves the store after every consumer has read it and before a single effect has
+run. Reverting either call site fails them.
+
 ### The locale itself
 
 `src/i18n/locale.ts` is a module singleton with subscribe/notify, modelled on `masteryStore.ts` — no
@@ -1597,6 +1636,9 @@ context, no provider, so screens stay renderable bare in Jest. Two deliberate di
 debounce (once per tap, not 193 times a round), and **the startup storage read notifies only when it
 disagrees** with the device default, because the common case is agreement and a spurious notify
 re-renders the map's layers for nothing.
+
+That one conditional notify is the whole population of events that can go missing, which is why losing
+it cost the entire feature on one device — see the `useSyncExternalStore` note above.
 
 The initial value is `Intl.DateTimeFormat().resolvedOptions().locale` — **not `expo-localization`**,
 which would be a native dependency, an `app.json` edit, an `expo prebuild` and a full rebuild for one
@@ -1981,8 +2023,14 @@ adb shell svc wifi enable
 
 ## Open risks
 
-- **The Russian build has never run on Android**, and the offline acceptance test has not been re-run
-  since it — or since flag labels or mastery — landed.
+- **The language switcher's fix has not been re-verified on the S25.** Russian on Android has now been
+  exercised once, on a Galaxy S25, and it found the dropped-notify bug in *Localization* — a device-only
+  race that no unit test could reach until one was written to force the interleaving. The fix is pinned
+  in Jest; what is unproven is the same cold start on the phone that produced it. **Check the mastery
+  choropleth on the same pass**: it carried the identical race, so a cold start straight into the
+  mastery fill mode should now paint scores rather than grey.
+- The offline acceptance test has not been re-run since Russian — or since flag labels or mastery —
+  landed.
 - **The persisted setup and the widened search have not been seen on a device.** Both are pure JS over
   data the app already had, so neither touches the offline gate — the web export builds unchanged at
   5.21 MB. What is unproven is fit and persistence: whether the search detail line survives

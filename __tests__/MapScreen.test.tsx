@@ -295,6 +295,45 @@ describe('MapScreen', () => {
       expect(screen.getByTestId('toggle-fill-mode')).toHaveTextContent('Обычная');
     });
 
+    /**
+     * The bug that shipped, and the reason every subscription here is
+     * `useSyncExternalStore`.
+     *
+     * `locale.ts` starts an AsyncStorage read at import and notifies exactly once, when
+     * what is stored disagrees with the device. A `useState` + `useEffect` pair reads
+     * the store during render and only subscribes in a passive effect, so that single
+     * notify fell into the gap between the two and was gone for the life of the process.
+     *
+     * On a Galaxy S25 it landed there every time, and the app came up in two languages:
+     * the map, its chrome and the info card frozen on the device's English, while
+     * `/search` and the quiz mounted later and read the stored Russian straight out of
+     * the singleton. The pill said `EN`, so the row a player reaches for is `Русский` -
+     * and `setLocale('ru')` is a correct no-op when the singleton already holds `ru`.
+     * Choosing English, the language the pill claimed to already be in, was the only
+     * thing that moved anything, which is what identified it.
+     *
+     * `Racer` stands in for that read landing mid-commit: it renders after `MapScreen`
+     * in the same pass, so the locale moves after every consumer has read it and before
+     * a single effect has run. Setting it again on a later render is `setLocale`'s own
+     * no-op, so this cannot loop.
+     */
+    it('catches a change that lands between render and the effect flush', async () => {
+      function Racer() {
+        setLocale('ru');
+        return null;
+      }
+
+      await rtlRender(
+        <SafeAreaProvider initialMetrics={METRICS}>
+          <MapScreen />
+          <Racer />
+        </SafeAreaProvider>,
+      );
+
+      expect(screen.getByTestId('toggle-language')).toHaveTextContent('RU');
+      expect(screen.getByTestId('toggle-fill-mode')).toHaveTextContent('Обычная');
+    });
+
     /** The panels behind the pills, which are always mounted and merely parked. */
     it('redraws the option panels too', async () => {
       await render();
@@ -346,6 +385,49 @@ describe('MapScreen', () => {
     it('is the untouched module constant while nothing has been played', async () => {
       await render();
       expect(sourceData()).toBe(worldGeoJson);
+    });
+
+    /**
+     * The same race as the language one, in the store next door.
+     *
+     * `masteryStore` also reads storage at import and notifies once when it resolves -
+     * which on a cold start is the first time the map has any scores to paint at all.
+     * A `useState` + `useEffect` pair would drop that notify whenever it landed between
+     * the screen's render and its effect flush, and the choropleth would sit grey until
+     * the player finished another round. Latent rather than reported, and fixed with the
+     * language bug because it is the same primitive; see `useTranslator.ts`.
+     *
+     * The flag is what keeps this from looping: `recordResult` would dirty the table on
+     * every re-render and `publishMastery` would notify straight back into one.
+     */
+    it('catches a publish that lands between render and the effect flush', async () => {
+      let landed = false;
+
+      function Racer() {
+        if (!landed) {
+          landed = true;
+          recordResult({
+            iso3: 'BRA',
+            grades: [
+              { field: 'name', correct: true, how: 'exact', given: 'Brazil', expected: 'Brazil' },
+            ],
+            allCorrect: true,
+          });
+          publishMastery();
+        }
+        return null;
+      }
+
+      await rtlRender(
+        <SafeAreaProvider initialMetrics={METRICS}>
+          <MapScreen />
+          <Racer />
+        </SafeAreaProvider>,
+      );
+
+      // The fold ran, so the screen saw the scores. Left unsubscribed it would still be
+      // holding the empty table's collection - which IS the module constant.
+      expect(sourceData()).not.toBe(worldGeoJson);
     });
 
     it('does not change when the fill mode changes', async () => {

@@ -1,5 +1,5 @@
 import { Camera, GeoJSONSource, Images, Layer, Map } from '@maplibre/maplibre-react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { StyleSheet, useWindowDimensions } from 'react-native';
 
 import type { CountryFeatureProperties } from '@/data/types';
@@ -86,13 +86,16 @@ export function WorldMap({
    * changed what the compiler memoised and failed `.maestro/quiz.yaml` 0/3. Same shape as
    * `MapScreen`'s mastery and pendingCountry subscriptions.
    *
+   * `useSyncExternalStore` rather than a `useState` + `useEffect` pair, because the
+   * startup storage read can notify in the gap between those two and be lost for the
+   * life of the process. That shipped; see `useTranslator.ts`.
+   *
    * This owns it rather than taking a prop, so the quiz's map gets it for free and no
    * screen has to thread a locale down. It changes only the two layer EXPRESSIONS below -
    * `data` is untouched, because both languages ride on the same features. See
    * `textPropertyFor`.
    */
-  const [locale, setActiveLocale] = useState(getLocale);
-  useEffect(() => subscribeToLocale(setActiveLocale), []);
+  const locale = useSyncExternalStore(subscribeToLocale, getLocale, getLocale);
 
   // The choropleth marks selection with an outline rather than a fill; both marker
   // layers share this filter, and it is empty - matching nothing - in flat mode.

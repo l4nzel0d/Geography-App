@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   Animated,
   type DimensionValue,
@@ -83,10 +90,11 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
    * dependency something the compiler can track.
    *
    * Subscribed inline for the same reason every other subscription in this app is; see
-   * the note in `MapScreen`.
+   * the note in `MapScreen` - and `useSyncExternalStore` rather than a `useState` +
+   * `useEffect` pair, because the startup storage read can notify in the gap between
+   * those two and be lost. That shipped; see `useTranslator.ts`.
    */
-  const [locale, setActiveLocale] = useState(getLocale);
-  useEffect(() => subscribeToLocale(setActiveLocale), []);
+  const locale = useSyncExternalStore(subscribeToLocale, getLocale, getLocale);
 
   const facts = getCountryFacts(iso3, locale);
   const slide = useRef(new Animated.Value(0)).current;

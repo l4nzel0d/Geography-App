@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 import { getLocale, subscribeToLocale } from './locale';
 import { translatorFor, type Translator } from './t';
@@ -34,10 +34,32 @@ import { translatorFor, type Translator } from './t';
  * Pure modules - `exitPrompt`, `resetPrompt` - still take a `Translator` as an argument
  * and never call this. Non-component code that needs a string outside React (the label
  * builder, `formatters`) passes an explicit locale.
+ *
+ * ## Why `useSyncExternalStore`, and not `useState` + `useEffect`
+ *
+ * The pair this replaced read the store once during render and only subscribed in a
+ * passive effect - so a notify landing in the gap between those two was lost, and lost
+ * for the life of the process. `locale.ts` fires exactly one such notify, from the
+ * storage read it kicks off at import, and on a Galaxy S25 that read won the race.
+ *
+ * The result was an app in two languages at once. Everything mounted at startup - the
+ * map, its chrome, the info card - froze on the device's English, while `/search` and
+ * the quiz screens mounted later and read Russian straight out of the singleton.
+ * Switching language then appeared to do **nothing**: the pill said `EN`, so the row a
+ * player reaches for is the other one, and `setLocale('ru')` is a correct no-op when the
+ * singleton already holds `ru`. Only choosing the language the pill claimed to already
+ * be in unstuck it - which is what identified the bug.
+ *
+ * `useSyncExternalStore` closes that gap by contract: React re-reads `getSnapshot` after
+ * subscribing and schedules a render if it moved. The third argument is not optional
+ * here - `web.output: "static"` pre-renders every route in Node, where a missing
+ * `getServerSnapshot` throws rather than degrading.
+ *
+ * Nor is this the hook extraction the section above warns about: the subscription is a
+ * first-class React hook the compiler models, not a helper wrapping one.
  */
 export function useTranslator(): Translator {
-  const [locale, setActiveLocale] = useState(getLocale);
-  useEffect(() => subscribeToLocale(setActiveLocale), []);
+  const locale = useSyncExternalStore(subscribeToLocale, getLocale, getLocale);
 
   return translatorFor(locale);
 }
