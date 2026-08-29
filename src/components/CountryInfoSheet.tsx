@@ -310,6 +310,11 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
         }}
       >
         <Fact
+          testID="fact-capital"
+          label={t('info.fact.capital')}
+          value={formatCapital(visibleFacts.capital)}
+        />
+        <Fact
           testID="fact-population"
           label={t('info.fact.population')}
           value={formatPopulation(visibleFacts.population)}
@@ -323,11 +328,6 @@ export function CountryInfoSheet({ iso3, onClose, onMeasured }: CountryInfoSheet
           testID="fact-currencies"
           label={t.plural('info.fact.currencies', visibleFacts.currencies.length)}
           value={formatCurrencies(visibleFacts.currencies)}
-        />
-        <Fact
-          testID="fact-capital"
-          label={t('info.fact.capital')}
-          value={formatCapital(visibleFacts.capital)}
         />
         <Fact testID="fact-area" label={t('info.fact.area')} value={formatArea(visibleFacts.area)} />
       </ScrollView>

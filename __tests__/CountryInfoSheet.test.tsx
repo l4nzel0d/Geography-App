@@ -26,9 +26,9 @@ const METRICS: Metrics = {
 };
 
 const FACT_IDS = [
+  'fact-capital',
   'fact-population',
   'fact-currencies',
-  'fact-capital',
   'fact-area',
 ] as const;
 
