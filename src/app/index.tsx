@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AboutLaunchButton } from '@/components/AboutLaunchButton';
 import { CountryInfoSheet } from '@/components/CountryInfoSheet';
 import { getMapFocusRect } from '@/components/infoSheetLayout';
 import { useDismissKey } from '@/components/useDismissKey';
@@ -169,6 +170,22 @@ export default function MapScreen() {
         labelField={labelField}
         countries={countries}
       />
+      {/*
+        BEFORE the chrome and the sheet, and both halves of that matter.
+
+        The option panels hang from the top-left and grow downward; this button is pinned
+        to the bottom-left. In LANDSCAPE the window is only ~411 dp tall and the label
+        panel's six rows reach within about 2 dp of the button - measured on the emulator,
+        not estimated. They do not overlap today, but a seventh label field would close
+        that gap, and a button drawn AFTER the panel would then sit on top of it and take
+        its taps. Drawn before, the panel simply covers the button instead - which is
+        exactly what the panels already do to the legend, deliberately.
+
+        The sheet is drawn after for the same reason: in portrait it docks full-width
+        across the bottom, and covering this button is better than leaving a live control
+        underneath it.
+      */}
+      <AboutLaunchButton />
       <MapControls
         fillMode={fillMode}
         onFillModeChange={setFillMode}

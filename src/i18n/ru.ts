@@ -215,6 +215,26 @@ export const ru: Record<MessageKey, string> = {
   'results.changeSettings': 'Изменить настройки',
   'results.backToMap': 'К карте',
 
+  // ------------------------------------------------------------------- about
+  'about.open': 'О приложении',
+  'about.title': 'О приложении',
+  'about.close': 'Назад к карте',
+  'about.version': 'Версия {version}',
+  'about.intro':
+    'Приложение построено на открытых данных и работает полностью офлайн — ничего не загружается во время работы. Вот источники, на которых оно основано.',
+  'about.licence.publicDomain': 'Общественное достояние',
+  'about.credit.flags.name': 'Флаги стран',
+  'about.section.data': 'Данные',
+  'about.section.software': 'Программы и графика',
+  'about.credit.naturalEarth': 'Очертания всех стран на карте',
+  'about.credit.worldCountries': 'Названия стран, столицы, валюты и регионы',
+  'about.credit.worldCountries.notice':
+    'Факты в приложении — производная база данных, она распространяется по той же лицензии.',
+  'about.credit.worldBank': 'Численность населения и рассчитанная по ней плотность',
+  'about.credit.maplibre': 'Отрисовывает саму карту',
+  'about.credit.notoSans': 'Шрифт, которым подписаны страны на карте',
+  'about.credit.flags': 'Все флаги рядом с названиями стран',
+
   // --------------------------------------------------------------- formatting
   'units.km2': 'км²',
   // A leading NO-BREAK SPACE, because Russian writes "47 млн" with a space and the label

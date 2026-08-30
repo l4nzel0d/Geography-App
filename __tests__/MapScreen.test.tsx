@@ -269,6 +269,11 @@ describe('MapScreen', () => {
       // The language pill names the language the app is IN, like every pill beside it
       // names its own current setting. The toggle it replaced named the other one.
       expect(screen.getByTestId('toggle-language')).toHaveTextContent('EN');
+      // Carries no text of its own, so its accessible name is the only thing on it that
+      // can go stale - and it goes stale exactly the way a pill's label would.
+      expect(screen.getByTestId('open-about').props.accessibilityLabel).toBe(
+        'About this app',
+      );
 
       await switchLanguage();
 
@@ -276,6 +281,38 @@ describe('MapScreen', () => {
       expect(screen.getByTestId('toggle-label-field')).toHaveTextContent('Метки');
       expect(screen.getByTestId('open-quiz')).toHaveTextContent('Тест');
       expect(screen.getByTestId('toggle-language')).toHaveTextContent('RU');
+      expect(screen.getByTestId('open-about').props.accessibilityLabel).toBe(
+        'О приложении',
+      );
+    });
+
+    /**
+     * The About button, the first thing in the app to use a bottom corner.
+     *
+     * It is NOT in the top row, and that is not a style choice: `chromeWidth.test.ts`
+     * budgets both top rows against the 379 dp between the insets and Russian already
+     * uses 355, so a third control there would push the rows into each other - the one
+     * chrome bug CLAUDE.md records as having actually shipped.
+     *
+     * Bottom-LEFT rather than right because the info card docks right, full height, in
+     * landscape. What Jest can see is the anchor; whether it PAINTS over the MapLibre
+     * surface is what a device pass is for.
+     */
+    it('anchors the about button to the bottom-left, off the top row', async () => {
+      await render();
+
+      const style = StyleSheet.flatten(screen.getByTestId('open-about').props.style);
+
+      expect(style.position).toBe('absolute');
+      expect(style.bottom).toBeGreaterThan(0);
+      expect(style.left).toBeGreaterThan(0);
+      // Never anchored from the top or the right: the top row is full, and the info
+      // card owns the right edge in landscape.
+      expect(style.top).toBeUndefined();
+      expect(style.right).toBeUndefined();
+      // Opaque, like every other piece of chrome over the map. A translucent background
+      // over the MapLibre surface did not paint at all.
+      expect(style.backgroundColor).toBe('#12263a');
     });
 
     /**

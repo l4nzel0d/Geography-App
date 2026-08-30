@@ -204,6 +204,26 @@ export const en = {
   'results.changeSettings': 'Change settings',
   'results.backToMap': 'Back to map',
 
+  // ------------------------------------------------------------------- about
+  'about.open': 'About this app',
+  'about.title': 'About',
+  'about.close': 'Back to the map',
+  'about.version': 'Version {version}',
+  'about.intro':
+    'This app is built on open data and works entirely offline — nothing it shows is fetched while you use it. These are the sources it is built from.',
+  'about.licence.publicDomain': 'Public domain',
+  'about.credit.flags.name': 'National flags',
+  'about.section.data': 'Data',
+  'about.section.software': 'Software and artwork',
+  'about.credit.naturalEarth': 'The outline of every country on the map',
+  'about.credit.worldCountries': 'Country names, capitals, currencies and regions',
+  'about.credit.worldCountries.notice':
+    'The facts in this app are a derived database and are offered under the same licence.',
+  'about.credit.worldBank': 'Population figures, and the density they are ranked by',
+  'about.credit.maplibre': 'Draws the map itself',
+  'about.credit.notoSans': 'The typeface the map labels are drawn in',
+  'about.credit.flags': 'Every flag shown beside a country',
+
   // --------------------------------------------------------------- formatting
   'units.km2': 'km²',
   'format.compact.thousand': 'k',
