@@ -206,7 +206,7 @@ export const FLAG_ASPECTS: Record<string, number> = {
   qa: 2.5473,
   re: 1.3333,
   ro: 1.4993,
-  rs: 2,
+  rs: 1.4993,
   ru: 1.4993,
   rw: 1.5015,
   sa: 1.4993,
