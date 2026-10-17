@@ -1,5 +1,5 @@
 /**
- * Generates the PWA icon set into `public/icons/`.
+ * Generates the PWA icon set into `public/icons/`, and the favicon source Expo reads.
  *
  * The web app manifest needs its own icons: Android's adaptive icon and iOS's app icon
  * are produced by `expo prebuild` from `app.json` and never reach a browser. A manifest
@@ -19,6 +19,7 @@
  * plain icon as maskable is the common mistake and produces visibly clipped artwork.
  */
 import { generateImageAsync, generateImageBackgroundAsync, compositeImagesAsync } from '@expo/image-utils';
+import sharp from 'sharp';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +32,9 @@ const BRAND_BACKGROUND = '#5595c1';
 
 const SOURCE_ICON = join(root, 'assets/images/icon.png');
 const SOURCE_FOREGROUND = join(root, 'assets/images/android-icon-foreground.png');
+
+/** `web.favicon` in app.json. `expo export` turns it into a 16/32/48 `favicon.ico`. */
+const FAVICON = join(root, 'assets/images/favicon.png');
 
 /**
  * Share of the maskable canvas the foreground occupies.
@@ -89,6 +93,24 @@ async function maskable(size, name) {
   return { name, bytes: composed.length };
 }
 
+/**
+ * The favicon is the globe alone, cropped to its own edge.
+ *
+ * Not the plain icon: that is the globe on a full-bleed square of brand blue with a
+ * third of the canvas as margin, which at 16 px is a blue tile with a smudge in it.
+ * The foreground layer already has the globe on transparency, so trimming it leaves a
+ * disc that fills the tab icon and sits on whatever colour the browser's tab strip is.
+ */
+async function favicon(size) {
+  const source = await sharp(SOURCE_FOREGROUND)
+    .trim()
+    .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
+  writeFileSync(FAVICON, source);
+  return { name: 'assets/images/favicon.png', bytes: source.length };
+}
+
 export async function buildWebIcons() {
   mkdirSync(ICONS_DIR, { recursive: true });
 
@@ -103,6 +125,11 @@ export async function buildWebIcons() {
   for (const { name, bytes } of written) {
     console.log(`  public/icons/${name}  (${(bytes / 1024).toFixed(0)} KB)`);
   }
+
+  // Written into assets/ rather than public/: a `public/favicon.ico` would make Expo skip
+  // generating one, and it would then have to be hand-built as a multi-size ICO here.
+  const icon = await favicon(128);
+  console.log(`  ${icon.name}  (${(icon.bytes / 1024).toFixed(0)} KB)`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
