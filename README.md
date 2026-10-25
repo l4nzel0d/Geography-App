@@ -28,6 +28,10 @@ It runs on Android and as an installable PWA, in English and Russian.
 
 <sub><a href="https://geography-app-bay.vercel.app/">English</a> · <a href="https://geography-app-bay.vercel.app/ru">Русский</a></sub>
 
+<br />
+
+https://github.com/user-attachments/assets/e5ef44ce-b29d-476e-8a84-5b25da123f4c
+
 </div>
 
 ---
